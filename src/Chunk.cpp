@@ -7,6 +7,7 @@
 #include <iostream>
 #include <cstring>
 #include <sqlite3.h>
+#include "World.hpp"
 
 using namespace Config;
 
@@ -17,8 +18,8 @@ Chunk::Chunk(int x, int z) : cx(x), cz(z) {
 }
 
 Chunk::~Chunk() {
-    if (worker.joinable()) worker.join();
-    if (rebuild_worker.joinable()) rebuild_worker.join();
+    if (gen_future.valid()) gen_future.wait();
+    if (rebuild_future.valid()) rebuild_future.wait();
     if (density_grid) delete[] density_grid;
     if (block_grid) delete[] block_grid;
     if (solid_mesh.vboId) UnloadMesh(solid_mesh);
@@ -27,7 +28,9 @@ Chunk::~Chunk() {
 }
 
 void Chunk::start_generation() {
-    worker = std::thread(&Chunk::generate_thread, this);
+    gen_future = global_thread_pool.enqueue([this] {
+        this->generate_thread();
+    });
 }
 
 inline int idx(int x, int y, int z) {
@@ -217,6 +220,7 @@ void Chunk::generate_thread() {
             extern std::mutex sqlite_mutex;
             std::lock_guard<std::mutex> lock(sqlite_mutex);
             if (db) {
+                sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
                 sqlite3_stmt* stmt;
                 const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
                 if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
@@ -229,6 +233,7 @@ void Chunk::generate_thread() {
                     sqlite3_step(stmt);
                     sqlite3_finalize(stmt);
                 }
+                sqlite3_exec(db, "COMMIT;", 0, 0, 0);
             }
         }
     }
@@ -271,11 +276,16 @@ void Chunk::build_mesh_data() {
             int ly = std::floor(center.y);
             int lz = std::floor(center.z) - cz * CHUNK_SIZE;
             
-            if (get_block(lx, ly, lz) == Config::GRASS || get_block(lx, ly - 1, lz) == Config::GRASS) {
+            uint8_t b1 = get_block(lx, ly, lz);
+            uint8_t b2 = get_block(lx, ly - 1, lz);
+            bool on_grass = (b1 == Config::GRASS || b2 == Config::GRASS);
+            bool is_explicit_grass = (b1 == Config::TALL_GRASS || b2 == Config::TALL_GRASS);
+            
+            if (on_grass || is_explicit_grass) {
                 // Deterministic hash based on world position
                 long hash = std::abs((long)(center.x * 73856.0f + center.z * 1920.0f)) % 1000;
                 
-                if (hash < 30) { 
+                if (hash < 30 || is_explicit_grass) { 
                     float hw = 0.4f; float h = 0.8f;
                     Vector3 base = center; // Start exactly on the triangle surface!
                     
@@ -305,13 +315,21 @@ void Chunk::build_mesh_data() {
                         Vector3Add(Vector3Add(base, d2), ht)                // top-right
                     };
                     
-                    BlockType bt = Config::BLOCKS.at(Config::LEAVES);
+                    BlockType bt = Config::BLOCKS.at(Config::TALL_GRASS);
                     float tw = 1.0f / 9.0f; float th = 1.0f / 10.0f;
-                    // Python code had 3 varieties. Rows 4, 5, 6 (not inverted).
-                    float u0 = 6.0f * tw; float v0 = (4.0f + (hash % 3)) * th;
+                    float sway = bt.is_waving ? 10.0f : 0.0f;
+                    float u0 = bt.tex_x * tw; 
+                    float v0 = (10.0f - 1.0f - bt.tex_y) * th; 
+                    if (!is_explicit_grass) {
+                        v0 = (10.0f - 1.0f - (bt.tex_y - (hash % 3))) * th; 
+                    }
                     float u1 = u0 + tw; float v1 = v0 + th;
                     
-                    Vector2 uvs[] = { {u1, v1}, {u0, v1}, {u0, v0}, {u1, v0} };
+                    // index 0: bottom-left (no sway)
+                    // index 1: bottom-right (no sway)
+                    // index 2: top-right (sway)
+                    // index 3: top-left (sway)
+                    Vector2 uvs[] = { {u1, v1}, {u0, v1}, {u0 + sway, v0}, {u1 + sway, v0} };
                     Vector3 nor = {0, 1, 0};
                     Color col = WHITE;
                     
@@ -671,11 +689,12 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
     int cap_cx = cx;
     int cap_cz = cz;
     
-    std::thread([cap_cx, cap_cz, buffer = std::move(buffer)]() {
+    global_thread_pool.enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
         extern sqlite3* db;
         extern std::mutex sqlite_mutex;
         std::lock_guard<std::mutex> lock(sqlite_mutex);
         if (db) {
+            sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
             sqlite3_stmt* stmt;
             const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
             if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
@@ -685,15 +704,48 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
                 sqlite3_step(stmt);
                 sqlite3_finalize(stmt);
             }
+            sqlite3_exec(db, "COMMIT;", 0, 0, 0);
         }
-    }).detach();
+    });
 }
 
 void Chunk::rebuild_mesh() {
-    if (rebuild_worker.joinable()) {
-        rebuild_worker.join();
+    if (rebuild_future.valid()) {
+        rebuild_future.wait();
     }
-    rebuild_worker = std::thread(&Chunk::rebuild_thread, this);
+    rebuild_future = global_thread_pool.enqueue([this] {
+        this->rebuild_thread();
+    });
+}
+
+void Chunk::save_to_disk() {
+    int total_blocks = (Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1);
+    std::vector<char> buffer(total_blocks * (sizeof(float) + sizeof(uint8_t)));
+    memcpy(buffer.data(), density_grid, total_blocks * sizeof(float));
+    memcpy(buffer.data() + total_blocks * sizeof(float), block_grid, total_blocks * sizeof(uint8_t));
+    
+    int cap_cx = cx;
+    int cap_cz = cz;
+    
+    global_thread_pool.enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
+        extern sqlite3* db;
+        extern std::mutex sqlite_mutex;
+        std::lock_guard<std::mutex> lock(sqlite_mutex);
+        if (db) {
+            sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
+            sqlite3_stmt* stmt;
+            const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, cap_cx);
+                sqlite3_bind_int(stmt, 2, cap_cz);
+                sqlite3_bind_blob(stmt, 3, buffer.data(), buffer.size(), SQLITE_TRANSIENT);
+                sqlite3_step(stmt);
+                sqlite3_finalize(stmt);
+            }
+            sqlite3_exec(db, "COMMIT;", 0, 0, 0);
+        }
+    });
+    is_dirty = false;
 }
 
 float Chunk::get_density(int x, int y, int z) const {

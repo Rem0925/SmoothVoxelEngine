@@ -9,6 +9,8 @@ uniform sampler2D texture0;
 uniform vec4 colDiffuse;
 uniform vec3 fogColor;
 uniform float time;
+uniform float fogStart;
+uniform float fogEnd;
 
 out vec4 finalColor;
 
@@ -75,8 +77,6 @@ void main()
     finalColor = alphaBlend(foamColor, waterColor);
 
     // 6. Niebla de profundidad (Mantenida del original)
-    float fogStart = 30.0;
-    float fogEnd = 80.0;
     float fogFactor = clamp((viewDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     
     finalColor.rgb = mix(finalColor.rgb, fogColor, fogFactor);

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <thread>
 #include <mutex>
+#include <future>
 #include "Config.hpp"
 
 class Chunk {
@@ -44,10 +45,11 @@ public:
     float get_density(int x, int y, int z) const;
     void set_block(int x, int y, int z, uint8_t type);
     void rebuild_mesh();
+    void save_to_disk();
 
 private:
-    std::thread worker;
-    std::thread rebuild_worker;
+    std::future<void> gen_future;
+    std::future<void> rebuild_future;
     
     void generate_thread();
     void rebuild_thread();

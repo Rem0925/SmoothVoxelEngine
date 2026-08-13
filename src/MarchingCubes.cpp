@@ -321,7 +321,7 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
         if (iy < 0) iy = 0; if (iy >= size_y) iy = size_y - 1;
         if (iz < 0) iz = 0; if (iz >= size_z) iz = size_z - 1;
         uint8_t b = block_grid[iy * slice + iz * size_x + ix];
-        if (b == 255 || b == 7) b = default_block;
+        if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = default_block;
         return b;
     };
 
@@ -432,8 +432,8 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                         int ix_f = std::floor(v.x); int iy_f = std::floor(v.y); int iz_f = std::floor(v.z);
                         int ix_c = std::ceil(v.x);  int iy_c = std::ceil(v.y);  int iz_c = std::ceil(v.z);
                         uint8_t b = get_raw_block(ix_f, iy_f, iz_f);
-                        if (b == 255 || b == 7) b = get_raw_block(ix_c, iy_c, iz_c);
-                        if (b == 255 || b == 7) b = default_block;
+                        if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = get_raw_block(ix_c, iy_c, iz_c);
+                        if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = default_block;
                         return b;
                     };
 
@@ -504,7 +504,7 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                                     int by = std::floor(v.y) + dy + 1;
                                     int bz = std::floor(v.z) + dz + 1;
                                     uint8_t b = get_raw_block(bx, by, bz);
-                                    if (b == 255 || b == 7) continue; // Ignore air/water
+                                    if (b == 255 || b == 7 || b == Config::TALL_GRASS) continue; // Ignore air/water/grass
                                     if (Config::BLOCKS.find(b) != Config::BLOCKS.end()) {
                                         if (!Config::BLOCKS.at(b).is_waving) {
                                             return false; // Touches a rigid solid, do not sway!

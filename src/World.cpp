@@ -3,7 +3,12 @@
 
 sqlite3* db = nullptr;
 std::mutex sqlite_mutex;
+ThreadPool global_thread_pool(Config::MAX_WORKER_THREADS);
 #include <cmath>
+#include <raymath.h>
+#include <algorithm>
+#include <vector>
+#include <utility>
 
 using namespace Config;
 
@@ -17,12 +22,15 @@ void World::update(Vector3 player_pos) {
     int pcx = std::floor(player_pos.x / CHUNK_SIZE);
     int pcz = std::floor(player_pos.z / CHUNK_SIZE);
     
-    int load_radius = 4;
+    int load_radius = Config::RENDER_DISTANCE;
     
     for (auto it = chunks.begin(); it != chunks.end();) {
         int cx = it->first.first;
         int cz = it->first.second;
         if (std::abs(cx - pcx) > load_radius + 1 || std::abs(cz - pcz) > load_radius + 1) {
+            if (it->second->is_dirty) {
+                it->second->save_to_disk();
+            }
             it = chunks.erase(it);
         } else {
             ++it;
@@ -31,34 +39,65 @@ void World::update(Vector3 player_pos) {
     
     int chunks_started = 0;
     
+    std::vector<std::pair<int, int>> chunk_coords;
     for (int x = -load_radius; x <= load_radius; x++) {
         for (int z = -load_radius; z <= load_radius; z++) {
-            int cx = pcx + x;
-            int cz = pcz + z;
-            
-            auto key = std::make_pair(cx, cz);
-            if (chunks.find(key) == chunks.end()) {
-                if (chunks_started < 2) {
-                    chunks[key] = std::make_unique<Chunk>(cx, cz);
-                    chunks[key]->start_generation();
-                    chunks_started++;
-                }
-            } else {
-                chunks[key]->update_logic();
-            }
+            chunk_coords.push_back({x, z});
+        }
+    }
+    
+    std::sort(chunk_coords.begin(), chunk_coords.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+        return (a.first * a.first + a.second * a.second) < (b.first * b.first + b.second * b.second);
+    });
+    
+    for (const auto& coord : chunk_coords) {
+        int cx = pcx + coord.first;
+        int cz = pcz + coord.second;
+        
+        auto key = std::make_pair(cx, cz);
+        if (chunks.find(key) == chunks.end()) {
+            chunks[key] = std::make_unique<Chunk>(cx, cz);
+            chunks[key]->start_generation();
+        } else {
+            chunks[key]->update_logic();
         }
     }
 }
 
-void World::draw(Vector3 camera_pos) {
+void World::draw(Camera3D camera) {
+    Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+    float half_w = Config::CHUNK_SIZE / 2.0f;
+    float half_h = Config::GRID_Y / 2.0f;
+    float radius = std::sqrt(half_w * half_w * 2 + half_h * half_h);
+    
+    auto is_visible = [&](Chunk* c) {
+        Vector3 center = { c->cx * Config::CHUNK_SIZE + half_w, half_h, c->cz * Config::CHUNK_SIZE + half_w };
+        Vector3 d = Vector3Subtract(center, camera.position);
+        float dist = Vector3Length(d);
+        if (dist <= radius) return true;
+        
+        Vector3 dir = Vector3Scale(d, 1.0f / dist);
+        float dot = Vector3DotProduct(forward, dir);
+        
+        float angle = std::acos(std::clamp(dot, -1.0f, 1.0f));
+        float sphere_angle = std::asin(std::clamp(radius / dist, 0.0f, 1.0f));
+        float max_angle = 1.2f + sphere_angle;
+        
+        return angle <= max_angle;
+    };
+
     // Pass 1: Opaque geometry (Solid and Plants)
     for (auto& pair : chunks) {
-        pair.second->draw_solid(mat_solid, camera_pos);
+        if (is_visible(pair.second.get())) {
+            pair.second->draw_solid(mat_solid, camera.position);
+        }
     }
     
     // Pass 2: Transparent geometry (Water)
     for (auto& pair : chunks) {
-        pair.second->draw_water(mat_water, camera_pos);
+        if (is_visible(pair.second.get())) {
+            pair.second->draw_water(mat_water, camera.position);
+        }
     }
 }
 

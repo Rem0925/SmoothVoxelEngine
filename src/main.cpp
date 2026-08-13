@@ -14,31 +14,77 @@
 
 using namespace Config;
 
-bool VoxelRaycast(World& world, Vector3 origin, Vector3 dir, float max_dist, Vector3& out_hit, Vector3& out_prev) {
-    float t = 0.0f;
-    float step = 0.05f;
+bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dist, Vector3& out_hit, Vector3& out_solid, Vector3& out_empty) {
+    Ray ray = { origin, dir };
     
-    Vector3 current = origin;
-    Vector3 previous = origin;
+    RayCollision closest_hit = { 0 };
+    closest_hit.distance = max_dist;
+    closest_hit.hit = false;
     
-    while (t <= max_dist) {
-        current = Vector3Add(origin, Vector3Scale(dir, t));
+    for (auto& pair : world.chunks) {
+        Chunk* c = pair.second.get();
+        if (!c->is_ready || c->solid_mesh.vertexCount == 0) continue;
         
-        int bx = std::floor(current.x);
-        int by = std::floor(current.y);
-        int bz = std::floor(current.z);
+        float cx_center = c->cx * Config::CHUNK_SIZE + Config::CHUNK_SIZE / 2.0f;
+        float cz_center = c->cz * Config::CHUNK_SIZE + Config::CHUNK_SIZE / 2.0f;
+        float dist_sq = (origin.x - cx_center)*(origin.x - cx_center) + (origin.z - cz_center)*(origin.z - cz_center);
         
-        uint8_t block = world.get_block(bx, by, bz);
+        // Fast radial discard (max_dist + chunk_diagonal)
+        float max_r = max_dist + (Config::CHUNK_SIZE * 1.5f);
+        if (dist_sq > max_r * max_r) continue;
         
-        if (block != AIR && block != WATER) { 
-            out_hit = { (float)bx, (float)by, (float)bz };
-            out_prev = { std::floor(previous.x), std::floor(previous.y), std::floor(previous.z) };
-            return true;
+        RayCollision mesh_hit = GetRayCollisionMesh(ray, c->solid_mesh, MatrixIdentity());
+        if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
+            closest_hit = mesh_hit;
+        }
+    }
+    
+    if (closest_hit.hit) {
+        out_hit = closest_hit.point;
+        
+        int ix = std::floor(out_hit.x);
+        int iy = std::floor(out_hit.y);
+        int iz = std::floor(out_hit.z);
+        
+        float best_dist_solid = 9999.0f;
+        Vector3 best_solid = { (float)ix, (float)iy, (float)iz };
+        
+        float best_dist_empty = 9999.0f;
+        Vector3 best_empty = { (float)ix, (float)iy, (float)iz };
+        
+        for (int dx = 0; dx <= 1; dx++) {
+            for (int dy = 0; dy <= 1; dy++) {
+                for (int dz = 0; dz <= 1; dz++) {
+                    int nx = ix + dx;
+                    int ny = iy + dy;
+                    int nz = iz + dz;
+                    
+                    if (ny >= 0 && ny < Config::GRID_Y) {
+                        float den = world.get_density(nx, ny, nz);
+                        Vector3 node_pos = { (float)nx, (float)ny, (float)nz };
+                        float dist = Vector3Distance(out_hit, node_pos);
+                        
+                        if (den >= Config::ISO_SURFACE) {
+                            if (dist < best_dist_solid) {
+                                best_dist_solid = dist;
+                                best_solid = node_pos;
+                            }
+                        } else {
+                            if (dist < best_dist_empty) {
+                                best_dist_empty = dist;
+                                best_empty = node_pos;
+                            }
+                        }
+                    }
+                }
+            }
         }
         
-        previous = current;
-        t += step;
+        out_solid = best_solid;
+        out_empty = best_empty;
+        return true;
     }
+    
     return false;
 }
 
@@ -122,7 +168,7 @@ void DrawSkybox(Camera3D camera, Texture2D side, Texture2D top, Texture2D bottom
 
 int main() {
     InitWindow(1280, 720, "Smooth Voxel Engine C++");
-    SetTargetFPS(60);
+    SetTargetFPS(MAX_FPS); 
     DisableCursor();
 
     Texture2D spritesheet = LoadTexture("assets/textures/spritesheet_tiles.png");
@@ -170,6 +216,8 @@ int main() {
     std::filesystem::create_directories(save_dir);
     
     if (sqlite3_open((save_dir + "/chunks.db").c_str(), &db) == SQLITE_OK) {
+        sqlite3_exec(db, "PRAGMA journal_mode=WAL;", 0, 0, 0);
+        sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", 0, 0, 0);
         const char* sql = "CREATE TABLE IF NOT EXISTS chunks (cx INTEGER, cz INTEGER, chunk_data BLOB, PRIMARY KEY(cx, cz))";
         sqlite3_exec(db, sql, 0, 0, 0);
     }
@@ -331,29 +379,29 @@ int main() {
             }
 
             Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-            Vector3 hit, prev;
-            if (VoxelRaycast(world, camera.position, forward, 8.0f, hit, prev)) {
+            Vector3 hit, target_solid, target_empty;
+            if (!ui.is_open && VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty)) {
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && ui.selected_slot == 0) {
-                    uint8_t broken_block = world.get_block(std::floor(hit.x), std::floor(hit.y), std::floor(hit.z));
+                    uint8_t broken_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
                     if (broken_block != AIR && broken_block != WATER) {
                         ui.add_resource(broken_block);
                     }
                     bool fill_water = false;
-                    if (hit.y <= Config::WATER_LEVEL) { 
-                        if (world.get_block(hit.x+1, hit.y, hit.z) == Config::WATER ||
-                            world.get_block(hit.x-1, hit.y, hit.z) == Config::WATER ||
-                            world.get_block(hit.x, hit.y, hit.z+1) == Config::WATER ||
-                            world.get_block(hit.x, hit.y, hit.z-1) == Config::WATER ||
-                            world.get_block(hit.x, hit.y+1, hit.z) == Config::WATER ||
-                            world.get_block(hit.x, hit.y-1, hit.z) == Config::WATER) {
+                    if (target_solid.y <= Config::WATER_LEVEL) { 
+                        if (world.get_block(target_solid.x+1, target_solid.y, target_solid.z) == Config::WATER ||
+                            world.get_block(target_solid.x-1, target_solid.y, target_solid.z) == Config::WATER ||
+                            world.get_block(target_solid.x, target_solid.y, target_solid.z+1) == Config::WATER ||
+                            world.get_block(target_solid.x, target_solid.y, target_solid.z-1) == Config::WATER ||
+                            world.get_block(target_solid.x, target_solid.y+1, target_solid.z) == Config::WATER ||
+                            world.get_block(target_solid.x, target_solid.y-1, target_solid.z) == Config::WATER) {
                             fill_water = true;
                         }
                     }
-                    world.set_block(hit.x, hit.y, hit.z, fill_water ? Config::WATER : AIR);
+                    world.set_block(target_solid.x, target_solid.y, target_solid.z, fill_water ? Config::WATER : AIR);
                 } 
                 else if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && ui.selected_slot != 0) {
                     if (ui.slots[ui.selected_slot].count > 0) {
-                        world.set_block(prev.x, prev.y, prev.z, ui.slots[ui.selected_slot].id);
+                        world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id);
                         ui.slots[ui.selected_slot].count--;
                     }
                 }
@@ -392,6 +440,16 @@ int main() {
         SetShaderValue(world.mat_solid.shader, fogLocSolid, fogColorVec, SHADER_UNIFORM_VEC3);
         int fogLocWater = GetShaderLocation(world.mat_water.shader, "fogColor");
         SetShaderValue(world.mat_water.shader, fogLocWater, fogColorVec, SHADER_UNIFORM_VEC3);
+        
+        int fogStartLocSolid = GetShaderLocation(world.mat_solid.shader, "fogStart");
+        SetShaderValue(world.mat_solid.shader, fogStartLocSolid, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
+        int fogEndLocSolid = GetShaderLocation(world.mat_solid.shader, "fogEnd");
+        SetShaderValue(world.mat_solid.shader, fogEndLocSolid, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
+        
+        int fogStartLocWater = GetShaderLocation(world.mat_water.shader, "fogStart");
+        SetShaderValue(world.mat_water.shader, fogStartLocWater, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
+        int fogEndLocWater = GetShaderLocation(world.mat_water.shader, "fogEnd");
+        SetShaderValue(world.mat_water.shader, fogEndLocWater, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
         
         // Dynamically update material colors for lighting
         unsigned char light_val = (unsigned char)(255 * light_intensity);
@@ -523,83 +581,102 @@ int main() {
         rlEnableDepthTest();
         rlEnableDepthMask();
 
-        world.draw(camera.position);
+        world.draw(camera);
+        EndMode3D(); // Flush and close standard 3D pass
         
         Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-        Vector3 hit, prev;
+        Vector3 hit, target_solid, target_empty;
 
-        if (!ui.is_open && VoxelRaycast(world, camera.position, forward, 8.0f, hit, prev)) {
-            rlDisableDepthMask();
-            rlDisableDepthTest();
-            rlDisableBackfaceCulling();
-            if (ui.selected_slot == 0) { // Mine
-                float d_slice[27];
-                for(int i=0; i<27; i++) d_slice[i] = -1.0f;
-                int bx = std::floor(hit.x);
-                int by = std::floor(hit.y);
-                int bz = std::floor(hit.z);
-                for(int dx=-1; dx<=1; dx++){
-                    for(int dy=-1; dy<=1; dy++){
-                        for(int dz=-1; dz<=1; dz++){
-                            d_slice[(dy+1)*9 + (dz+1)*3 + (dx+1)] = world.get_density(bx+dx, by+dy, bz+dz);
-                        }
-                    }
-                }
-                d_slice[1*9 + 1*3 + 1] = -1.0f; // Preview
-                
-                std::vector<Vector3> g_verts, g_norms;
-                std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
-                mc::generate(d_slice, nullptr, 3, 3, 3, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
-                
-                rlPushMatrix();
-                rlTranslatef(bx - 1.0f, by - 1.0f, bz - 1.0f);
-                rlSetTexture(spritesheet.id);
-                rlBegin(RL_TRIANGLES);
-                rlColor4ub(255, 100, 100, 150);
-                for (size_t i = 0; i < g_verts.size(); ++i) {
-                    rlTexCoord2f(g_uvs[i].x, g_uvs[i].y);
-                    rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
-                }
-                rlEnd();
-                rlSetTexture(0);
-                rlPopMatrix();
-            } else if (ui.slots[ui.selected_slot].count > 0) { // Place
-                float d_slice[27];
-                for(int i=0; i<27; i++) d_slice[i] = -1.0f;
-                int bx = std::floor(prev.x);
-                int by = std::floor(prev.y);
-                int bz = std::floor(prev.z);
-                for(int dx=-1; dx<=1; dx++){
-                    for(int dy=-1; dy<=1; dy++){
-                        for(int dz=-1; dz<=1; dz++){
-                            d_slice[(dy+1)*9 + (dz+1)*3 + (dx+1)] = world.get_density(bx+dx, by+dy, bz+dz);
-                        }
-                    }
-                }
-                d_slice[1*9 + 1*3 + 1] = 1.0f; // Preview
-                
-                std::vector<Vector3> g_verts, g_norms;
-                std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
-                mc::generate(d_slice, nullptr, 3, 3, 3, 0.0f, ui.slots[ui.selected_slot].id, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
-                
-                rlPushMatrix();
-                rlTranslatef(bx - 1.0f, by - 1.0f, bz - 1.0f);
-                rlSetTexture(spritesheet.id);
-                rlBegin(RL_TRIANGLES);
-                rlColor4ub(100, 255, 100, 150);
-                for (size_t i = 0; i < g_verts.size(); ++i) {
-                    rlTexCoord2f(g_uvs[i].x, g_uvs[i].y);
-                    rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
-                }
-                rlEnd();
-                rlSetTexture(0);
-                rlPopMatrix();
+        bool is_valid_tool = false;
+        if (ui.selected_slot == 0) {
+            is_valid_tool = true;
+        } else {
+            if (ui.slots[ui.selected_slot].id != Config::AIR && ui.slots[ui.selected_slot].count > 0) {
+                is_valid_tool = true;
             }
-            rlEnableDepthTest();
+        }
+
+        if (!ui.is_open && is_valid_tool && VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty)) {
+            BeginMode3D(camera); // Start X-Ray 3D pass (this internally enables depth test!)
+            
+            rlDisableDepthMask(); // Disable depth mask AFTER BeginMode3D
+            rlDisableDepthTest(); // Disable depth test AFTER BeginMode3D
+            
+            Vector3 target_node = (ui.selected_slot == 0) ? target_solid : target_empty;
+            
+            float scale = 0.2f + std::sin(GetTime() * 8.0f) * 0.05f;
+            Color cursor_color = (ui.selected_slot == 0) ? Color{255, 40, 40, 255} : Color{40, 255, 100, 255};
+            DrawCube(target_node, scale, scale, scale, cursor_color);
+            
+            rlDisableBackfaceCulling(); // Re-disable to show the inside of the concave crater hologram
+            
+            int bx = std::floor(target_node.x);
+            int by = std::floor(target_node.y);
+            int bz = std::floor(target_node.z);
+            
+            float d_slice[27];
+            for(int i=0; i<27; i++) d_slice[i] = -1.0f;
+            for(int dx=-1; dx<=1; dx++){
+                for(int dy=-1; dy<=1; dy++){
+                    for(int dz=-1; dz<=1; dz++){
+                        d_slice[(dy+1)*9 + (dz+1)*3 + (dx+1)] = world.get_density(bx+dx, by+dy, bz+dz);
+                    }
+                }
+            }
+            if (ui.selected_slot == 0) {
+                d_slice[1*9 + 1*3 + 1] = -1.0f; // Preview mine
+            } else {
+                d_slice[1*9 + 1*3 + 1] = 1.0f; // Preview place
+            }
+            
+            std::vector<Vector3> g_verts, g_norms;
+            std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
+            mc::generate(d_slice, nullptr, 3, 3, 3, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
+            
+            rlPushMatrix();
+            rlTranslatef(bx - 1.0f, by - 1.0f, bz - 1.0f);
+            
+            float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
+            unsigned char alpha = (unsigned char)(pulse * 255);
+            Color wire_col = (ui.selected_slot == 0) ? Color{255, 25, 25, alpha} : Color{25, 255, 75, alpha};
+            Color solid_col = (ui.selected_slot == 0) ? Color{255, 0, 0, 40} : Color{0, 255, 0, 40};
+
+            rlBegin(RL_LINES);
+            rlColor4ub(wire_col.r, wire_col.g, wire_col.b, wire_col.a);
+            for (size_t i = 0; i < g_verts.size(); i += 3) {
+                rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+                rlVertex3f(g_verts[i+1].x, g_verts[i+1].y, g_verts[i+1].z);
+                
+                rlVertex3f(g_verts[i+1].x, g_verts[i+1].y, g_verts[i+1].z);
+                rlVertex3f(g_verts[i+2].x, g_verts[i+2].y, g_verts[i+2].z);
+                
+                rlVertex3f(g_verts[i+2].x, g_verts[i+2].y, g_verts[i+2].z);
+                rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+            }
+            rlEnd();
+            
+            rlSetTexture(spritesheet.id);
+            rlBegin(RL_TRIANGLES);
+            rlColor4ub(solid_col.r, solid_col.g, solid_col.b, solid_col.a);
+            for (size_t i = 0; i < g_verts.size(); ++i) {
+                rlTexCoord2f(g_uvs[i].x, g_uvs[i].y);
+                rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+            }
+            rlEnd();
+            rlSetTexture(0);
+            
+            rlPopMatrix();
+            
+            // 1. Flush the X-Ray batch NOW while depth test is still OFF
+            rlDrawRenderBatchActive();
+            
+            // 2. Restore persistent states that Raylib doesn't auto-restore
             rlEnableDepthMask();
             rlEnableBackfaceCulling();
+            
+            // 3. Close 3D mode (auto-disables depth test for 2D UI)
+            EndMode3D();
         }
-        EndMode3D();
 
         int cam_x = std::floor(camera.position.x);
         int cam_y = std::floor(camera.position.y);
@@ -615,8 +692,10 @@ int main() {
         DrawText(TextFormat("X: %d  Y: %d  Z: %d%s", cam_x, cam_y, cam_z, spec_txt), 10, 40, 20, BLACK);
 
         uint8_t look_block = AIR;
-        if (!ui.is_open && VoxelRaycast(world, camera.position, forward, 8.0f, hit, prev)) {
-            look_block = world.get_block(std::floor(hit.x), std::floor(hit.y), std::floor(hit.z));
+        Vector3 forward_text = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+        Vector3 h, s, e;
+        if (!ui.is_open && VoxelRaycastSmooth(world, camera.position, forward_text, 15.0f, h, s, e)) {
+            look_block = world.get_block(s.x, s.y, s.z);
         }
         std::string block_name = (look_block != AIR && BLOCKS.count(look_block)) ? BLOCKS.at(look_block).name : "Aire";
         DrawText(TextFormat("Mirando: %s", block_name.c_str()), 10, 70, 20, BLACK);

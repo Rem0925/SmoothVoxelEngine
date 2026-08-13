@@ -4,6 +4,9 @@
 #include <mutex>
 #include <memory>
 #include "Chunk.hpp"
+#include "ThreadPool.hpp"
+
+extern ThreadPool global_thread_pool;
 
 struct pair_hash {
     template <class T1, class T2>
@@ -25,7 +28,7 @@ public:
     ~World();
 
     void update(Vector3 player_pos);
-    void draw(Vector3 camera_pos);
+    void draw(Camera3D camera);
 
     uint8_t get_block(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
