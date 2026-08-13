@@ -11,6 +11,8 @@ uniform vec3 fogColor;
 uniform float time;
 uniform float fogStart;
 uniform float fogEnd;
+uniform vec3 sunDir;
+uniform vec3 cameraPos;
 
 out vec4 finalColor;
 
@@ -79,5 +81,17 @@ void main()
     // 6. Niebla de profundidad (Mantenida del original)
     float fogFactor = clamp((viewDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     
-    finalColor.rgb = mix(finalColor.rgb, fogColor, fogFactor);
+    vec3 viewDir = normalize(fragPosition - cameraPos);
+    vec3 sun = normalize(sunDir);
+    float sunHeight = sun.y;
+    
+    // Matemática del atardecer idéntica al skybox
+    float sunsetFactor = clamp(1.0 - abs(sunHeight - 0.05) * 6.0, 0.0, 1.0);
+    float sunDot = dot(viewDir, sun);
+    float sunsetDirectional = smoothstep(0.5, 1.0, sunDot) * sunsetFactor;
+    
+    vec3 sunsetColor = vec3(1.0, 0.4, 0.1) * sunsetDirectional;
+    vec3 dynamicFogColor = fogColor + sunsetColor;
+    
+    finalColor.rgb = mix(finalColor.rgb, dynamicFogColor, fogFactor);
 }

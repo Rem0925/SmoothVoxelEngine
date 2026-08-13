@@ -13,6 +13,8 @@ uniform vec4 colDiffuse;
 uniform vec3 fogColor;
 uniform float fogStart;
 uniform float fogEnd;
+uniform vec3 sunDir;
+uniform vec3 cameraPos;
 
 // Color de salida
 out vec4 finalColor;
@@ -51,18 +53,15 @@ void main()
     vec4 texSecondary = texture(texture0, fragTexCoord2);
     float baseWeight = fragColor.a;
     
-    // 3. Escala de los polígonos: Controla qué tan largos son los cortes rectos
-    float geoScale = 3.5; 
-    
-    // 4. Proyección Triplanar (Mantiene la cuadrícula sin estirarse en pendientes)
+    // 6. Proyección para el ruido geométrico
     vec3 normal = abs(normalize(cross(dFdx(fragPosition), dFdy(fragPosition))));
-    
     vec2 projCoord;
     if (normal.x >= normal.y && normal.x >= normal.z) projCoord = fragPosition.yz;
     else if (normal.y >= normal.x && normal.y >= normal.z) projCoord = fragPosition.xz;
     else projCoord = fragPosition.xy;
     
     // Evaluamos los puntos interconectados
+    float geoScale = 3.5;
     float noise = geometricNoise(projCoord * geoScale);
     
     // 5. EL SECRETO PARA ELIMINAR ISLAS Y HUECOS:
@@ -94,17 +93,29 @@ void main()
     vec3 lightDir = normalize(vec3(0.6, 0.8, -0.4));
     float diff = max(dot(surfNormal, lightDir), 0.0);
     
-    // Sombras más suaves estilo voxel (0.5 a 1.0)
-    float lighting = 0.5 + 0.5 * diff;
+    // Sombras más suaves estilo voxel (0.75 a 1.0) para que coincida con el cielo
+    float lighting = 0.75 + 0.25 * diff;
 
     // Apply vertex color, lighting, and diffuse
     vec4 colorNoAlpha = vec4(fragColor.rgb * lighting, 1.0);
     finalColor = blendedTex * colorNoAlpha * colDiffuse;
     
-    // --- NIEBLA DE PROFUNDIDAD ---
+    // --- NIEBLA DE PROFUNDIDAD Y ATARDECER DIRECCIONAL ---
     float fogFactor = clamp((viewDist - fogStart) / (fogEnd - fogStart), 0.0, 1.0);
     
-    finalColor.rgb = mix(finalColor.rgb, fogColor, fogFactor);
+    vec3 viewDir = normalize(fragPosition - cameraPos);
+    vec3 sun = normalize(sunDir);
+    float sunHeight = sun.y;
+    
+    // Matemática del atardecer idéntica al skybox
+    float sunsetFactor = clamp(1.0 - abs(sunHeight - 0.05) * 6.0, 0.0, 1.0);
+    float sunDot = dot(viewDir, sun);
+    float sunsetDirectional = smoothstep(0.5, 1.0, sunDot) * sunsetFactor;
+    
+    vec3 sunsetColor = vec3(1.0, 0.4, 0.1) * sunsetDirectional;
+    vec3 dynamicFogColor = fogColor + sunsetColor;
+    
+    finalColor.rgb = mix(finalColor.rgb, dynamicFogColor, fogFactor);
     
     // Discard transparent pixels
     if (finalColor.a < 0.1) discard;

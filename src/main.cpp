@@ -197,6 +197,10 @@ int main() {
 
     Shader terrainShader = LoadShader("assets/shaders/terrain.vs", "assets/shaders/terrain.fs");
     Shader waterShader = LoadShader("assets/shaders/water.vs", "assets/shaders/water.fs");
+    Shader skyboxShader = LoadShader("assets/shaders/skybox.vs", "assets/shaders/skybox.fs");
+    int skyboxSunDirLoc = GetShaderLocation(skyboxShader, "sunDir");
+    int terrainSunDirLoc = GetShaderLocation(terrainShader, "sunDir");
+    int waterSunDirLoc = GetShaderLocation(waterShader, "sunDir");
     
     Material mat_solid = LoadMaterialDefault();
     mat_solid.shader = terrainShader;
@@ -425,7 +429,10 @@ int main() {
         BeginDrawing();
         
         float sun_y = std::sin(day_time);
-        float light_intensity = std::max(0.1f, sun_y);
+        float sun_x = std::cos(day_time);
+        // Alinear la claridad del terreno con la del cielo
+        float dayFactor = std::clamp(sun_y * 2.0f + 0.2f, 0.0f, 1.0f);
+        float light_intensity = std::max(0.2f, dayFactor);
         Color sky_color = { 
             (unsigned char)(135 * light_intensity), 
             (unsigned char)(206 * light_intensity), 
@@ -468,14 +475,23 @@ int main() {
 
         BeginMode3D(camera);
         
+        Vector3 sun_dir_vec = { sun_x, sun_y, 0.0f };
+        SetShaderValue(skyboxShader, skyboxSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+        SetShaderValue(world.mat_solid.shader, terrainSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+        SetShaderValue(world.mat_water.shader, waterSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+        
+        BeginShaderMode(skyboxShader);
         DrawSkybox(camera, sky_side, sky_top, sky_bottom, light_intensity);
+        EndShaderMode();
         
         rlDisableDepthMask();
         rlDisableDepthTest();
         rlDisableBackfaceCulling();
         
-        float sun_alpha = std::clamp(sun_y / 0.15f, 0.0f, 1.0f);
-        float moon_alpha = std::clamp(-sun_y / 0.15f, 0.0f, 1.0f);
+        // El sol/luna se mantienen 100% sólidos hasta cruzar completamente el horizonte (y = -0.1)
+        // Se desvanecen rápidamente en el vacío (y = -0.15) para que no se vean por debajo del mapa
+        float sun_alpha = std::clamp((sun_y + 0.15f) / 0.05f, 0.0f, 1.0f);
+        float moon_alpha = std::clamp((-sun_y + 0.15f) / 0.05f, 0.0f, 1.0f);
         
         rlEnableColorBlend();
         
