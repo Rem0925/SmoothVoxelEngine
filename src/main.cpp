@@ -202,6 +202,17 @@ int main() {
     int terrainSunDirLoc = GetShaderLocation(terrainShader, "sunDir");
     int waterSunDirLoc = GetShaderLocation(waterShader, "sunDir");
     
+    int timeLocSolid = GetShaderLocation(terrainShader, "time");
+    int camPosLocSolid = GetShaderLocation(terrainShader, "cameraPos");
+    int timeLocWater = GetShaderLocation(waterShader, "time");
+    int camPosLocWater = GetShaderLocation(waterShader, "cameraPos");
+    int fogLocSolid = GetShaderLocation(terrainShader, "fogColor");
+    int fogLocWater = GetShaderLocation(waterShader, "fogColor");
+    int fogStartLocSolid = GetShaderLocation(terrainShader, "fogStart");
+    int fogEndLocSolid = GetShaderLocation(terrainShader, "fogEnd");
+    int fogStartLocWater = GetShaderLocation(waterShader, "fogStart");
+    int fogEndLocWater = GetShaderLocation(waterShader, "fogEnd");
+    
     Material mat_solid = LoadMaterialDefault();
     mat_solid.shader = terrainShader;
 
@@ -246,7 +257,11 @@ int main() {
             size_t pos = content.find("\"" + key + "\"");
             if (pos != std::string::npos) {
                 size_t colon = content.find(":", pos);
-                return std::stof(content.substr(colon + 1));
+                try {
+                    return std::stof(content.substr(colon + 1));
+                } catch (const std::exception& e) {
+                    return def;
+                }
             }
             return def;
         };
@@ -273,6 +288,9 @@ int main() {
     }
 
     while (!WindowShouldClose()) {
+        bool ray_hit_valid = false;
+        Vector3 hit = {0}, target_solid = {0}, target_empty = {0};
+
         // Ciclo completo (2*PI) en 20 minutos (1200 segundos) como en Minecraft
         // Velocidad = 2*PI / 1200 = PI / 600
         day_time += GetFrameTime() * (PI / 600.0f);
@@ -296,7 +314,7 @@ int main() {
                     float r = 0.25f; // cylinder radius
                     auto is_solid = [&](float x, float y, float z) {
                         uint8_t b = world.get_block(std::floor(x), std::floor(y), std::floor(z));
-                        return b != AIR && b != WATER && b != LEAVES;
+                        return b != AIR && b != WATER;
                     };
                 auto check_wall = [&](float vx, float vz, float y) {
                     return is_solid(vx - r, y, vz - r) || is_solid(vx + r, y, vz - r) ||
@@ -383,8 +401,8 @@ int main() {
             }
 
             Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-            Vector3 hit, target_solid, target_empty;
-            if (!ui.is_open && VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty)) {
+            ray_hit_valid = VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty);
+            if (ray_hit_valid) {
                 if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && ui.selected_slot == 0) {
                     uint8_t broken_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
                     if (broken_block != AIR && broken_block != WATER) {
@@ -416,14 +434,10 @@ int main() {
         world.update(camera.position);
 
         float shaderTime = GetTime();
-        int timeLocSolid = GetShaderLocation(world.mat_solid.shader, "time");
         SetShaderValue(world.mat_solid.shader, timeLocSolid, &shaderTime, SHADER_UNIFORM_FLOAT);
-        int camPosLocSolid = GetShaderLocation(world.mat_solid.shader, "cameraPos");
         SetShaderValue(world.mat_solid.shader, camPosLocSolid, &camera.position, SHADER_UNIFORM_VEC3);
         
-        int timeLocWater = GetShaderLocation(world.mat_water.shader, "time");
         SetShaderValue(world.mat_water.shader, timeLocWater, &shaderTime, SHADER_UNIFORM_FLOAT);
-        int camPosLocWater = GetShaderLocation(world.mat_water.shader, "cameraPos");
         SetShaderValue(world.mat_water.shader, camPosLocWater, &camera.position, SHADER_UNIFORM_VEC3);
 
         BeginDrawing();
@@ -443,19 +457,13 @@ int main() {
         
         // Pass dynamic fog color to shaders
         float fogColorVec[3] = { sky_color.r / 255.0f, sky_color.g / 255.0f, sky_color.b / 255.0f };
-        int fogLocSolid = GetShaderLocation(world.mat_solid.shader, "fogColor");
         SetShaderValue(world.mat_solid.shader, fogLocSolid, fogColorVec, SHADER_UNIFORM_VEC3);
-        int fogLocWater = GetShaderLocation(world.mat_water.shader, "fogColor");
         SetShaderValue(world.mat_water.shader, fogLocWater, fogColorVec, SHADER_UNIFORM_VEC3);
         
-        int fogStartLocSolid = GetShaderLocation(world.mat_solid.shader, "fogStart");
         SetShaderValue(world.mat_solid.shader, fogStartLocSolid, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
-        int fogEndLocSolid = GetShaderLocation(world.mat_solid.shader, "fogEnd");
         SetShaderValue(world.mat_solid.shader, fogEndLocSolid, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
         
-        int fogStartLocWater = GetShaderLocation(world.mat_water.shader, "fogStart");
         SetShaderValue(world.mat_water.shader, fogStartLocWater, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
-        int fogEndLocWater = GetShaderLocation(world.mat_water.shader, "fogEnd");
         SetShaderValue(world.mat_water.shader, fogEndLocWater, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
         
         // Dynamically update material colors for lighting
@@ -600,9 +608,6 @@ int main() {
         world.draw(camera);
         EndMode3D(); // Flush and close standard 3D pass
         
-        Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-        Vector3 hit, target_solid, target_empty;
-
         bool is_valid_tool = false;
         if (ui.selected_slot == 0) {
             is_valid_tool = true;
@@ -612,7 +617,7 @@ int main() {
             }
         }
 
-        if (!ui.is_open && is_valid_tool && VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty)) {
+        if (!ui.is_open && is_valid_tool && ray_hit_valid) {
             BeginMode3D(camera); // Start X-Ray 3D pass (this internally enables depth test!)
             
             rlDisableDepthMask(); // Disable depth mask AFTER BeginMode3D
@@ -708,10 +713,8 @@ int main() {
         DrawText(TextFormat("X: %d  Y: %d  Z: %d%s", cam_x, cam_y, cam_z, spec_txt), 10, 40, 20, BLACK);
 
         uint8_t look_block = AIR;
-        Vector3 forward_text = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-        Vector3 h, s, e;
-        if (!ui.is_open && VoxelRaycastSmooth(world, camera.position, forward_text, 15.0f, h, s, e)) {
-            look_block = world.get_block(s.x, s.y, s.z);
+        if (!ui.is_open && ray_hit_valid) {
+            look_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
         }
         std::string block_name = (look_block != AIR && BLOCKS.count(look_block)) ? BLOCKS.at(look_block).name : "Aire";
         DrawText(TextFormat("Mirando: %s", block_name.c_str()), 10, 70, 20, BLACK);
@@ -741,9 +744,15 @@ int main() {
         out.close();
     }
     
-    if (db) {
-        sqlite3_close(db);
-        db = nullptr;
+    world.save_all();
+    global_thread_pool.wait_idle();
+    
+    {
+        std::lock_guard<std::mutex> lock(sqlite_mutex);
+        if (db) {
+            sqlite3_close(db);
+            db = nullptr;
+        }
     }
 
     UnloadTexture(spritesheet);

@@ -16,12 +16,16 @@ public:
     template<class F, class... Args>
     auto enqueue(F&& f, Args&&... args) -> std::future<typename std::invoke_result<F, Args...>::type>;
 
+    void wait_idle();
+
 private:
     std::vector<std::thread> workers;
     std::queue<std::function<void()>> tasks;
+    size_t active = 0;
     
     std::mutex queue_mutex;
     std::condition_variable condition;
+    std::condition_variable idle_condition;
     bool stop;
 };
 
@@ -39,8 +43,14 @@ inline ThreadPool::ThreadPool(size_t threads) : stop(false) {
                             return;
                         task = std::move(this->tasks.front());
                         this->tasks.pop();
+                        ++this->active;
                     }
                     task();
+                    {
+                        std::unique_lock<std::mutex> lock(this->queue_mutex);
+                        --this->active;
+                        if (this->active == 0) this->idle_condition.notify_all();
+                    }
                 }
             }
         );
@@ -73,4 +83,9 @@ inline ThreadPool::~ThreadPool() {
     condition.notify_all();
     for(std::thread &worker: workers)
         worker.join();
+}
+
+inline void ThreadPool::wait_idle() {
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    idle_condition.wait(lock, [this]{ return tasks.empty() && active == 0; });
 }

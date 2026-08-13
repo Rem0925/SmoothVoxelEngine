@@ -14,6 +14,8 @@ public:
     std::atomic<bool> is_dirty{false};
     std::atomic<bool> needs_upload{false};
     
+    std::mutex chunk_mutex;
+
     float* density_grid = nullptr;
     uint8_t* block_grid = nullptr;
 
@@ -53,6 +55,6 @@ private:
     
     void generate_thread();
     void rebuild_thread();
-    void build_mesh_data();
+    void build_mesh_data(const float* density, const uint8_t* blocks);
     void upload_meshes();
 };

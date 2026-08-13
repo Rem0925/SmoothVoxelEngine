@@ -65,7 +65,7 @@ void Chunk::generate_thread() {
     }
 
     if (!loaded) {
-        int seed_offset = WORLD_SEED * 1000;
+        int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
         
         std::vector<int> top_solid_y( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1), 0 );
         std::vector<bool> has_solid( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1), false );
@@ -238,23 +238,31 @@ void Chunk::generate_thread() {
         }
     }
 
-    build_mesh_data();
+    build_mesh_data(density_grid, block_grid);
     needs_upload = true;
     is_ready = true;
 }
 
 void Chunk::rebuild_thread() {
-    build_mesh_data();
+    int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
+    std::vector<float> d_copy(total_blocks);
+    std::vector<uint8_t> b_copy(total_blocks);
+    {
+        std::lock_guard<std::mutex> lock(chunk_mutex);
+        memcpy(d_copy.data(), density_grid, total_blocks * sizeof(float));
+        memcpy(b_copy.data(), block_grid, total_blocks * sizeof(uint8_t));
+    }
+    build_mesh_data(d_copy.data(), b_copy.data());
     needs_upload = true;
 }
 
-void Chunk::build_mesh_data() {
+void Chunk::build_mesh_data(const float* density, const uint8_t* blocks) {
     s_vertices.clear(); s_normals.clear(); s_uvs.clear(); s_uvs2.clear(); s_colors.clear();
     w_vertices.clear(); w_normals.clear(); w_uvs.clear(); w_uvs2.clear(); w_colors.clear();
     p_vertices.clear(); p_normals.clear(); p_uvs.clear(); p_colors.clear();
 
     // 1. Terrain Mesh (Marching Cubes)
-    mc::generate(density_grid, block_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, s_vertices, s_normals, s_uvs, s_uvs2, s_colors);
+    mc::generate(density, blocks, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, s_vertices, s_normals, s_uvs, s_uvs2, s_colors);
     
     // Remap vertices to global coords
     for (auto& v : s_vertices) {
@@ -359,8 +367,8 @@ void Chunk::build_mesh_data() {
     
     for (int x = 0; x < wx; ++x) {
         for (int z = 0; z < wz; ++z) {
-            if (block_grid[idx(x, (int)WATER_LEVEL, z)] == WATER || 
-                block_grid[idx(x, (int)WATER_LEVEL - 1, z)] == WATER) {
+            if (blocks[idx(x, (int)WATER_LEVEL, z)] == WATER || 
+                blocks[idx(x, (int)WATER_LEVEL - 1, z)] == WATER) {
                 lake_2d[z * wx + x] = -1.0f;
             }
         }
@@ -391,57 +399,6 @@ void Chunk::build_mesh_data() {
         
 
 
-        auto is_world_shore = [&](int world_x, int world_z) -> bool {
-            double wx_world = world_x + Config::WORLD_SEED * 1000;
-            double wz_world = world_z + Config::WORLD_SEED * 1000;
-            
-            double n_base = pnoise3(wx_world * 0.005, 0.0, wz_world * 0.005, 4, 0.5);
-            double n_detail = pnoise3(wx_world * 0.02, 0.0, wz_world * 0.02, 4, 0.5);
-            double n_mountains = std::abs(pnoise3(wx_world * 0.008, 0.0, wz_world * 0.008, 4, 0.5));
-            
-            double valley_base = (n_base < 0) ? (n_base * 16.0) : (n_base * 10.0);
-            double raw_h = 42.0 + valley_base + (n_detail * 3.0) + (n_mountains * 16.0);
-            float base_h = std::round(raw_h) * 0.20f + raw_h * 0.80f;
-            
-            int top = 0;
-            float d_water = -1.0f;
-            float d_water_minus_1 = -1.0f;
-            
-            for (int y = 0; y < Config::GRID_Y; ++y) {
-                float n3d = pnoise3(wx_world * 0.05f, y * 0.05f, wz_world * 0.05f, 2, 0.4f);
-                float cave_noise = pnoise3(wx_world * 0.04f, y * 0.04f, wz_world * 0.04f, 2, 0.5f);
-                
-                float true_depth = (base_h - y) + (n3d * 2.5f);
-                float d = true_depth;
-                
-                if (y == 0) d = 1.0f;
-                if (y == Config::GRID_Y - 1) d = -1.0f;
-                
-                d = std::max(-1.0f, std::min(1.0f, d));
-                
-                float depth_below = base_h - y;
-                float cave_suppression = std::max(0.5f, std::min(1.0f, 0.5f + depth_below / 15.0f));
-                
-                if ((cave_noise * cave_suppression) > 0.4f) {
-                    d = -1.0f;
-                }
-                
-                if (d >= Config::ISO_SURFACE) {
-                    top = y;
-                }
-                
-                if (y == (int)Config::WATER_LEVEL) d_water = d;
-                if (y == (int)Config::WATER_LEVEL - 1) d_water_minus_1 = d;
-            }
-            
-            bool is_water1 = ((int)Config::WATER_LEVEL <= (int)Config::WATER_LEVEL && d_water < Config::ISO_SURFACE && (int)Config::WATER_LEVEL >= top);
-            bool is_water2 = ((int)Config::WATER_LEVEL - 1 <= (int)Config::WATER_LEVEL && d_water_minus_1 < Config::ISO_SURFACE && (int)Config::WATER_LEVEL - 1 >= top);
-            
-            if (is_water1 || is_water2) {
-                return false; // It is WATER (lake_2d = -1.0f)
-            }
-            return true; // It is NOT WATER (lake_2d = 1.0f), so it IS a shore!
-        };
 
         auto get_foam_alpha = [&](Vector3 v) -> unsigned char {
             float fx = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, v.x));
@@ -459,7 +416,7 @@ void Chunk::build_mesh_data() {
             auto get_d = [&](int x, int y, int z) {
                 if (y < 0 || y >= Config::GRID_Y) return 0.0f;
                 int idx = y * w * w + z * w + x;
-                return density_grid[idx];
+                return density[idx];
             };
             
             float exact_depth = 3.0f; // Default deep
@@ -670,6 +627,8 @@ uint8_t Chunk::get_block(int x, int y, int z) const {
 
 void Chunk::set_block(int x, int y, int z, uint8_t type) {
     if (x < 0 || x > CHUNK_SIZE || y < 0 || y >= GRID_Y || z < 0 || z > CHUNK_SIZE) return;
+    
+    std::lock_guard<std::mutex> lock(chunk_mutex);
     int i = idx(x, y, z);
     block_grid[i] = type;
     
@@ -680,33 +639,6 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
     }
     
     is_dirty = true;
-    
-    int total_blocks = (Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1);
-    std::vector<char> buffer(total_blocks * (sizeof(float) + sizeof(uint8_t)));
-    memcpy(buffer.data(), density_grid, total_blocks * sizeof(float));
-    memcpy(buffer.data() + total_blocks * sizeof(float), block_grid, total_blocks * sizeof(uint8_t));
-    
-    int cap_cx = cx;
-    int cap_cz = cz;
-    
-    global_thread_pool.enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
-        extern sqlite3* db;
-        extern std::mutex sqlite_mutex;
-        std::lock_guard<std::mutex> lock(sqlite_mutex);
-        if (db) {
-            sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
-            sqlite3_stmt* stmt;
-            const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
-                sqlite3_bind_int(stmt, 1, cap_cx);
-                sqlite3_bind_int(stmt, 2, cap_cz);
-                sqlite3_bind_blob(stmt, 3, buffer.data(), buffer.size(), SQLITE_TRANSIENT);
-                sqlite3_step(stmt);
-                sqlite3_finalize(stmt);
-            }
-            sqlite3_exec(db, "COMMIT;", 0, 0, 0);
-        }
-    });
 }
 
 void Chunk::rebuild_mesh() {
@@ -721,8 +653,11 @@ void Chunk::rebuild_mesh() {
 void Chunk::save_to_disk() {
     int total_blocks = (Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1);
     std::vector<char> buffer(total_blocks * (sizeof(float) + sizeof(uint8_t)));
-    memcpy(buffer.data(), density_grid, total_blocks * sizeof(float));
-    memcpy(buffer.data() + total_blocks * sizeof(float), block_grid, total_blocks * sizeof(uint8_t));
+    {
+        std::lock_guard<std::mutex> lock(chunk_mutex);
+        memcpy(buffer.data(), density_grid, total_blocks * sizeof(float));
+        memcpy(buffer.data() + total_blocks * sizeof(float), block_grid, total_blocks * sizeof(uint8_t));
+    }
     
     int cap_cx = cx;
     int cap_cz = cz;

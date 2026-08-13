@@ -12,7 +12,7 @@ namespace Config {
     constexpr float ISO_SURFACE = 0.0f;
 
     inline const std::string WORLD_NAME = "world_1";
-    constexpr int WORLD_SEED = 1234512;
+    constexpr int WORLD_SEED = 414412;
     
     constexpr int MAX_FPS = 120;
     constexpr int RENDER_DISTANCE = 6;

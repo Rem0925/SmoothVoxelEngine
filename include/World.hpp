@@ -29,6 +29,7 @@ public:
 
     void update(Vector3 player_pos);
     void draw(Camera3D camera);
+    void save_all();
 
     uint8_t get_block(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;

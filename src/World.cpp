@@ -101,6 +101,14 @@ void World::draw(Camera3D camera) {
     }
 }
 
+void World::save_all() {
+    for (auto& pair : chunks) {
+        if (pair.second->is_dirty) {
+            pair.second->save_to_disk();
+        }
+    }
+}
+
 Chunk* World::get_chunk(int cx, int cz) {
     auto key = std::make_pair(cx, cz);
     if (chunks.find(key) != chunks.end()) {
