@@ -36,4 +36,9 @@ public:
     void set_block(int wx, int wy, int wz, uint8_t type);
     
     Chunk* get_chunk(int cx, int cz);
+
+private:
+    void simulate_water();
+    void set_water_node(int wx, int wy, int wz, uint8_t level);
+    float water_timer = 0.0f;
 };

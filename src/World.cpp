@@ -7,6 +7,7 @@ ThreadPool global_thread_pool(Config::MAX_WORKER_THREADS);
 #include <cmath>
 #include <raymath.h>
 #include <algorithm>
+#include <cstdio>
 #include <vector>
 #include <utility>
 
@@ -62,6 +63,128 @@ void World::update(Vector3 player_pos) {
             chunks[key]->update_logic();
         }
     }
+    
+    water_timer += GetFrameTime();
+    if (water_timer >= 0.15f) {
+        water_timer = 0.0f;
+        simulate_water();
+    }
+}
+
+struct WaterEdit {
+    int x, y, z;
+    uint8_t level;
+};
+
+void World::simulate_water() {
+    std::vector<WaterEdit> edits;
+    edits.reserve(1024);
+
+    for (auto& pair : chunks) {
+        Chunk* c = pair.second.get();
+        if (!c->is_ready) continue;
+        if (edits.size() > 2000) break;
+
+        int cx = c->cx;
+        int cz = c->cz;
+        Chunk* nx_p = get_chunk(cx + 1, cz);
+        Chunk* nx_n = get_chunk(cx - 1, cz);
+        Chunk* nz_p = get_chunk(cx, cz + 1);
+        Chunk* nz_n = get_chunk(cx, cz - 1);
+
+        auto read_block = [&](int wx, int wy, int wz) -> uint8_t {
+            if (wy < 0 || wy >= Config::GRID_Y) return Config::AIR;
+            int lx = wx - cx * Config::CHUNK_SIZE;
+            int lz = wz - cz * Config::CHUNK_SIZE;
+            Chunk* target = c;
+            if (lx < 0) { target = nx_n; lx += Config::CHUNK_SIZE; }
+            else if (lx > Config::CHUNK_SIZE) { target = nx_p; lx -= Config::CHUNK_SIZE; }
+            if (lz < 0) { target = nz_n; lz += Config::CHUNK_SIZE; }
+            else if (lz > Config::CHUNK_SIZE) { target = nz_p; lz -= Config::CHUNK_SIZE; }
+            if (!target || !target->is_ready) return Config::AIR;
+            return target->get_block(lx, wy, lz);
+        };
+
+        auto read_level = [&](int wx, int wy, int wz) -> uint8_t {
+            if (wy < 0 || wy >= Config::GRID_Y) return 0;
+            int lx = wx - cx * Config::CHUNK_SIZE;
+            int lz = wz - cz * Config::CHUNK_SIZE;
+            Chunk* target = c;
+            if (lx < 0) { target = nx_n; lx += Config::CHUNK_SIZE; }
+            else if (lx > Config::CHUNK_SIZE) { target = nx_p; lx -= Config::CHUNK_SIZE; }
+            if (lz < 0) { target = nz_n; lz += Config::CHUNK_SIZE; }
+            else if (lz > Config::CHUNK_SIZE) { target = nz_p; lz -= Config::CHUNK_SIZE; }
+            if (!target || !target->is_ready) return 0;
+            return target->get_water_level(lx, wy, lz);
+        };
+
+        const int stride = Config::CHUNK_SIZE + 1;
+        for (int y = 1; y < Config::GRID_Y; ++y) {
+            for (int lz = 0; lz <= Config::CHUNK_SIZE; ++lz) {
+                for (int lx = 0; lx <= Config::CHUNK_SIZE; ++lx) {
+                    int i = y * stride * stride + lz * stride + lx;
+                    uint8_t L = c->water_level[i];
+                    if (L == 0) continue;
+
+                    int wx = cx * Config::CHUNK_SIZE + lx;
+                    int wz = cz * Config::CHUNK_SIZE + lz;
+
+                    // Fall
+                    if (read_block(wx, y - 1, wz) == Config::AIR) {
+                        edits.push_back({wx, y, wz, 0});
+                        edits.push_back({wx, y - 1, wz, L});
+                        continue;
+                    }
+
+                    // Ocean source refill (below sea level never drains)
+                    if (y <= (int)Config::WATER_LEVEL && L < 8) {
+                        edits.push_back({wx, y, wz, 8});
+                        continue;
+                    }
+
+                    // Horizontal spread (levels decay, flow terminates)
+                    if (L >= 2) {
+                        const int dirs[4][2] = { {1, 0}, {-1, 0}, {0, 1}, {0, -1} };
+                        for (int d = 0; d < 4; ++d) {
+                            int nwx = wx + dirs[d][0];
+                            int nwz = wz + dirs[d][1];
+                            int ncx = std::floor((float)nwx / Config::CHUNK_SIZE);
+                            int ncz = std::floor((float)nwz / Config::CHUNK_SIZE);
+                            Chunk* target_chunk = get_chunk(ncx, ncz);
+                            if (!target_chunk || !target_chunk->is_ready) continue;
+                            if (read_block(nwx, y, nwz) != Config::AIR) continue;
+                            uint8_t nl = read_level(nwx, y, nwz);
+                            if (nl < L - 1) {
+                                edits.push_back({nwx, y, nwz, (uint8_t)(L - 1)});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    for (const auto& e : edits) {
+        set_water_node(e.x, e.y, e.z, e.level);
+    }
+}
+
+void World::set_water_node(int wx, int wy, int wz, uint8_t level) {
+    if (wy < 0 || wy >= Config::GRID_Y) return;
+    int cx = std::floor((float)wx / CHUNK_SIZE);
+    int cz = std::floor((float)wz / CHUNK_SIZE);
+    int lx = wx - cx * CHUNK_SIZE;
+    int lz = wz - cz * CHUNK_SIZE;
+
+    auto apply = [&](int ccx, int ccz, int llx, int llz) {
+        Chunk* ch = get_chunk(ccx, ccz);
+        if (ch && ch->is_ready) ch->set_water_node(llx, wy, llz, level);
+    };
+
+    apply(cx, cz, lx, lz);
+    if (lx == 0) apply(cx - 1, cz, CHUNK_SIZE, lz);
+    if (lz == 0) apply(cx, cz - 1, lx, CHUNK_SIZE);
+    if (lx == 0 && lz == 0) apply(cx - 1, cz - 1, CHUNK_SIZE, CHUNK_SIZE);
 }
 
 void World::draw(Camera3D camera) {

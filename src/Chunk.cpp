@@ -15,6 +15,8 @@ Chunk::Chunk(int x, int z) : cx(x), cz(z) {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
     density_grid = new float[total_blocks];
     block_grid = new uint8_t[total_blocks];
+    water_level = new uint8_t[total_blocks];
+    std::memset(water_level, 0, total_blocks * sizeof(uint8_t));
 }
 
 Chunk::~Chunk() {
@@ -22,6 +24,7 @@ Chunk::~Chunk() {
     if (rebuild_future.valid()) rebuild_future.wait();
     if (density_grid) delete[] density_grid;
     if (block_grid) delete[] block_grid;
+    if (water_level) delete[] water_level;
     if (solid_mesh.vboId) UnloadMesh(solid_mesh);
     if (water_mesh.vboId) UnloadMesh(water_mesh);
     if (plants_mesh.vboId) UnloadMesh(plants_mesh);
@@ -238,7 +241,11 @@ void Chunk::generate_thread() {
         }
     }
 
-    build_mesh_data(density_grid, block_grid);
+    for (int i = 0; i < total_blocks; ++i) {
+        water_level[i] = (block_grid[i] == Config::WATER) ? 8 : 0;
+    }
+
+    build_mesh_data(density_grid, block_grid, water_level);
     needs_upload = true;
     is_ready = true;
 }
@@ -247,16 +254,18 @@ void Chunk::rebuild_thread() {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
     std::vector<float> d_copy(total_blocks);
     std::vector<uint8_t> b_copy(total_blocks);
+    std::vector<uint8_t> w_copy(total_blocks);
     {
         std::lock_guard<std::mutex> lock(chunk_mutex);
         memcpy(d_copy.data(), density_grid, total_blocks * sizeof(float));
         memcpy(b_copy.data(), block_grid, total_blocks * sizeof(uint8_t));
+        memcpy(w_copy.data(), water_level, total_blocks * sizeof(uint8_t));
     }
-    build_mesh_data(d_copy.data(), b_copy.data());
+    build_mesh_data(d_copy.data(), b_copy.data(), w_copy.data());
     needs_upload = true;
 }
 
-void Chunk::build_mesh_data(const float* density, const uint8_t* blocks) {
+void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water) {
     s_vertices.clear(); s_normals.clear(); s_uvs.clear(); s_uvs2.clear(); s_colors.clear();
     w_vertices.clear(); w_normals.clear(); w_uvs.clear(); w_uvs2.clear(); w_colors.clear();
     p_vertices.clear(); p_normals.clear(); p_uvs.clear(); p_colors.clear();
@@ -360,16 +369,31 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks) {
         }
     }
 
-    // 2. 2.5D Water Mesh
+    // 2. 2.5D Water Mesh (height-driven: flat ocean + pools + cascades)
     int wx = CHUNK_SIZE + 1;
     int wz = CHUNK_SIZE + 1;
     std::vector<float> lake_2d(wx * wz, 1.0f);
+    std::vector<float> col_height(wx * wz, 0.0f);
     
     for (int x = 0; x < wx; ++x) {
         for (int z = 0; z < wz; ++z) {
-            if (blocks[idx(x, (int)WATER_LEVEL, z)] == WATER || 
-                blocks[idx(x, (int)WATER_LEVEL - 1, z)] == WATER) {
+            float terrain_top = 0.0f;
+            float water_top = -100.0f;
+            for (int y = GRID_Y - 1; y >= 0; --y) {
+                int i = idx(x, y, z);
+                if (water_top < -50.0f && water[i] > 0) {
+                    water_top = (float)y + water[i] * (1.0f / 8.0f);
+                }
+                if (density[i] >= ISO_SURFACE) {
+                    terrain_top = (float)y + 0.5f;
+                    break;
+                }
+            }
+            if (water_top > -50.0f) {
                 lake_2d[z * wx + x] = -1.0f;
+                col_height[z * wx + x] = water_top;
+            } else {
+                col_height[z * wx + x] = terrain_top;
             }
         }
     }
@@ -388,6 +412,24 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks) {
     std::vector<Vector2> fw_uvs, fw_uvs2;
     std::vector<Color> fw_colors;
 
+    auto sample_height = [&](float px, float pz) -> float {
+        px = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, px));
+        pz = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, pz));
+        int x0 = (int)px;
+        int z0 = (int)pz;
+        int x1 = std::min(x0 + 1, (int)Config::CHUNK_SIZE);
+        int z1 = std::min(z0 + 1, (int)Config::CHUNK_SIZE);
+        float tx = px - x0;
+        float tz = pz - z0;
+        float h00 = col_height[z0 * wx + x0];
+        float h10 = col_height[z0 * wx + x1];
+        float h01 = col_height[z1 * wx + x0];
+        float h11 = col_height[z1 * wx + x1];
+        float h0 = h00 * (1.0f - tx) + h10 * tx;
+        float h1 = h01 * (1.0f - tx) + h11 * tx;
+        return h0 * (1.0f - tz) + h1 * tz;
+    };
+
     for (size_t i = 0; i < w_vertices.size(); i += 3) {
         Vector3 v0 = w_vertices[i];
         Vector3 v1 = w_vertices[i+1];
@@ -397,8 +439,9 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks) {
         float area = 0.5f * std::abs((v1.x - v0.x) * (v2.z - v0.z) - (v2.x - v0.x) * (v1.z - v0.z));
         if (area < 0.001f) continue;
         
-
-
+        v0.y = sample_height(v0.x, v0.z);
+        v1.y = sample_height(v1.x, v1.z);
+        v2.y = sample_height(v2.x, v2.z);
 
         auto get_foam_alpha = [&](Vector3 v) -> unsigned char {
             float fx = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, v.x));
@@ -464,10 +507,9 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks) {
     w_uvs2 = std::move(fw_uvs2);
     w_colors = std::move(fw_colors);
 
-    // Flatten and reposition water
+    // Reposition water (heights already sampled, only global x/z offset)
     for (auto& v : w_vertices) {
         v.x += cx * CHUNK_SIZE;
-        v.y = WATER_LEVEL - 0.05f;
         v.z += cz * CHUNK_SIZE;
     }
 }
@@ -638,6 +680,8 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
         density_grid[i] = 1.0f;
     }
     
+    water_level[i] = (type == Config::WATER) ? 8 : 0;
+    
     is_dirty = true;
 }
 
@@ -686,4 +730,28 @@ void Chunk::save_to_disk() {
 float Chunk::get_density(int x, int y, int z) const {
     if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return -1.0f;
     return density_grid[idx(x, y, z)];
+}
+
+uint8_t Chunk::get_water_level(int x, int y, int z) const {
+    if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return 0;
+    return water_level[idx(x, y, z)];
+}
+
+void Chunk::set_water_node(int x, int y, int z, uint8_t level) {
+    if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return;
+    std::lock_guard<std::mutex> lock(chunk_mutex);
+    int i = idx(x, y, z);
+    if (water_level[i] == level && (level > 0) == (block_grid[i] == Config::WATER)) return;
+    
+    if (level > 0) {
+        block_grid[i] = Config::WATER;
+        water_level[i] = (level > 8) ? 8 : level;
+        density_grid[i] = -1.0f;
+    } else {
+        block_grid[i] = Config::AIR;
+        water_level[i] = 0;
+        density_grid[i] = -1.0f;
+    }
+    
+    is_dirty = true;
 }

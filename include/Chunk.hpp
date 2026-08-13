@@ -18,6 +18,7 @@ public:
 
     float* density_grid = nullptr;
     uint8_t* block_grid = nullptr;
+    uint8_t* water_level = nullptr;
 
     Mesh solid_mesh = { 0 };
     Mesh water_mesh = { 0 };
@@ -46,6 +47,8 @@ public:
     uint8_t get_block(int x, int y, int z) const;
     float get_density(int x, int y, int z) const;
     void set_block(int x, int y, int z, uint8_t type);
+    uint8_t get_water_level(int x, int y, int z) const;
+    void set_water_node(int x, int y, int z, uint8_t level);
     void rebuild_mesh();
     void save_to_disk();
 
@@ -55,6 +58,6 @@ private:
     
     void generate_thread();
     void rebuild_thread();
-    void build_mesh_data(const float* density, const uint8_t* blocks);
+    void build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water);
     void upload_meshes();
 };
