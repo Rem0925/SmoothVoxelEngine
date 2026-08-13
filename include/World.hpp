@@ -2,6 +2,8 @@
 #include <unordered_map>
 #include <sqlite3.h>
 #include <mutex>
+#include <atomic>
+#include <thread>
 #include <memory>
 #include "Chunk.hpp"
 #include "ThreadPool.hpp"
@@ -20,7 +22,8 @@ extern std::mutex sqlite_mutex;
 
 class World {
 public:
-    std::unordered_map<std::pair<int, int>, std::unique_ptr<Chunk>, pair_hash> chunks;
+    std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash> chunks;
+    std::mutex chunks_mutex;
     Material mat_solid;
     Material mat_water;
     
@@ -30,6 +33,7 @@ public:
     void update(Vector3 player_pos);
     void draw(Camera3D camera);
     void save_all();
+    void stop_simulation();
 
     uint8_t get_block(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
@@ -39,6 +43,12 @@ public:
 
 private:
     void simulate_water();
-    void set_water_node(int wx, int wy, int wz, uint8_t level);
-    float water_timer = 0.0f;
+    void set_water_node(const std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash>& snap, int wx, int wy, int wz, uint8_t level);
+    void sim_loop();
+    void activate(int wx, int wy, int wz);
+    int upload_budget = 2;
+    std::thread sim_thread;
+    std::atomic<bool> sim_running{true};
+    std::vector<uint64_t> active_cells;
+    std::mutex active_mutex;
 };

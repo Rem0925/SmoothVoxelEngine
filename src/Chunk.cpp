@@ -21,7 +21,6 @@ Chunk::Chunk(int x, int z) : cx(x), cz(z) {
 
 Chunk::~Chunk() {
     if (gen_future.valid()) gen_future.wait();
-    if (rebuild_future.valid()) rebuild_future.wait();
     if (density_grid) delete[] density_grid;
     if (block_grid) delete[] block_grid;
     if (water_level) delete[] water_level;
@@ -255,14 +254,24 @@ void Chunk::rebuild_thread() {
     std::vector<float> d_copy(total_blocks);
     std::vector<uint8_t> b_copy(total_blocks);
     std::vector<uint8_t> w_copy(total_blocks);
-    {
-        std::lock_guard<std::mutex> lock(chunk_mutex);
-        memcpy(d_copy.data(), density_grid, total_blocks * sizeof(float));
-        memcpy(b_copy.data(), block_grid, total_blocks * sizeof(uint8_t));
-        memcpy(w_copy.data(), water_level, total_blocks * sizeof(uint8_t));
-    }
-    build_mesh_data(d_copy.data(), b_copy.data(), w_copy.data());
-    needs_upload = true;
+    rebuild_running = true;
+    int mode = rebuild_mode.exchange(0);
+    do {
+        {
+            std::lock_guard<std::mutex> lock(chunk_mutex);
+            memcpy(d_copy.data(), density_grid, total_blocks * sizeof(float));
+            memcpy(b_copy.data(), block_grid, total_blocks * sizeof(uint8_t));
+            memcpy(w_copy.data(), water_level, total_blocks * sizeof(uint8_t));
+        }
+        if (mode >= 2) {
+            build_mesh_data(d_copy.data(), b_copy.data(), w_copy.data());
+        } else {
+            build_water_mesh(d_copy.data(), w_copy.data());
+        }
+        needs_upload = true;
+        mode = rebuild_mode.exchange(0);
+    } while (mode != 0);
+    rebuild_running = false;
 }
 
 void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water) {
@@ -369,6 +378,12 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
         }
     }
 
+    build_water_mesh(density, water);
+}
+
+void Chunk::build_water_mesh(const float* density, const uint8_t* water) {
+    w_vertices.clear(); w_normals.clear(); w_uvs.clear(); w_uvs2.clear(); w_colors.clear();
+
     // 2. 2.5D Water Mesh (height-driven: flat ocean + pools + cascades)
     int wx = CHUNK_SIZE + 1;
     int wz = CHUNK_SIZE + 1;
@@ -382,7 +397,7 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
             for (int y = GRID_Y - 1; y >= 0; --y) {
                 int i = idx(x, y, z);
                 if (water_top < -50.0f && water[i] > 0) {
-                    water_top = (float)y + water[i] * (1.0f / 8.0f);
+                    water_top = (float)y + 0.5f + (water[i] - 8) * (1.0f / 8.0f);
                 }
                 if (density[i] >= ISO_SURFACE) {
                     terrain_top = (float)y + 0.5f;
@@ -619,22 +634,41 @@ void Chunk::upload_meshes() {
         }
         UploadMesh(&plants_mesh, false);
     }
+
+    if (!rebuild_running) {
+        std::vector<Vector3>().swap(s_vertices);
+        std::vector<Vector3>().swap(s_normals);
+        std::vector<Vector2>().swap(s_uvs);
+        std::vector<Vector2>().swap(s_uvs2);
+        std::vector<Color>().swap(s_colors);
+        std::vector<Vector3>().swap(w_vertices);
+        std::vector<Vector3>().swap(w_normals);
+        std::vector<Vector2>().swap(w_uvs);
+        std::vector<Vector2>().swap(w_uvs2);
+        std::vector<Color>().swap(w_colors);
+        std::vector<Vector3>().swap(p_vertices);
+        std::vector<Vector3>().swap(p_normals);
+        std::vector<Vector2>().swap(p_uvs);
+        std::vector<Color>().swap(p_colors);
+    }
 }
 
-void Chunk::update_logic() {
-    if (needs_upload) {
+void Chunk::update_logic(int& upload_budget) {
+    if (needs_upload && upload_budget > 0) {
         upload_meshes();
         needs_upload = false;
+        --upload_budget;
     }
     
     if (is_dirty) {
-        rebuild_mesh();
+        rebuild_mesh(water_only_rebuild.load());
+        water_only_rebuild = false;
         is_dirty = false;
     }
 }
 
 void Chunk::draw_solid(Material& mat_solid, Vector3 camera_pos) {
-    if (!is_ready || needs_upload) return;
+    if (!is_ready || (needs_upload && !s_vertices.empty())) return;
     
     if (solid_mesh.vboId) {
         DrawMesh(solid_mesh, mat_solid, MatrixIdentity());
@@ -653,7 +687,7 @@ void Chunk::draw_solid(Material& mat_solid, Vector3 camera_pos) {
 }
 
 void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
-    if (!is_ready || needs_upload) return;
+    if (!is_ready || (needs_upload && !w_vertices.empty())) return;
     
     if (water_mesh.vboId) {
         rlDisableBackfaceCulling();
@@ -683,13 +717,18 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
     water_level[i] = (type == Config::WATER) ? 8 : 0;
     
     is_dirty = true;
+    water_only_rebuild = false;
 }
 
-void Chunk::rebuild_mesh() {
-    if (rebuild_future.valid()) {
-        rebuild_future.wait();
+void Chunk::rebuild_mesh(bool water_only) {
+    int want = water_only ? 1 : 2;
+    int old = rebuild_mode.exchange(0);
+    if (old != 0) {
+        rebuild_mode.store(old > want ? old : want);
+        return;
     }
-    rebuild_future = global_thread_pool.enqueue([this] {
+    rebuild_mode.store(want);
+    global_thread_pool.enqueue([this] {
         this->rebuild_thread();
     });
 }
@@ -754,4 +793,5 @@ void Chunk::set_water_node(int x, int y, int z, uint8_t level) {
     }
     
     is_dirty = true;
+    water_only_rebuild = true;
 }

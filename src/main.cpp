@@ -10,6 +10,7 @@
 #include <rlgl.h>
 #include <filesystem>
 #include <fstream>
+#include <cstdio>
 #include <sqlite3.h>
 
 using namespace Config;
@@ -167,8 +168,9 @@ void DrawSkybox(Camera3D camera, Texture2D side, Texture2D top, Texture2D bottom
 }
 
 int main() {
+    SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(1280, 720, "Smooth Voxel Engine C++");
-    SetTargetFPS(MAX_FPS); 
+    SetTargetFPS(60); 
     DisableCursor();
 
     Texture2D spritesheet = LoadTexture("assets/textures/spritesheet_tiles.png");
@@ -744,6 +746,7 @@ int main() {
         out.close();
     }
     
+    world.stop_simulation();
     world.save_all();
     global_thread_pool.wait_idle();
     

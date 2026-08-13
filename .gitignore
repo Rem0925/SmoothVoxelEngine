@@ -46,3 +46,6 @@ Thumbs.db
 
 # External dependencies (FetchContent)
 _deps/
+
+# Save data
+worlds/
