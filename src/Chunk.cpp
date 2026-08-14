@@ -397,21 +397,43 @@ void Chunk::build_water_mesh(const float* density, const uint8_t* water) {
             for (int y = GRID_Y - 1; y >= 0; --y) {
                 int i = idx(x, y, z);
                 if (water_top < -50.0f && water[i] > 0) {
-                    water_top = (float)y + 0.5f + (water[i] - 8) * (1.0f / 8.0f);
+                    water_top = (float)y + 0 + (water[i] - 8) * (1.0f / 8.0f);
                 }
                 if (density[i] >= ISO_SURFACE) {
                     terrain_top = (float)y + 0.5f;
                     break;
                 }
             }
+            terrain_top = std::max(terrain_top, 0.0f);
             if (water_top > -50.0f) {
                 lake_2d[z * wx + x] = -1.0f;
                 col_height[z * wx + x] = water_top;
             } else {
-                col_height[z * wx + x] = terrain_top;
+                col_height[z * wx + x] = -100.0f; // mark as land
             }
         }
     }
+
+    // Second pass: flatten shores by copying adjacent water heights to land nodes
+    std::vector<float> final_col = col_height;
+    for (int x = 0; x < wx; ++x) {
+        for (int z = 0; z < wz; ++z) {
+            if (col_height[z * wx + x] < -50.0f) {
+                float max_h = -100.0f;
+                if (x > 0 && col_height[z * wx + (x-1)] > -50.0f) max_h = std::max(max_h, col_height[z * wx + (x-1)]);
+                if (x < wx-1 && col_height[z * wx + (x+1)] > -50.0f) max_h = std::max(max_h, col_height[z * wx + (x+1)]);
+                if (z > 0 && col_height[(z-1) * wx + x] > -50.0f) max_h = std::max(max_h, col_height[(z-1) * wx + x]);
+                if (z < wz-1 && col_height[(z+1) * wx + x] > -50.0f) max_h = std::max(max_h, col_height[(z+1) * wx + x]);
+                
+                if (max_h > -50.0f) {
+                    final_col[z * wx + x] = max_h;
+                } else {
+                    final_col[z * wx + x] = 0.0f; // fallback
+                }
+            }
+        }
+    }
+    col_height = final_col;
 
     std::vector<float> mini_grid(wx * 2 * wz, 1.0f);
     for (int x = 0; x < wx; ++x) {
