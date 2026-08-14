@@ -410,18 +410,7 @@ int main() {
                     if (broken_block != AIR && broken_block != WATER) {
                         ui.add_resource(broken_block);
                     }
-                    bool fill_water = false;
-                    if (target_solid.y <= Config::WATER_LEVEL) { 
-                        if (world.get_block(target_solid.x+1, target_solid.y, target_solid.z) == Config::WATER ||
-                            world.get_block(target_solid.x-1, target_solid.y, target_solid.z) == Config::WATER ||
-                            world.get_block(target_solid.x, target_solid.y, target_solid.z+1) == Config::WATER ||
-                            world.get_block(target_solid.x, target_solid.y, target_solid.z-1) == Config::WATER ||
-                            world.get_block(target_solid.x, target_solid.y+1, target_solid.z) == Config::WATER ||
-                            world.get_block(target_solid.x, target_solid.y-1, target_solid.z) == Config::WATER) {
-                            fill_water = true;
-                        }
-                    }
-                    world.set_block(target_solid.x, target_solid.y, target_solid.z, fill_water ? Config::WATER : AIR);
+                    world.set_block(target_solid.x, target_solid.y, target_solid.z, AIR);
                 } 
                 else if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && ui.selected_slot != 0) {
                     if (ui.slots[ui.selected_slot].count > 0) {

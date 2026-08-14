@@ -255,8 +255,14 @@ void Chunk::rebuild_thread() {
     std::vector<uint8_t> b_copy(total_blocks);
     std::vector<uint8_t> w_copy(total_blocks);
     rebuild_running = true;
-    int mode = rebuild_mode.exchange(0);
-    do {
+    int mode;
+    for (;;) {
+        {
+            std::lock_guard<std::mutex> lock(rebuild_mutex);
+            mode = rebuild_mode;
+            rebuild_mode = 0;
+        }
+        if (mode == 0) break;
         {
             std::lock_guard<std::mutex> lock(chunk_mutex);
             memcpy(d_copy.data(), density_grid, total_blocks * sizeof(float));
@@ -265,25 +271,30 @@ void Chunk::rebuild_thread() {
         }
         if (mode >= 2) {
             build_mesh_data(d_copy.data(), b_copy.data(), w_copy.data());
+            pending_upload_mask.fetch_or(3);
         } else {
-            build_water_mesh(d_copy.data(), w_copy.data());
+            build_water_mesh(d_copy.data(), b_copy.data(), w_copy.data());
+            pending_upload_mask.fetch_or(1);
         }
-        needs_upload = true;
-        mode = rebuild_mode.exchange(0);
-    } while (mode != 0);
+    }
     rebuild_running = false;
+    needs_upload = true;
 }
 
 void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water) {
-    s_vertices.clear(); s_normals.clear(); s_uvs.clear(); s_uvs2.clear(); s_colors.clear();
-    w_vertices.clear(); w_normals.clear(); w_uvs.clear(); w_uvs2.clear(); w_colors.clear();
-    p_vertices.clear(); p_normals.clear(); p_uvs.clear(); p_colors.clear();
+    std::vector<Vector3> ls_vertices, ls_normals;
+    std::vector<Vector2> ls_uvs, ls_uvs2;
+    std::vector<Color> ls_colors;
+
+    std::vector<Vector3> lp_vertices, lp_normals;
+    std::vector<Vector2> lp_uvs;
+    std::vector<Color> lp_colors;
 
     // 1. Terrain Mesh (Marching Cubes)
-    mc::generate(density, blocks, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, s_vertices, s_normals, s_uvs, s_uvs2, s_colors);
+    mc::generate(density, blocks, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors);
     
     // Remap vertices to global coords
-    for (auto& v : s_vertices) {
+    for (auto& v : ls_vertices) {
         v.x += cx * CHUNK_SIZE;
         v.z += cz * CHUNK_SIZE;
     }
@@ -291,12 +302,12 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
     // [Water and plants... omitted for brevity, I will update water separately]
     
     // Tall Grass Generation
-    for (size_t i = 0; i < s_vertices.size(); i += 3) {
-        Vector3 n = s_normals[i];
+    for (size_t i = 0; i < ls_vertices.size(); i += 3) {
+        Vector3 n = ls_normals[i];
         if (n.y > 0.8f) { // Allow grass on slightly steeper slopes
-            Vector3 center = { (s_vertices[i].x + s_vertices[i+1].x + s_vertices[i+2].x) / 3.0f,
-                               (s_vertices[i].y + s_vertices[i+1].y + s_vertices[i+2].y) / 3.0f,
-                               (s_vertices[i].z + s_vertices[i+1].z + s_vertices[i+2].z) / 3.0f };
+            Vector3 center = { (ls_vertices[i].x + ls_vertices[i+1].x + ls_vertices[i+2].x) / 3.0f,
+                               (ls_vertices[i].y + ls_vertices[i+1].y + ls_vertices[i+2].y) / 3.0f,
+                               (ls_vertices[i].z + ls_vertices[i+1].z + ls_vertices[i+2].z) / 3.0f };
                                
             int lx = std::floor(center.x) - cx * CHUNK_SIZE;
             int ly = std::floor(center.y);
@@ -360,15 +371,15 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
                     Color col = WHITE;
                     
                     auto add_quad = [&](Vector3* v) {
-                        p_vertices.push_back(v[0]); p_vertices.push_back(v[1]); p_vertices.push_back(v[2]);
-                        p_vertices.push_back(v[0]); p_vertices.push_back(v[2]); p_vertices.push_back(v[3]);
+                        lp_vertices.push_back(v[0]); lp_vertices.push_back(v[1]); lp_vertices.push_back(v[2]);
+                        lp_vertices.push_back(v[0]); lp_vertices.push_back(v[2]); lp_vertices.push_back(v[3]);
                         
                         for(int j=0; j<6; j++) {
-                            p_normals.push_back(nor); p_colors.push_back(col);
+                            lp_normals.push_back(nor); lp_colors.push_back(col);
                         }
                         
-                        p_uvs.push_back(uvs[0]); p_uvs.push_back(uvs[1]); p_uvs.push_back(uvs[2]);
-                        p_uvs.push_back(uvs[0]); p_uvs.push_back(uvs[2]); p_uvs.push_back(uvs[3]);
+                        lp_uvs.push_back(uvs[0]); lp_uvs.push_back(uvs[1]); lp_uvs.push_back(uvs[2]);
+                        lp_uvs.push_back(uvs[0]); lp_uvs.push_back(uvs[2]); lp_uvs.push_back(uvs[3]);
                     };
                     
                     add_quad(q1_v);
@@ -378,72 +389,90 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
         }
     }
 
-    build_water_mesh(density, water);
+    {
+        std::lock_guard<std::mutex> lock(mesh_mutex);
+        s_vertices = std::move(ls_vertices);
+        s_normals = std::move(ls_normals);
+        s_uvs = std::move(ls_uvs);
+        s_uvs2 = std::move(ls_uvs2);
+        s_colors = std::move(ls_colors);
+
+        p_vertices = std::move(lp_vertices);
+        p_normals = std::move(lp_normals);
+        p_uvs = std::move(lp_uvs);
+        p_colors = std::move(lp_colors);
+    }
+
+    build_water_mesh(density, blocks, water);
 }
 
-void Chunk::build_water_mesh(const float* density, const uint8_t* water) {
-    w_vertices.clear(); w_normals.clear(); w_uvs.clear(); w_uvs2.clear(); w_colors.clear();
+void Chunk::build_water_mesh(const float* density, const uint8_t* blocks, const uint8_t* water) {
+    std::vector<Vector3> lw_vertices, lw_normals;
+    std::vector<Vector2> lw_uvs, lw_uvs2;
+    std::vector<Color> lw_colors;
 
-    // 2. 2.5D Water Mesh (height-driven: flat ocean + pools + cascades)
     int wx = CHUNK_SIZE + 1;
     int wz = CHUNK_SIZE + 1;
-    std::vector<float> lake_2d(wx * wz, 1.0f);
-    std::vector<float> col_height(wx * wz, 0.0f);
+    std::vector<float> col_height(wx * wz, -100.0f);
     
     for (int x = 0; x < wx; ++x) {
         for (int z = 0; z < wz; ++z) {
-            float terrain_top = 0.0f;
             float water_top = -100.0f;
             for (int y = GRID_Y - 1; y >= 0; --y) {
                 int i = idx(x, y, z);
                 if (water_top < -50.0f && water[i] > 0) {
-                    water_top = (float)y + 0 + (water[i] - 8) * (1.0f / 8.0f);
+                    float drop = 0.05f + (8 - water[i]) * 0.10f;
+                    water_top = (float)y - drop;
                 }
                 if (density[i] >= ISO_SURFACE) {
-                    terrain_top = (float)y + 0.5f;
                     break;
                 }
             }
-            terrain_top = std::max(terrain_top, 0.0f);
             if (water_top > -50.0f) {
-                lake_2d[z * wx + x] = -1.0f;
                 col_height[z * wx + x] = water_top;
-            } else {
-                col_height[z * wx + x] = -100.0f; // mark as land
             }
         }
     }
 
-    // Second pass: flatten shores by copying adjacent water heights to land nodes
-    std::vector<float> final_col = col_height;
-    for (int x = 0; x < wx; ++x) {
-        for (int z = 0; z < wz; ++z) {
-            if (col_height[z * wx + x] < -50.0f) {
-                float max_h = -100.0f;
-                if (x > 0 && col_height[z * wx + (x-1)] > -50.0f) max_h = std::max(max_h, col_height[z * wx + (x-1)]);
-                if (x < wx-1 && col_height[z * wx + (x+1)] > -50.0f) max_h = std::max(max_h, col_height[z * wx + (x+1)]);
-                if (z > 0 && col_height[(z-1) * wx + x] > -50.0f) max_h = std::max(max_h, col_height[(z-1) * wx + x]);
-                if (z < wz-1 && col_height[(z+1) * wx + x] > -50.0f) max_h = std::max(max_h, col_height[(z+1) * wx + x]);
-                
-                if (max_h > -50.0f) {
-                    final_col[z * wx + x] = max_h;
-                } else {
-                    final_col[z * wx + x] = 0.0f; // fallback
+    // Extend water heights to adjacent land columns so shore bilinear interpolation remains flat
+    std::vector<float> smoothed_height = col_height;
+    for (int pass = 0; pass < 3; ++pass) {
+        std::vector<float> temp = smoothed_height;
+        for (int x = 0; x < wx; ++x) {
+            for (int z = 0; z < wz; ++z) {
+                if (smoothed_height[z * wx + x] < -50.0f) {
+                    float max_h = -100.0f;
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        for (int dz = -1; dz <= 1; ++dz) {
+                            int nx = x + dx;
+                            int nz = z + dz;
+                            if (nx >= 0 && nx < wx && nz >= 0 && nz < wz) {
+                                if (smoothed_height[nz * wx + nx] > -50.0f) {
+                                    max_h = std::max(max_h, smoothed_height[nz * wx + nx]);
+                                }
+                            }
+                        }
+                    }
+                    if (max_h > -50.0f) {
+                        temp[z * wx + x] = max_h;
+                    }
                 }
             }
         }
+        smoothed_height = temp;
     }
-    col_height = final_col;
+    col_height = smoothed_height;
 
-    std::vector<float> mini_grid(wx * 2 * wz, 1.0f);
-    for (int x = 0; x < wx; ++x) {
-        for (int z = 0; z < wz; ++z) {
-            mini_grid[0 * (wx * wz) + z * wx + x] = 1.0f; // top layer
-            mini_grid[1 * (wx * wz) + z * wx + x] = lake_2d[z * wx + x]; // bottom layer
+    // 3D volumetric Marching Cubes
+    int total_blocks = wx * GRID_Y * wz;
+    std::vector<float> water_density(total_blocks, 1.0f);
+    for (int i = 0; i < total_blocks; ++i) {
+        if (blocks[i] == Config::WATER) {
+            water_density[i] = -1.0f;
         }
     }
 
-    mc::generate(mini_grid.data(), nullptr, wx, 2, wz, ISO_SURFACE, Config::WATER, w_vertices, w_normals, w_uvs, w_uvs2, w_colors);
+    mc::generate(water_density.data(), blocks, wx, GRID_Y, wz, ISO_SURFACE, Config::WATER, lw_vertices, lw_normals, lw_uvs, lw_uvs2, lw_colors);
 
     std::vector<Vector3> fw_vertices, fw_normals;
     std::vector<Vector2> fw_uvs, fw_uvs2;
@@ -467,96 +496,125 @@ void Chunk::build_water_mesh(const float* density, const uint8_t* water) {
         return h0 * (1.0f - tz) + h1 * tz;
     };
 
-    for (size_t i = 0; i < w_vertices.size(); i += 3) {
-        Vector3 v0 = w_vertices[i];
-        Vector3 v1 = w_vertices[i+1];
-        Vector3 v2 = w_vertices[i+2];
-
-        // Área en el plano XZ para detectar paredes degeneradas por el aplanamiento
-        float area = 0.5f * std::abs((v1.x - v0.x) * (v2.z - v0.z) - (v2.x - v0.x) * (v1.z - v0.z));
-        if (area < 0.001f) continue;
+    auto get_foam_alpha = [&](Vector3 v) -> unsigned char {
+        float fx = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, v.x));
+        float fz = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, v.z));
         
-        v0.y = sample_height(v0.x, v0.z);
-        v1.y = sample_height(v1.x, v1.z);
-        v2.y = sample_height(v2.x, v2.z);
-
-        auto get_foam_alpha = [&](Vector3 v) -> unsigned char {
-            float fx = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, v.x));
-            float fz = std::max(0.0f, std::min((float)Config::CHUNK_SIZE, v.z));
+        int x0 = (int)fx;
+        int z0 = (int)fz;
+        int x1 = std::min(x0 + 1, (int)Config::CHUNK_SIZE);
+        int z1 = std::min(z0 + 1, (int)Config::CHUNK_SIZE);
+        
+        float tx = fx - x0;
+        float tz = fz - z0;
+        
+        int w = Config::CHUNK_SIZE + 1;
+        auto get_d = [&](int x, int y, int z) {
+            if (y < 0 || y >= Config::GRID_Y) return 0.0f;
+            int idx = y * w * w + z * w + x;
+            return density[idx];
+        };
+        
+        float exact_depth = 3.0f; // Default deep
+        int base_y = std::round(v.y);
+        
+        for (int dy = 0; dy <= 2; ++dy) {
+            int y = base_y - dy;
+            float d00 = get_d(x0, y, z0);
+            float d10 = get_d(x1, y, z0);
+            float d01 = get_d(x0, y, z1);
+            float d11 = get_d(x1, y, z1);
             
-            int x0 = (int)fx;
-            int z0 = (int)fz;
-            int x1 = std::min(x0 + 1, (int)Config::CHUNK_SIZE);
-            int z1 = std::min(z0 + 1, (int)Config::CHUNK_SIZE);
+            float d0 = d00 * (1.0f - tx) + d10 * tx;
+            float d1 = d01 * (1.0f - tx) + d11 * tx;
+            float d = d0 * (1.0f - tz) + d1 * tz;
             
-            float tx = fx - x0;
-            float tz = fz - z0;
-            
-            int w = Config::CHUNK_SIZE + 1;
-            auto get_d = [&](int x, int y, int z) {
-                if (y < 0 || y >= Config::GRID_Y) return 0.0f;
-                int idx = y * w * w + z * w + x;
-                return density[idx];
-            };
-            
-            float exact_depth = 3.0f; // Default deep
-            
-            // Search downwards from WATER_LEVEL to properly detect underwater blocks (like user placed blocks)
-            for (int dy = 0; dy <= 2; ++dy) {
-                int y = (int)Config::WATER_LEVEL - dy;
-                float d00 = get_d(x0, y, z0);
-                float d10 = get_d(x1, y, z0);
-                float d01 = get_d(x0, y, z1);
-                float d11 = get_d(x1, y, z1);
-                
-                float d0 = d00 * (1.0f - tx) + d10 * tx;
-                float d1 = d01 * (1.0f - tx) + d11 * tx;
-                float d = d0 * (1.0f - tz) + d1 * tz;
-                
-                if (d >= 0.0f) {
-                    exact_depth = (float)dy - d;
-                    if (exact_depth < 0.0f) exact_depth = 0.0f;
-                    break;
-                }
+            if (d >= 0.0f) {
+                exact_depth = (float)dy - d;
+                if (exact_depth < 0.0f) exact_depth = 0.0f;
+                break;
             }
-            
-            float max_depth = 2.0f; 
-            float normalized = exact_depth / max_depth;
-            normalized = std::max(0.0f, std::min(1.0f, normalized));
-            
-            return (unsigned char)((1.0f - normalized) * 255.0f);
+        }
+        
+        float max_depth = 2.0f; 
+        float normalized = exact_depth / max_depth;
+        normalized = std::max(0.0f, std::min(1.0f, normalized));
+        
+        return (unsigned char)((1.0f - normalized) * 255.0f);
+    };
+
+    for (size_t i = 0; i < lw_vertices.size(); i += 3) {
+        Vector3 v0 = lw_vertices[i];
+        Vector3 v1 = lw_vertices[i+1];
+        Vector3 v2 = lw_vertices[i+2];
+
+        auto apply_slant = [&](Vector3& v) {
+            float sh = sample_height(v.x, v.z);
+            if (sh > 0.0f && v.y > sh - 0.5f) {
+                v.y = sh;
+            }
         };
 
+        apply_slant(v0);
+        apply_slant(v1);
+        apply_slant(v2);
+
+        // Recalculate normal for triangles
+        Vector3 u = { v1.x - v0.x, v1.y - v0.y, v1.z - v0.z };
+        Vector3 v = { v2.x - v0.x, v2.y - v0.y, v2.z - v0.z };
+        Vector3 n = {
+            u.y * v.z - u.z * v.y,
+            u.z * v.x - u.x * v.z,
+            u.x * v.y - u.y * v.x
+        };
+        float len = std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
+        if (len < 0.0001f) {
+            continue;
+        }
+        n.x /= len; n.y /= len; n.z /= len;
+
         fw_vertices.push_back(v0); fw_vertices.push_back(v1); fw_vertices.push_back(v2);
-        fw_normals.push_back({0.0f, 1.0f, 0.0f}); fw_normals.push_back({0.0f, 1.0f, 0.0f}); fw_normals.push_back({0.0f, 1.0f, 0.0f});
-        fw_uvs.push_back(w_uvs[i]); fw_uvs.push_back(w_uvs[i+1]); fw_uvs.push_back(w_uvs[i+2]);
-        fw_uvs2.push_back(w_uvs2[i]); fw_uvs2.push_back(w_uvs2[i+1]); fw_uvs2.push_back(w_uvs2[i+2]);
+        fw_normals.push_back(n); fw_normals.push_back(n); fw_normals.push_back(n);
+        fw_uvs.push_back(lw_uvs[i]); fw_uvs.push_back(lw_uvs[i+1]); fw_uvs.push_back(lw_uvs[i+2]);
+        fw_uvs2.push_back(lw_uvs2[i]); fw_uvs2.push_back(lw_uvs2[i+1]); fw_uvs2.push_back(lw_uvs2[i+2]);
         
-        Color c0 = w_colors[i]; c0.a = get_foam_alpha(v0);
-        Color c1 = w_colors[i+1]; c1.a = get_foam_alpha(v1);
-        Color c2 = w_colors[i+2]; c2.a = get_foam_alpha(v2);
+        Color c0 = lw_colors[i]; c0.a = get_foam_alpha(v0);
+        Color c1 = lw_colors[i+1]; c1.a = get_foam_alpha(v1);
+        Color c2 = lw_colors[i+2]; c2.a = get_foam_alpha(v2);
         fw_colors.push_back(c0); fw_colors.push_back(c1); fw_colors.push_back(c2);
     }
 
-    w_vertices = std::move(fw_vertices);
-    w_normals = std::move(fw_normals);
-    w_uvs = std::move(fw_uvs);
-    w_uvs2 = std::move(fw_uvs2);
-    w_colors = std::move(fw_colors);
-
     // Reposition water (heights already sampled, only global x/z offset)
-    for (auto& v : w_vertices) {
+    for (auto& v : fw_vertices) {
         v.x += cx * CHUNK_SIZE;
         v.z += cz * CHUNK_SIZE;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mesh_mutex);
+        w_vertices = std::move(fw_vertices);
+        w_normals = std::move(fw_normals);
+        w_uvs = std::move(fw_uvs);
+        w_uvs2 = std::move(fw_uvs2);
+        w_colors = std::move(fw_colors);
     }
 }
 
 void Chunk::upload_meshes() {
-    if (solid_mesh.vboId) UnloadMesh(solid_mesh);
-    if (water_mesh.vboId) UnloadMesh(water_mesh);
-    if (plants_mesh.vboId) UnloadMesh(plants_mesh);
+    int mask = pending_upload_mask.exchange(0);
+    if (mask == 0) mask = 3; // Fallback to all if called directly
 
-    solid_mesh = { 0 }; water_mesh = { 0 }; plants_mesh = { 0 };
+    std::lock_guard<std::mutex> lock(mesh_mutex);
+
+    if ((mask & 2) != 0) {
+        if (solid_mesh.vboId) UnloadMesh(solid_mesh);
+        if (plants_mesh.vboId) UnloadMesh(plants_mesh);
+        solid_mesh = { 0 }; plants_mesh = { 0 };
+    }
+    if ((mask & 1) != 0) {
+        if (water_mesh.vboId) UnloadMesh(water_mesh);
+        water_mesh = { 0 };
+    }
 
     if (!s_vertices.empty()) {
         solid_mesh.vertexCount = s_vertices.size();
@@ -631,7 +689,6 @@ void Chunk::upload_meshes() {
         plants_mesh.vertices = (float*)MemAlloc(p_vertices.size() * 3 * sizeof(float));
         plants_mesh.normals = (float*)MemAlloc(p_normals.size() * 3 * sizeof(float));
         plants_mesh.texcoords = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
-        plants_mesh.texcoords2 = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
         plants_mesh.colors = (unsigned char*)MemAlloc(p_colors.size() * 4 * sizeof(unsigned char));
 
         for (size_t i = 0; i < p_vertices.size(); i++) {
@@ -645,9 +702,6 @@ void Chunk::upload_meshes() {
             
             plants_mesh.texcoords[i*2] = p_uvs[i].x;
             plants_mesh.texcoords[i*2+1] = p_uvs[i].y;
-
-            plants_mesh.texcoords2[i*2] = p_uvs[i].x;
-            plants_mesh.texcoords2[i*2+1] = p_uvs[i].y;
             
             plants_mesh.colors[i*4] = p_colors[i].r;
             plants_mesh.colors[i*4+1] = p_colors[i].g;
@@ -658,20 +712,24 @@ void Chunk::upload_meshes() {
     }
 
     if (!rebuild_running) {
-        std::vector<Vector3>().swap(s_vertices);
-        std::vector<Vector3>().swap(s_normals);
-        std::vector<Vector2>().swap(s_uvs);
-        std::vector<Vector2>().swap(s_uvs2);
-        std::vector<Color>().swap(s_colors);
-        std::vector<Vector3>().swap(w_vertices);
-        std::vector<Vector3>().swap(w_normals);
-        std::vector<Vector2>().swap(w_uvs);
-        std::vector<Vector2>().swap(w_uvs2);
-        std::vector<Color>().swap(w_colors);
-        std::vector<Vector3>().swap(p_vertices);
-        std::vector<Vector3>().swap(p_normals);
-        std::vector<Vector2>().swap(p_uvs);
-        std::vector<Color>().swap(p_colors);
+        if ((mask & 2) != 0) {
+            std::vector<Vector3>().swap(s_vertices);
+            std::vector<Vector3>().swap(s_normals);
+            std::vector<Vector2>().swap(s_uvs);
+            std::vector<Vector2>().swap(s_uvs2);
+            std::vector<Color>().swap(s_colors);
+            std::vector<Vector3>().swap(p_vertices);
+            std::vector<Vector3>().swap(p_normals);
+            std::vector<Vector2>().swap(p_uvs);
+            std::vector<Color>().swap(p_colors);
+        }
+        if ((mask & 1) != 0) {
+            std::vector<Vector3>().swap(w_vertices);
+            std::vector<Vector3>().swap(w_normals);
+            std::vector<Vector2>().swap(w_uvs);
+            std::vector<Vector2>().swap(w_uvs2);
+            std::vector<Color>().swap(w_colors);
+        }
     }
 }
 
@@ -712,9 +770,7 @@ void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
     if (!is_ready || (needs_upload && !w_vertices.empty())) return;
     
     if (water_mesh.vboId) {
-        rlDisableBackfaceCulling();
         DrawMesh(water_mesh, mat_water, MatrixIdentity());
-        rlEnableBackfaceCulling();
     }
 }
 
@@ -744,9 +800,10 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
 
 void Chunk::rebuild_mesh(bool water_only) {
     int want = water_only ? 1 : 2;
-    int old = rebuild_mode.exchange(0);
-    if (old != 0) {
-        rebuild_mode.store(old > want ? old : want);
+    std::lock_guard<std::mutex> lock(rebuild_mutex);
+    int current = rebuild_mode.load();
+    if (current != 0) {
+        rebuild_mode.store(current > want ? current : want);
         return;
     }
     rebuild_mode.store(want);

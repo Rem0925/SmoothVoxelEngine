@@ -16,8 +16,11 @@ public:
     std::atomic<int> rebuild_mode{0};
     std::atomic<bool> rebuild_running{false};
     std::atomic<bool> water_only_rebuild{false};
+    std::atomic<int> pending_upload_mask{0};
     
     std::mutex chunk_mutex;
+    std::mutex rebuild_mutex;
+    std::mutex mesh_mutex;
 
     float* density_grid = nullptr;
     uint8_t* block_grid = nullptr;
@@ -61,6 +64,6 @@ private:
     void generate_thread();
     void rebuild_thread();
     void build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water);
-    void build_water_mesh(const float* density, const uint8_t* water);
+    void build_water_mesh(const float* density, const uint8_t* blocks, const uint8_t* water);
     void upload_meshes();
 };

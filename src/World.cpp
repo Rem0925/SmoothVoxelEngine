@@ -4,6 +4,7 @@
 sqlite3* db = nullptr;
 std::mutex sqlite_mutex;
 ThreadPool global_thread_pool(Config::MAX_WORKER_THREADS);
+#include <rlgl.h>
 #include <cmath>
 #include <raymath.h>
 #include <algorithm>
@@ -89,13 +90,14 @@ struct WaterEdit {
 };
 
 static inline uint64_t cell_key(int wx, int wy, int wz) {
-    return (uint64_t)(wx + (1 << 20)) | ((uint64_t)(wy + 32) << 21) | ((uint64_t)(wz + (1 << 20)) << 42);
+    // wx: 21 bits (0-20), wy: 7 bits (21-27, offset 32 cubre 0..63), wz: 21 bits (28-48)
+    return (uint64_t)(wx + (1 << 20)) | ((uint64_t)(wy + 32) << 21) | ((uint64_t)(wz + (1 << 20)) << 28);
 }
 
 static inline void cell_decode(uint64_t k, int& wx, int& wy, int& wz) {
     wx = (int)(k & 0x1FFFFF) - (1 << 20);
-    wy = (int)((k >> 21) & 0x3F) - 32;
-    wz = (int)((k >> 42) & 0x1FFFFF) - (1 << 20);
+    wy = (int)((k >> 21) & 0x7F) - 32;
+    wz = (int)((k >> 28) & 0x1FFFFF) - (1 << 20);
 }
 
 void World::activate(int wx, int wy, int wz) {
@@ -186,33 +188,68 @@ void World::simulate_water() {
             return target->get_water_level(tl, wy2, tlz);
         };
 
-        // Fall
-        if (read_block(wx, wy - 1, wz) == Config::AIR) {
-            edits.push_back({wx, wy, wz, 0});
-            edits.push_back({wx, wy - 1, wz, L});
-            add_neighborhood(wx, wy, wz);
-            add_neighborhood(wx, wy - 1, wz);
-            continue;
-        }
+        bool is_source = (L == 8);
+        uint8_t expected = 0;
 
-        // Ocean source refill (below sea level never drains)
-        if (wy <= (int)Config::WATER_LEVEL && L < 8) {
-            edits.push_back({wx, wy, wz, 8});
-            add_neighborhood(wx, wy, wz);
-            continue;
-        }
-
-        // Horizontal spread (levels decay, flow terminates)
-        if (L >= 2) {
+        if (is_source) {
+            expected = 8;
+        } else {
+            // Check for infinite water source generation (2 adjacent sources + solid below)
+            int source_count = 0;
             for (int d = 0; d < 4; ++d) {
-                int nwx = wx + dirs[d][0];
-                int nwz = wz + dirs[d][1];
-                if (!get_target(nwx, nwz)) continue;
-                if (read_block(nwx, wy, nwz) != Config::AIR) continue;
-                uint8_t nl = read_level(nwx, wy, nwz);
-                if (nl < L - 1) {
-                    edits.push_back({nwx, wy, nwz, (uint8_t)(L - 1)});
-                    add_neighborhood(nwx, wy, nwz);
+                if (read_level(wx + dirs[d][0], wy, wz + dirs[d][1]) == 8) source_count++;
+            }
+            
+            bool has_solid_below = false;
+            if (wy > 0) {
+                uint8_t below = read_block(wx, wy - 1, wz);
+                if (below != Config::AIR && below != Config::WATER) has_solid_below = true;
+            } else {
+                has_solid_below = true;
+            }
+
+            if (source_count >= 2 && has_solid_below) {
+                expected = 8;
+            } else {
+                uint8_t above = read_level(wx, wy + 1, wz);
+                if (above > 0) {
+                    expected = 7;
+                } else {
+                    for (int d = 0; d < 4; ++d) {
+                        uint8_t nL = read_level(wx + dirs[d][0], wy, wz + dirs[d][1]);
+                        if (nL == 8) expected = std::max(expected, (uint8_t)7);
+                        else if (nL > 1 && nL <= 7) expected = std::max(expected, (uint8_t)(nL - 1));
+                    }
+                }
+            }
+        }
+
+        if (L != expected) {
+            edits.push_back({wx, wy, wz, expected});
+            add_neighborhood(wx, wy, wz);
+        }
+
+        if (expected > 0) {
+            bool can_fall = (wy > 0 && (read_block(wx, wy - 1, wz) == Config::AIR || read_block(wx, wy - 1, wz) == Config::WATER));
+            
+            if (can_fall) {
+                uint8_t below = read_level(wx, wy - 1, wz);
+                if (below != 7 && below != 8) {
+                    edits.push_back({wx, wy - 1, wz, 7});
+                    add_neighborhood(wx, wy - 1, wz);
+                }
+            } else if (expected > 1) {
+                for (int d = 0; d < 4; ++d) {
+                    int nwx = wx + dirs[d][0];
+                    int nwz = wz + dirs[d][1];
+                    uint8_t nb = read_block(nwx, wy, nwz);
+                    if (nb == Config::AIR || nb == Config::WATER) {
+                        uint8_t nl = read_level(nwx, wy, nwz);
+                        if (nl < expected - 1) {
+                            edits.push_back({nwx, wy, nwz, (uint8_t)(expected - 1)});
+                            add_neighborhood(nwx, wy, nwz);
+                        }
+                    }
                 }
             }
         }
@@ -278,11 +315,21 @@ void World::draw(Camera3D camera) {
     }
     
     // Pass 2: Transparent geometry (Water)
+    int cam_x = std::floor(camera.position.x);
+    int cam_y = std::floor(camera.position.y);
+    int cam_z = std::floor(camera.position.z);
+    bool is_underwater = (get_block(cam_x, cam_y, cam_z) == Config::WATER);
+
+    rlEnableBackfaceCulling();
+    rlSetCullFace(is_underwater ? RL_CULL_FACE_BACK : RL_CULL_FACE_FRONT);
+
     for (auto& pair : chunks) {
         if (is_visible(pair.second.get())) {
             pair.second->draw_water(mat_water, camera.position);
         }
     }
+
+    rlSetCullFace(RL_CULL_FACE_BACK);
 }
 
 void World::save_all() {

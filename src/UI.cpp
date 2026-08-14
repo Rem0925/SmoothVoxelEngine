@@ -6,6 +6,7 @@ using namespace Config;
 UI::UI(Texture2D sheet) : spritesheet(sheet) {
     slots.resize(10);
     slots[0] = { AIR, "Pico", -1 }; // Slot 0 es Pico
+    slots[1] = { WATER, "Agua", 64 };
 }
 
 UI::~UI() {}
