@@ -10,5 +10,6 @@ namespace mc {
                   std::vector<Vector3>& normals,
                   std::vector<Vector2>& uvs,
                   std::vector<Vector2>& uvs2,
-                  std::vector<Color>& colors);
+                  std::vector<Color>& colors,
+                  float origin_x = 0.0f, float origin_z = 0.0f, int seed_offset = 0);
 }

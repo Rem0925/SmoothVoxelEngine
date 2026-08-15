@@ -90,18 +90,18 @@ struct WaterEdit {
 };
 
 static inline uint64_t cell_key(int wx, int wy, int wz) {
-    // wx: 21 bits (0-20), wy: 7 bits (21-27, offset 32 cubre 0..63), wz: 21 bits (28-48)
-    return (uint64_t)(wx + (1 << 20)) | ((uint64_t)(wy + 32) << 21) | ((uint64_t)(wz + (1 << 20)) << 28);
+    // wx: 20 bits (0-19), wy: 10 bits (20-29, offset 64 cubre 0..959), wz: 20 bits (30-49)
+    return (uint64_t)(wx + (1 << 19)) | ((uint64_t)(wy + 64) << 20) | ((uint64_t)(wz + (1 << 19)) << 30);
 }
 
 static inline void cell_decode(uint64_t k, int& wx, int& wy, int& wz) {
-    wx = (int)(k & 0x1FFFFF) - (1 << 20);
-    wy = (int)((k >> 21) & 0x7F) - 32;
-    wz = (int)((k >> 28) & 0x1FFFFF) - (1 << 20);
+    wx = (int)(k & 0xFFFFF) - (1 << 19);
+    wy = (int)((k >> 20) & 0x3FF) - 64;
+    wz = (int)((k >> 30) & 0xFFFFF) - (1 << 19);
 }
 
 void World::activate(int wx, int wy, int wz) {
-    if (wx < -(1 << 20) || wx >= (1 << 20) || wz < -(1 << 20) || wz >= (1 << 20)) return;
+    if (wx < -(1 << 19) || wx >= (1 << 19) || wz < -(1 << 19) || wz >= (1 << 19)) return;
     if (wy < 0 || wy >= Config::GRID_Y) return;
     std::lock_guard<std::mutex> lock(active_mutex);
     if (active_cells.size() < 5000) active_cells.push_back(cell_key(wx, wy, wz));

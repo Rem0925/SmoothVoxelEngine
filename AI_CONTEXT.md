@@ -43,7 +43,22 @@ El motor está escrito en **C++17** y utiliza **Raylib** para la gestión de la 
 
 *   **Centralización de Uniforms:** Los parámetros estéticos ambientales de ambos shaders, como `fogStart` y `fogEnd`, están controlados globalmente desde constantes en `Config.hpp`. Estos valores se envían dinámicamente cada fotograma a la GPU mediante `SetShaderValue()` en C++.
 
-### 5. Configuración y UI (`Config.hpp`, `UI.hpp/cpp`)
+### 5. Sistema de Biomas y Climas (`Biome.hpp/cpp`)
+*   **Capas de Ruido Continuo 2D:** El sistema evalúa Continentalidad ($C$), Temperatura ($T$) y Humedad ($H$) a macro-escala para determinar biomas sin romper la continuidad del terreno:
+    *   `BIOME_OCEAN`: Fondo marino profundo ($Y \approx 24 \sim 29$), lecho de arena bajo `WATER_LEVEL = 38.0f`.
+    *   `BIOME_BEACH`: Pendientes suaves de arena en las costas.
+    *   `BIOME_PLAINS`: Praderas y llanuras templadas con abundante pasto alto.
+    *   `BIOME_FOREST`: Bosques frondosos con alta densidad de árboles.
+    *   `BIOME_MOUNTAINS`: Montañas colosales y empinadas ($Y=85 \sim 115$) con roca expuesta en picos y laderas.
+    *   `BIOME_DESERT`: Grandes extensiones de arena, dunas suaves y clima árido.
+    *   `BIOME_TAIGA`: Bosques boreales fríos con coníferas altas y pasto verdeazulado.
+    *   `BIOME_JUNGLE`: Selvas tropicales densas con árboles gigantescos y vegetación esmeralda hipervibrante.
+*   **Tintado Dinámico por Temperatura:**
+    *   Los bloques de `GRASS`, `TALL_GRASS` y `LEAVES` son tintados a nivel de vértice multiplicando la intensidad lumínica por el tinte RGB del bioma correspondiente.
+    *   Los bloques de piedra, madera, tierra y arena conservan sus texturas y colores naturales intactos.
+*   **Altura Vertical (`GRID_Y = 128`):** El motor soporta 128 bloques de altura vertical, permitiendo cordilleras de gran altitud y fosas oceánicas profundas.
+
+### 6. Configuración y UI (`Config.hpp`, `UI.hpp/cpp`)
 *   **El diccionario `BLOCKS`:** En `Config.hpp`, un `std::unordered_map` unifica todos los datos de los bloques (ID, Nombre de visualización, coordenadas de textura `tex_x/tex_y`, si es transparente y si tiene flag `is_waving` para ondular con el viento).
-*   **Vegetación y Decoraciones:** El motor incluye bloques decorativos no sólidos como el `TALL_GRASS`. Este bloque mantiene la lógica de vegetación pero se guarda en el arreglo `block_grid`. Al construir la malla (`build_mesh_data()`), el motor ignora estos IDs para no formar cubos sólidos (a través del algoritmo Marching Cubes), y en su lugar emite cuádruples transversales (cross-quads) que se envían directamente a la `plants_mesh`, manteniendo su animación de viento mediante el shader.
+*   **Vegetación y Decoraciones:** El motor incluye bloques decorativos no sólidos como el `TALL_GRASS`. Este bloque mantiene la lógica de vegetación pero se guarda en el arreglo `block_grid`. Al construir la malla (`build_mesh_data()`), el motor ignora estos IDs para no formar cubos sólidos (a través del algoritmo Marching Cubes), y en su lugar emite cuádruples transversales (cross-quads) que se envían directamente a la `plants_mesh`, manteniendo su animación de viento mediante el shader y adoptando el tinte de color de su bioma.
 *   **Inventario (UI):** La clase `UI` abstrae las lógicas de interfaz 2D de Raylib. Genera visualmente la barra de acceso rápido (Hotbar), lee el sprite principal (`spritesheet_tiles.png`) y recorta los iconos 2D correspondientes de la cuadrícula a partir de la configuración del bloque seleccionado en 3D.

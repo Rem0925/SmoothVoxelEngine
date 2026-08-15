@@ -1,5 +1,6 @@
 #include "MarchingCubes.hpp"
 #include "Config.hpp"
+#include "Biome.hpp"
 #include <cmath>
 
 namespace mc {
@@ -304,7 +305,8 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
               std::vector<Vector3>& normals,
               std::vector<Vector2>& uvs,
               std::vector<Vector2>& uvs2,
-              std::vector<Color>& colors) 
+              std::vector<Color>& colors,
+              float origin_x, float origin_z, int seed_offset) 
 {
     int slice = size_x * size_z;
     
@@ -416,17 +418,13 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                         return block_grid[by * slice + bz * size_x + bx];
                     };
                     
-                    // Lighting calculation sin Ambient Occlusion (el usuario lo pidió)
+                    // Lighting calculation sin Ambient Occlusion (el usuario lo pidio)
                     float dot_val = std::abs(n.x * light_dir.x + n.y * light_dir.y + n.z * light_dir.z);
                     float intensity = dot_val * 0.3f + 0.7f;
                     if (intensity < 0.7f) intensity = 0.7f;
                     if (intensity > 1.0f) intensity = 1.0f;
                     
                     unsigned char col_val = (unsigned char)(255.0f * intensity);
-                    Color vertex_color = { col_val, col_val, col_val, 255 };
-                    colors.push_back(vertex_color);
-                    colors.push_back(vertex_color);
-                    colors.push_back(vertex_color);
 
                     auto get_v_block = [&](Vector3 v) -> uint8_t {
                         int ix_f = std::floor(v.x); int iy_f = std::floor(v.y); int iz_f = std::floor(v.z);
@@ -446,30 +444,79 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                     if (b2 != b1) b_secondary = b2;
                     else if (b3 != b1) b_secondary = b3;
 
+                    auto get_vertex_col = [&](Vector3 v, uint8_t b) -> Color {
+                        double gx = v.x + origin_x;
+                        double gz = v.z + origin_z;
+                        unsigned char r = col_val;
+                        unsigned char g = col_val;
+                        unsigned char b_col = col_val;
+                        
+                        if (b == Config::GRASS) {
+                            Color tint = Biome::get_grass_tint_at(gx, gz, seed_offset);
+                            r = (unsigned char)((col_val * tint.r) / 255);
+                            g = (unsigned char)((col_val * tint.g) / 255);
+                            b_col = (unsigned char)((col_val * tint.b) / 255);
+                        } else if (b == Config::LEAVES) {
+                            Color tint = Biome::get_foliage_tint_at(gx, gz, seed_offset);
+                            r = (unsigned char)((col_val * tint.r) / 255);
+                            g = (unsigned char)((col_val * tint.g) / 255);
+                            b_col = (unsigned char)((col_val * tint.b) / 255);
+                        }
+                        
+                        return Color{ r, g, b_col, 255 };
+                    };
+
                     // 1. Evitar que las antorchas se mezclen con el suelo, de resto todo se mezcla (incluidas las hojas)
                     auto is_terrain = [](uint8_t b) {
                         return b != Config::TORCH;
                     };
                     
                     if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {
-                        b_secondary = b_primary; // Desactivar mezcla para paredes de madera/hojas
+                        b_secondary = b_primary;
                     } else if (b_primary > b_secondary) {
                         // 2. ORDENAR por ID para evitar que en los bordes de chunk se invierta la mezcla
                         std::swap(b_primary, b_secondary);
                     }
 
+                    bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES);
+                    bool sec_is_foliage = (b_secondary == Config::GRASS || b_secondary == Config::LEAVES);
+
+                    float foliage_pri_offset = pri_is_foliage ? 10.0f : 0.0f;
+                    float foliage_sec_offset = sec_is_foliage ? 10.0f : 0.0f;
+
+                    // Color de tinte para el triángulo (hojas o pasto)
+                    double tri_gx = (v1.x + v2.x + v3.x) / 3.0 + origin_x;
+                    double tri_gz = (v1.z + v2.z + v3.z) / 3.0 + origin_z;
+                    Color tri_tint;
+                    if (b_primary == Config::LEAVES || b_secondary == Config::LEAVES) {
+                        tri_tint = Biome::get_foliage_tint_at(tri_gx, tri_gz, seed_offset);
+                    } else {
+                        tri_tint = Biome::get_grass_tint_at(tri_gx, tri_gz, seed_offset);
+                    }
+
+                    Color tri_color = Color{
+                        (unsigned char)((col_val * tri_tint.r) / 255),
+                        (unsigned char)((col_val * tri_tint.g) / 255),
+                        (unsigned char)((col_val * tri_tint.b) / 255),
+                        255
+                    };
+
+                    colors.push_back(tri_color);
+                    colors.push_back(tri_color);
+                    colors.push_back(tri_color);
+
                     Config::BlockType b_info_pri = Config::BLOCKS.at(Config::GRASS);
                     if (Config::BLOCKS.find(b_primary) != Config::BLOCKS.end()) {
                         b_info_pri = Config::BLOCKS.at(b_primary);
                     } else {
-                        b_info_pri.is_waving = false; // Fallback seguro
+                        b_info_pri.is_waving = false;
                     }
                     
                     Config::BlockType b_info_sec = Config::BLOCKS.at(Config::GRASS);
                     if (Config::BLOCKS.find(b_secondary) != Config::BLOCKS.end()) {
                         b_info_sec = Config::BLOCKS.at(b_secondary);
                     } else {
-                        b_info_sec.is_waving = false; // El aire no debe moverse! Evita que se rompa la malla
+                        b_info_sec.is_waving = false;
                     }
 
                     float tex_w = 1.0f / 9.0f;
@@ -497,17 +544,17 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                         int iy = std::round(v.y);
                         int iz = std::round(v.z);
                         bool has_waving = false;
-                        for (int dx=-1; dx<=0; dx++) { // Solo necesitamos revisar los 8 bloques que comparten el vértice
+                        for (int dx=-1; dx<=0; dx++) {
                             for (int dy=-1; dy<=0; dy++) {
                                 for (int dz=-1; dz<=0; dz++) {
-                                    int bx = std::floor(v.x) + dx + 1; // get the 8 adjacent grid cells
+                                    int bx = std::floor(v.x) + dx + 1;
                                     int by = std::floor(v.y) + dy + 1;
                                     int bz = std::floor(v.z) + dz + 1;
                                     uint8_t b = get_raw_block(bx, by, bz);
-                                    if (b == 255 || b == 7 || b == Config::TALL_GRASS) continue; // Ignore air/water/grass
+                                    if (b == 255 || b == 7 || b == Config::TALL_GRASS) continue;
                                     if (Config::BLOCKS.find(b) != Config::BLOCKS.end()) {
                                         if (!Config::BLOCKS.at(b).is_waving) {
-                                            return false; // Touches a rigid solid, do not sway!
+                                            return false;
                                         } else {
                                             has_waving = true;
                                         }
@@ -528,17 +575,17 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                         }
                         else if (abs_x >= abs_y && abs_x >= abs_z) { // Dominante X (Paredes)
                             uv.x = vert.z - cz; 
-                            uv.y = 1.0f - (vert.y - cy); // Invertido para que Raylib no lo pinte de cabeza
+                            uv.y = 1.0f - (vert.y - cy);
                         }
                         else { // Dominante Z (Paredes frontales)
                             uv.x = vert.x - cx; 
-                            uv.y = 1.0f - (vert.y - cy); // Invertido para que Raylib no lo pinte de cabeza
+                            uv.y = 1.0f - (vert.y - cy);
                         }
                         
                         float sway = check_sway(vert) ? 10.0f : 0.0f;
                         
-                        uvs.push_back({uv.x * tex_w + offset_u_pri + sway, uv.y * tex_h + offset_v_pri});
-                        uvs2.push_back({uv.x * tex_w + offset_u_sec + sway, uv.y * tex_h + offset_v_sec});
+                        uvs.push_back({uv.x * tex_w + offset_u_pri + sway, uv.y * tex_h + offset_v_pri + foliage_pri_offset});
+                        uvs2.push_back({uv.x * tex_w + offset_u_sec + sway, uv.y * tex_h + offset_v_sec + foliage_sec_offset});
                     }
                 }
             }

@@ -16,6 +16,8 @@ uniform float fogEnd;
 uniform vec3 sunDir;
 uniform vec3 cameraPos;
 
+in vec2 outFoliageFlags;
+
 // Color de salida
 out vec4 finalColor;
 
@@ -65,17 +67,17 @@ void main()
     float noise = geometricNoise(projCoord * geoScale);
     
     // 5. EL SECRETO PARA ELIMINAR ISLAS Y HUECOS:
-    // Reducimos el multiplicador de 1.3 a 0.6. 
-    // Ahora el ruido solo tiene fuerza para mover el borde unos pocos píxeles, 
-    // por lo que es matemáticamente imposible que genere textura flotante en áreas puras.
     float noiseOffset = (noise - 0.5) * 0.6; 
     
-    // 6. Corte duro para separación nítida
+    // 6. Corte duro para separación nítida y asignación exacta de tinte
     vec4 blendedTex;
+    vec3 blockColor;
     if (baseWeight + noiseOffset > 0.5) {
         blendedTex = texPrimary;
+        blockColor = (outFoliageFlags.x > 0.5) ? fragColor.rgb : vec3(1.0);
     } else {
         blendedTex = texSecondary;
+        blockColor = (outFoliageFlags.y > 0.5) ? fragColor.rgb : vec3(1.0);
     }
 
     // --- ILUMINACIÓN FLAT SHADING ---
@@ -97,7 +99,7 @@ void main()
     float lighting = 0.75 + 0.25 * diff;
 
     // Apply vertex color, lighting, and diffuse
-    vec4 colorNoAlpha = vec4(fragColor.rgb * lighting, 1.0);
+    vec4 colorNoAlpha = vec4(blockColor * lighting, 1.0);
     finalColor = blendedTex * colorNoAlpha * colDiffuse;
     
     // --- NIEBLA DE PROFUNDIDAD Y ATARDECER DIRECCIONAL ---

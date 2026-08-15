@@ -1,9 +1,11 @@
 #include "Chunk.hpp"
 #include "Noise.hpp"
 #include "MarchingCubes.hpp"
+#include "Biome.hpp"
 #include <rlgl.h>
 #include <raymath.h>
 #include <cmath>
+#include <algorithm>
 #include <iostream>
 #include <cstring>
 #include <sqlite3.h>
@@ -71,25 +73,45 @@ void Chunk::generate_thread() {
         
         std::vector<int> top_solid_y( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1), 0 );
         std::vector<bool> has_solid( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1), false );
+        std::vector<BiomeConfig> col_biomes( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1) );
 
         for (int lx = 0; lx <= CHUNK_SIZE; ++lx) {
             for (int lz = 0; lz <= CHUNK_SIZE; ++lz) {
-                double wx = cx * CHUNK_SIZE + lx + seed_offset;
-                double wz = cz * CHUNK_SIZE + lz + seed_offset;
+                double wx = cx * CHUNK_SIZE + lx;
+                double wz = cz * CHUNK_SIZE + lz;
                 
-                double n_base = pnoise3(wx * 0.005, 0.0, wz * 0.005, 4, 0.5);
-                double n_detail = pnoise3(wx * 0.02, 0.0, wz * 0.02, 4, 0.5);
-                double n_mountains = std::abs(pnoise3(wx * 0.008, 0.0, wz * 0.008, 4, 0.5)); // Smoother mountains
+                BiomeConfig biome = Biome::get_biome_at(wx, wz, seed_offset);
+                col_biomes[lz * (CHUNK_SIZE + 1) + lx] = biome;
+
+                double sx = wx + seed_offset;
+                double sz = wz + seed_offset;
                 
-                double valley_base = (n_base < 0) ? (n_base * 16.0) : (n_base * 10.0);
-                double raw_h = 42.0 + valley_base + (n_detail * 3.0) + (n_mountains * 16.0); // Less intense
-                float base_h = std::round(raw_h) * 0.20f + raw_h * 0.80f;
+                // Relieve base
+                double n_base = pnoise3(sx * 0.005, 0.0, sz * 0.005, 4, 0.5);
+                double n_detail = pnoise3(sx * 0.02, 0.0, sz * 0.02, 4, 0.5);
+                
+                // Mascara de macizos montanosos circulares y suaves
+                double n_mount_mask = pnoise3(sx * 0.0011, 750.0, sz * 0.0011, 3, 0.5);
+                float mount_t = std::clamp((float)((n_mount_mask - 0.15) / 0.35), 0.0f, 1.0f);
+                float smooth_mount = mount_t * mount_t * (3.0f - 2.0f * mount_t); // Smoothstep
+                
+                // Perfilado de crestas afiladas
+                double n_mount_raw = std::abs(pnoise3(sx * 0.007, 0.0, sz * 0.007, 4, 0.5));
+                double n_mount_sharp = std::pow(n_mount_raw, 1.3) * 1.7;
+                
+                double valley_base = (n_base < 0) ? (n_base * biome.valley_neg_scale) : (n_base * biome.valley_pos_scale);
+                
+                // La montaña nace desde el nivel base del valle y asciende de forma continua y suave
+                double mountain_elevation = smooth_mount * n_mount_sharp * biome.mountain_scale;
+                
+                double raw_h = biome.base_height + valley_base + (n_detail * biome.detail_scale) + mountain_elevation;
+                float base_h = (float)raw_h; // 100% suave, sin saltos de redondeo
                 
                 int highest_y = 0;
                 
                 for (int y = 0; y < GRID_Y; ++y) {
-                    float n3d = pnoise3(wx * 0.05f, y * 0.05f, wz * 0.05f, 2, 0.4f);
-                    float cave_noise = pnoise3(wx * 0.04f, y * 0.04f, wz * 0.04f, 2, 0.5f);
+                    float n3d = pnoise3(sx * 0.05f, y * 0.05f, sz * 0.05f, 2, 0.4f);
+                    float cave_noise = pnoise3(sx * 0.04f, y * 0.04f, sz * 0.04f, 2, 0.5f);
                     
                     float true_depth = (base_h - y) + (n3d * 2.5f);
                     float d = true_depth;
@@ -122,8 +144,22 @@ void Chunk::generate_thread() {
 
         for (int lx = 0; lx <= CHUNK_SIZE; ++lx) {
             for (int lz = 0; lz <= CHUNK_SIZE; ++lz) {
-                int top = top_solid_y[lz * (CHUNK_SIZE + 1) + lx];
-                bool solid_exists = has_solid[lz * (CHUNK_SIZE + 1) + lx];
+                int col_idx = lz * (CHUNK_SIZE + 1) + lx;
+                int top = top_solid_y[col_idx];
+                bool solid_exists = has_solid[col_idx];
+                const BiomeConfig& biome = col_biomes[col_idx];
+                
+                // Calcular pendiente local con vecinos
+                int max_slope = 0;
+                for (int dx = -1; dx <= 1; dx++) {
+                    for (int dz = -1; dz <= 1; dz++) {
+                        int nx = std::clamp(lx + dx, 0, CHUNK_SIZE);
+                        int nz = std::clamp(lz + dz, 0, CHUNK_SIZE);
+                        max_slope = std::max(max_slope, std::abs(top - top_solid_y[nz * (CHUNK_SIZE + 1) + nx]));
+                    }
+                }
+                // Acantilado de roca solo si es fuerte pendiente vertical o pico extremo (>108)
+                bool is_steep_cliff = (biome.type == BIOME_MOUNTAINS && (max_slope >= 3 || top > 108));
                 
                 for (int y = 0; y < GRID_Y; ++y) {
                     int i = idx(lx, y, lz);
@@ -132,10 +168,26 @@ void Chunk::generate_thread() {
                     if (density_grid[i] >= ISO_SURFACE) {
                         block_grid[i] = STONE;
                         if (solid_exists) {
-                            if (y > top - 2 && y <= top) {
-                                block_grid[i] = GRASS;
-                            } else if (y > top - 6 && y <= top - 2) {
-                                block_grid[i] = DIRT;
+                            if (is_steep_cliff) {
+                                block_grid[i] = STONE;
+                            } else if (biome.type == BIOME_OCEAN || biome.type == BIOME_BEACH) {
+                                if (y > top - 3 && y <= top) {
+                                    block_grid[i] = Config::SAND;
+                                } else if (y > top - 6 && y <= top - 3) {
+                                    block_grid[i] = Config::GRAVEL; // Grava bajo la arena marina
+                                }
+                            } else if (biome.type == BIOME_DESERT) {
+                                if (y > top - 3 && y <= top) {
+                                    block_grid[i] = Config::SAND;
+                                } else if (y > top - 7 && y <= top - 3) {
+                                    block_grid[i] = Config::RED_CLAY; // Arcilla roja en el desierto
+                                }
+                            } else {
+                                if (y > top - 2 && y <= top) {
+                                    block_grid[i] = biome.surface_block;
+                                } else if (y > top - 6 && y <= top - 2) {
+                                    block_grid[i] = biome.subsurface_block;
+                                }
                             }
                         }
                     }
@@ -143,7 +195,7 @@ void Chunk::generate_thread() {
                     if (y <= (int)WATER_LEVEL && density_grid[i] < ISO_SURFACE && y >= top) {
                         block_grid[i] = WATER;
                         is_water[i] = true;
-                        water_columns[lz * (CHUNK_SIZE + 1) + lx] = true;
+                        water_columns[col_idx] = true;
                     }
                 }
             }
@@ -168,32 +220,53 @@ void Chunk::generate_thread() {
         for (int lx = 0; lx <= CHUNK_SIZE; ++lx) {
             for (int lz = 0; lz <= CHUNK_SIZE; ++lz) {
                 bool is_shore = shore_columns[lz * (CHUNK_SIZE + 1) + lx];
+                const BiomeConfig& biome = col_biomes[lz * (CHUNK_SIZE + 1) + lx];
                 for (int y = 0; y < GRID_Y; ++y) {
                     int i = idx(lx, y, lz);
                     if (block_grid[i] == GRASS) {
                         if (y < (int)WATER_LEVEL || is_shore) {
-                            block_grid[i] = DIRT;
+                            block_grid[i] = (biome.type == BIOME_BEACH || biome.type == BIOME_DESERT || biome.type == BIOME_OCEAN) ? Config::SAND : Config::DIRT;
                         }
                     }
                 }
             }
         }
         
-        // Trees
+        // Arboles (Roble y Abedul)
         for (int lx = 3; lx < CHUNK_SIZE - 3; ++lx) {
             for (int lz = 3; lz < CHUNK_SIZE - 3; ++lz) {
-                int top = top_solid_y[lz * (CHUNK_SIZE + 1) + lx];
-                if (top > WATER_LEVEL && block_grid[idx(lx, top, lz)] == GRASS) {
-                    long hash = ( (cx * CHUNK_SIZE + lx + WORLD_SEED) * 73856 + (cz * CHUNK_SIZE + lz) * 1920 ) % 1000;
-                    if (hash < 15) { // 1.5% probability
-                        int tree_h = 5 + (hash % 4);
+                int col_idx = lz * (CHUNK_SIZE + 1) + lx;
+                int top = top_solid_y[col_idx];
+                const BiomeConfig& biome = col_biomes[col_idx];
+                
+                if (top > WATER_LEVEL && block_grid[idx(lx, top, lz)] == GRASS && biome.tree_chance > 0) {
+                    int g_wx = cx * CHUNK_SIZE + lx;
+                    int g_wz = cz * CHUNK_SIZE + lz;
+                    
+                    // Hash 2D de alta entropia para distribucion organica uniforme
+                    uint32_t th = (static_cast<uint32_t>(g_wx) * 374761393U) ^ 
+                                  (static_cast<uint32_t>(g_wz) * 668265263U) ^ 
+                                  (static_cast<uint32_t>(seed_offset) * 1274126177U);
+                    th = (th ^ (th >> 13)) * 1274126177U;
+                    th = th ^ (th >> 16);
+                    int tree_hash = (int)(th % 1000U);
+                    
+                    if (tree_hash < biome.tree_chance) {
+                        int h_range = std::max(1, biome.tree_max_h - biome.tree_min_h + 1);
+                        int tree_h = biome.tree_min_h + (tree_hash % h_range);
+                        
+                        // Determinar especie: Roble (WOOD) o Abedul (BIRCH_WOOD)
+                        int species_val = (int)((th / 1000U) % 100U);
+                        bool is_birch = (biome.birch_tree_ratio > 0.0f) && (species_val < (int)(biome.birch_tree_ratio * 100.0f));
+                        uint8_t trunk_block = is_birch ? Config::BIRCH_WOOD : Config::WOOD;
+                        
                         for (int ty = 1; ty <= tree_h; ++ty) {
                             if (top + ty < GRID_Y) {
-                                block_grid[idx(lx, top + ty, lz)] = WOOD;
+                                block_grid[idx(lx, top + ty, lz)] = trunk_block;
                                 density_grid[idx(lx, top + ty, lz)] = 1.0f;
                             }
                         }
-                        int r = 2;
+                        int r = (biome.type == BIOME_JUNGLE) ? 3 : 2;
                         for (int dx = -r; dx <= r; ++dx) {
                             for (int dy = -r; dy <= r; ++dy) {
                                 for (int dz = -r; dz <= r; ++dz) {
@@ -291,7 +364,8 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
     std::vector<Color> lp_colors;
 
     // 1. Terrain Mesh (Marching Cubes)
-    mc::generate(density, blocks, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors);
+    int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
+    mc::generate(density, blocks, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset);
     
     // Remap vertices to global coords
     for (auto& v : ls_vertices) {
@@ -301,10 +375,10 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
 
     // [Water and plants... omitted for brevity, I will update water separately]
     
-    // Tall Grass Generation
+    // Plant / Vegetation Cross-Quad Generation (Pasto Alto, Setas, Arbustos)
     for (size_t i = 0; i < ls_vertices.size(); i += 3) {
         Vector3 n = ls_normals[i];
-        if (n.y > 0.8f) { // Allow grass on slightly steeper slopes
+        if (n.y > 0.8f) { // Superficies horizontales o suaves
             Vector3 center = { (ls_vertices[i].x + ls_vertices[i+1].x + ls_vertices[i+2].x) / 3.0f,
                                (ls_vertices[i].y + ls_vertices[i+1].y + ls_vertices[i+2].y) / 3.0f,
                                (ls_vertices[i].z + ls_vertices[i+1].z + ls_vertices[i+2].z) / 3.0f };
@@ -316,75 +390,118 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
             uint8_t b1 = get_block(lx, ly, lz);
             uint8_t b2 = get_block(lx, ly - 1, lz);
             bool on_grass = (b1 == Config::GRASS || b2 == Config::GRASS);
-            bool is_explicit_grass = (b1 == Config::TALL_GRASS || b2 == Config::TALL_GRASS);
+            bool on_sand  = (b1 == Config::SAND  || b2 == Config::SAND);
             
-            if (on_grass || is_explicit_grass) {
-                // Deterministic hash based on world position
-                long hash = std::abs((long)(center.x * 73856.0f + center.z * 1920.0f)) % 1000;
-                
-                if (hash < 30 || is_explicit_grass) { 
-                    float hw = 0.4f; float h = 0.8f;
-                    Vector3 base = center; // Start exactly on the triangle surface!
-                    
-                    Vector3 up = n;
-                    Vector3 right = {1, 0, 0};
-                    if (std::abs(up.y) < 0.999f) {
-                        right = Vector3Normalize(Vector3CrossProduct({0,1,0}, up));
-                    }
-                    Vector3 fwd = Vector3Normalize(Vector3CrossProduct(right, up));
-                    
-                    // Construct 4 vectors for the quad corners from the center
-                    Vector3 d1 = Vector3Add(Vector3Scale(right, hw), Vector3Scale(fwd, hw));
-                    Vector3 d2 = Vector3Subtract(Vector3Scale(right, hw), Vector3Scale(fwd, hw));
-                    Vector3 ht = Vector3Scale(up, h);
-                    
-                    Vector3 q1_v[] = {
-                        Vector3Subtract(base, d1),                          // bottom-left
-                        Vector3Add(base, d1),                               // bottom-right
-                        Vector3Add(Vector3Add(base, d1), ht),               // top-right
-                        Vector3Add(Vector3Subtract(base, d1), ht)           // top-left
-                    };
-                    
-                    Vector3 q2_v[] = {
-                        Vector3Add(base, d2),                               // bottom-right
-                        Vector3Subtract(base, d2),                          // bottom-left
-                        Vector3Add(Vector3Subtract(base, d2), ht),          // top-left
-                        Vector3Add(Vector3Add(base, d2), ht)                // top-right
-                    };
-                    
-                    BlockType bt = Config::BLOCKS.at(Config::TALL_GRASS);
-                    float tw = 1.0f / 9.0f; float th = 1.0f / 10.0f;
-                    float sway = bt.is_waving ? 10.0f : 0.0f;
-                    float u0 = bt.tex_x * tw; 
-                    float v0 = (10.0f - 1.0f - bt.tex_y) * th; 
-                    if (!is_explicit_grass) {
-                        v0 = (10.0f - 1.0f - (bt.tex_y - (hash % 3))) * th; 
-                    }
-                    float u1 = u0 + tw; float v1 = v0 + th;
-                    
-                    // index 0: bottom-left (no sway)
-                    // index 1: bottom-right (no sway)
-                    // index 2: top-right (sway)
-                    // index 3: top-left (sway)
-                    Vector2 uvs[] = { {u1, v1}, {u0, v1}, {u0 + sway, v0}, {u1 + sway, v0} };
-                    Vector3 nor = {0, 1, 0};
-                    Color col = WHITE;
-                    
-                    auto add_quad = [&](Vector3* v) {
-                        lp_vertices.push_back(v[0]); lp_vertices.push_back(v[1]); lp_vertices.push_back(v[2]);
-                        lp_vertices.push_back(v[0]); lp_vertices.push_back(v[2]); lp_vertices.push_back(v[3]);
-                        
-                        for(int j=0; j<6; j++) {
-                            lp_normals.push_back(nor); lp_colors.push_back(col);
-                        }
-                        
-                        lp_uvs.push_back(uvs[0]); lp_uvs.push_back(uvs[1]); lp_uvs.push_back(uvs[2]);
-                        lp_uvs.push_back(uvs[0]); lp_uvs.push_back(uvs[2]); lp_uvs.push_back(uvs[3]);
-                    };
-                    
-                    add_quad(q1_v);
-                    add_quad(q2_v);
+            BiomeConfig biome = Biome::get_biome_at(center.x, center.z, seed_offset);
+            
+            // Hash 2D de alta entropia para plantas (sin lineas diagonales)
+            int cell_x = (int)std::floor(center.x * 3.0f);
+            int cell_z = (int)std::floor(center.z * 3.0f);
+            uint32_t ph = (static_cast<uint32_t>(cell_x) * 374761393U) ^ 
+                          (static_cast<uint32_t>(cell_z) * 668265263U) ^ 
+                          (static_cast<uint32_t>(seed_offset) * 1274126177U);
+            ph = (ph ^ (ph >> 13)) * 1274126177U;
+            ph = ph ^ (ph >> 16);
+            int hash = (int)(ph % 1000U);
+            
+            uint8_t plant_type = Config::AIR;
+            Color plant_color = WHITE;
+            float plant_height = 0.8f;
+            float plant_width = 0.4f;
+            int tile_var = 0;
+            
+            if (b1 == Config::TALL_GRASS || b2 == Config::TALL_GRASS) {
+                plant_type = Config::TALL_GRASS;
+                plant_color = Biome::get_grass_tint_at(center.x, center.z, seed_offset);
+            } else if (b1 == Config::RED_MUSHROOM || b2 == Config::RED_MUSHROOM) {
+                plant_type = Config::RED_MUSHROOM;
+                plant_height = 0.55f;
+            } else if (b1 == Config::BROWN_MUSHROOM || b2 == Config::BROWN_MUSHROOM) {
+                plant_type = Config::BROWN_MUSHROOM;
+                plant_height = 0.55f;
+            } else if (b1 == Config::DEAD_BUSH || b2 == Config::DEAD_BUSH) {
+                plant_type = Config::DEAD_BUSH;
+                plant_height = 0.7f;
+            } else if (on_grass) {
+                if (hash < biome.tall_grass_chance) {
+                    plant_type = Config::TALL_GRASS;
+                    plant_color = Biome::get_grass_tint_at(center.x, center.z, seed_offset);
+                    tile_var = hash % 3;
+                } else if (hash < biome.tall_grass_chance + biome.red_mushroom_chance) {
+                    plant_type = Config::RED_MUSHROOM;
+                    plant_height = 0.55f;
+                } else if (hash < biome.tall_grass_chance + biome.red_mushroom_chance + biome.brown_mushroom_chance) {
+                    plant_type = Config::BROWN_MUSHROOM;
+                    plant_height = 0.55f;
                 }
+            } else if (on_sand) {
+                if (hash < biome.dead_bush_chance) {
+                    plant_type = Config::DEAD_BUSH;
+                    plant_height = 0.7f;
+                }
+            }
+            
+            if (plant_type != Config::AIR) {
+                BlockType bt = Config::BLOCKS.at(plant_type);
+                float tw = 1.0f / 9.0f;
+                float th = 1.0f / 10.0f;
+                float sway = bt.is_waving ? 10.0f : 0.0f;
+                float u0 = bt.tex_x * tw;
+                float v0 = (10.0f - 1.0f - (bt.tex_y - tile_var)) * th;
+                float u1 = u0 + tw;
+                float v1 = v0 + th;
+                
+                Vector3 base = center;
+                Vector3 up = n;
+                Vector3 right = {1, 0, 0};
+                if (std::abs(up.y) < 0.999f) {
+                    right = Vector3Normalize(Vector3CrossProduct({0,1,0}, up));
+                }
+                Vector3 fwd = Vector3Normalize(Vector3CrossProduct(right, up));
+                
+                Vector3 d1 = Vector3Add(Vector3Scale(right, plant_width), Vector3Scale(fwd, plant_width));
+                Vector3 d2 = Vector3Subtract(Vector3Scale(right, plant_width), Vector3Scale(fwd, plant_width));
+                Vector3 ht = Vector3Scale(up, plant_height);
+                
+                Vector3 q1_v[] = {
+                    Vector3Subtract(base, d1),
+                    Vector3Add(base, d1),
+                    Vector3Add(Vector3Add(base, d1), ht),
+                    Vector3Add(Vector3Subtract(base, d1), ht)
+                };
+                
+                Vector3 q2_v[] = {
+                    Vector3Add(base, d2),
+                    Vector3Subtract(base, d2),
+                    Vector3Add(Vector3Subtract(base, d2), ht),
+                    Vector3Add(Vector3Add(base, d2), ht)
+                };
+                
+                bool is_foliage_plant = (plant_type == Config::TALL_GRASS);
+                float foliage_offset = is_foliage_plant ? 10.0f : 0.0f;
+                
+                Vector2 uvs[] = { 
+                    {u1, v1 + foliage_offset}, 
+                    {u0, v1 + foliage_offset}, 
+                    {u0 + sway, v0 + foliage_offset}, 
+                    {u1 + sway, v0 + foliage_offset} 
+                };
+                Vector3 nor = {0, 1, 0};
+                
+                auto add_quad = [&](Vector3* v) {
+                    lp_vertices.push_back(v[0]); lp_vertices.push_back(v[1]); lp_vertices.push_back(v[2]);
+                    lp_vertices.push_back(v[0]); lp_vertices.push_back(v[2]); lp_vertices.push_back(v[3]);
+                    
+                    for(int j=0; j<6; j++) {
+                        lp_normals.push_back(nor); lp_colors.push_back(plant_color);
+                    }
+                    
+                    lp_uvs.push_back(uvs[0]); lp_uvs.push_back(uvs[1]); lp_uvs.push_back(uvs[2]);
+                    lp_uvs.push_back(uvs[0]); lp_uvs.push_back(uvs[2]); lp_uvs.push_back(uvs[3]);
+                };
+                
+                add_quad(q1_v);
+                add_quad(q2_v);
             }
         }
     }

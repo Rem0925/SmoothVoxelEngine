@@ -5,6 +5,7 @@
 #include <algorithm>
 #include "Config.hpp"
 #include "MarchingCubes.hpp"
+#include "Biome.hpp"
 #include "World.hpp"
 #include "UI.hpp"
 #include <rlgl.h>
@@ -709,6 +710,10 @@ int main() {
         }
         std::string block_name = (look_block != AIR && BLOCKS.count(look_block)) ? BLOCKS.at(look_block).name : "Aire";
         DrawText(TextFormat("Mirando: %s", block_name.c_str()), 10, 70, 20, BLACK);
+        
+        int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
+        const char* biome_name = Biome::get_biome_name_at(camera.position.x, camera.position.z, seed_offset);
+        DrawText(TextFormat("Bioma: %s", biome_name), 10, 95, 20, BLACK);
         
         EndDrawing();
         

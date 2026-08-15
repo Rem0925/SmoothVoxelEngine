@@ -18,23 +18,31 @@ out vec2 fragTexCoord2;
 out vec4 fragColor;
 out vec3 fragPosition;
 out float viewDist; // Para la niebla
+out vec2 outFoliageFlags; // x: primario es follaje (pasto/hojas), y: secundario es follaje
 
 void main()
 {
-    // Decode wind sway flag
+    // Decode wind sway flag (> 5.0 on x)
     bool waves_pri = vertexTexCoord.x > 5.0;
     bool waves_sec = vertexTexCoord2.x > 5.0;
     
+    // Decode foliage tint flag (> 5.0 on y)
+    bool foliage_pri = vertexTexCoord.y > 5.0;
+    bool foliage_sec = vertexTexCoord2.y > 5.0;
+    
     vec2 realTexCoord = vertexTexCoord;
     if (waves_pri) realTexCoord.x -= 10.0;
+    if (foliage_pri) realTexCoord.y -= 10.0;
     
     vec2 realTexCoord2 = vertexTexCoord2;
     if (waves_sec) realTexCoord2.x -= 10.0;
+    if (foliage_sec) realTexCoord2.y -= 10.0;
 
     // Send vertex attributes to fragment shader
     fragTexCoord = realTexCoord;
     fragTexCoord2 = realTexCoord2;
     fragColor = vertexColor;
+    outFoliageFlags = vec2(foliage_pri ? 1.0 : 0.0, foliage_sec ? 1.0 : 0.0);
     
     // Apply wind sway if needed
     vec3 animatedPos = vertexPosition;
