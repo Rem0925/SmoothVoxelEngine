@@ -2,7 +2,6 @@
 #include <cmath>
 
 sqlite3* db = nullptr;
-std::mutex sqlite_mutex;
 ThreadPool global_thread_pool(Config::MAX_WORKER_THREADS);
 #include <rlgl.h>
 #include <cmath>
@@ -16,7 +15,7 @@ ThreadPool global_thread_pool(Config::MAX_WORKER_THREADS);
 
 using namespace Config;
 
-World::World(Material solid, Material water) : mat_solid(solid), mat_water(water) {
+World::World(Material solid, Material plants, Material water) : mat_solid(solid), mat_plants(plants), mat_water(water) {
     sim_thread = std::thread([this] { sim_loop(); });
 }
 
@@ -48,7 +47,7 @@ void World::update(Vector3 player_pos) {
         int cx = it->first.first;
         int cz = it->first.second;
         if (std::abs(cx - pcx) > load_radius + 1 || std::abs(cz - pcz) > load_radius + 1) {
-            if (it->second->is_dirty) {
+            if (it->second->needs_save) {
                 it->second->save_to_disk();
             }
             it = chunks.erase(it);
@@ -77,6 +76,7 @@ void World::update(Vector3 player_pos) {
         auto key = std::make_pair(cx, cz);
         if (chunks.find(key) == chunks.end()) {
             chunks[key] = std::make_shared<Chunk>(cx, cz);
+            chunks[key]->current_lod = 1;
             chunks[key]->start_generation();
         } else {
             chunks[key]->update_logic(upload_budget);
@@ -310,7 +310,7 @@ void World::draw(Camera3D camera) {
     // Pass 1: Opaque geometry (Solid and Plants)
     for (auto& pair : chunks) {
         if (is_visible(pair.second.get())) {
-            pair.second->draw_solid(mat_solid, camera.position);
+            pair.second->draw_solid(mat_solid, mat_plants, camera.position);
         }
     }
     

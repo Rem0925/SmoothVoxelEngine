@@ -6,6 +6,7 @@ in vec3 fragPosition;
 in float viewDist;
 
 uniform sampler2D texture0;
+uniform sampler2D noiseTex;
 uniform vec4 colDiffuse;
 uniform vec3 fogColor;
 uniform float time;
@@ -15,22 +16,6 @@ uniform vec3 sunDir;
 uniform vec3 cameraPos;
 
 out vec4 finalColor;
-
-// Función hash 2D para generar ruido pseudoaleatorio
-float hash(vec2 p) {
-    vec2 p2 = fract(p * vec2(0.3183099, 0.3678794));
-    p2 += dot(p2, p2.yx + 19.19);
-    return fract((p2.x + p2.y) * p2.x);
-}
-
-// Función valueNoise para generar ruido procedimental suave
-float valueNoise(vec2 p) {
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
-               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-}
 
 // Mezcla Alpha (Normal Blending) como Photoshop / Roystan
 vec4 alphaBlend(vec4 top, vec4 bottom) {
@@ -56,18 +41,17 @@ void main()
     vec4 waterColor = vec4(vibrantWater, 0.78); // Opacidad reducida un poco para más transparencia
 
     // 2. Ruido Evolutivo (Morphing Noise - Fuerte y Rápido)
-    // Aumentamos la velocidad de desfase (time * 0.4) para que hierva y cambie de forma más rápido
-    vec2 offset1 = vec2(time * 0.4, -time * 0.6);
-    vec2 offset2 = vec2(-time * 0.1, time * 0.05); // El movimiento general sigue lento
+    vec2 offset1 = vec2(time * 0.04, -time * 0.06);
+    vec2 offset2 = vec2(-time * 0.01, time * 0.005);
     
-    // Aumentamos la escala (de 1.5 y 2.5 a 3.0 y 5.0) para hacer la espuma mucho más pequeña
-    float n1 = valueNoise(fragPosition.xz * 3.0 + offset1);
-    float evolvingNoise = valueNoise(fragPosition.xz * 5.0 + offset2 + (n1 * 2.0));
+    // Muestreo de textura precalculada en lugar de valueNoise procedural
+    float n1 = texture(noiseTex, fragPosition.xz * 0.15 + offset1).r;
+    float evolvingNoise = texture(noiseTex, fragPosition.xz * 0.25 + offset2 + (n1 * 0.2)).r;
 
     // 3. Espuma de Superficie Evolutiva
-    // Subimos el cutoff base a 0.85 para que la espuma sea escasa y finita
-    float surfaceNoiseCutoff = mix(0.85, 0.95, depth); 
-    float surfaceFoam = smoothstep(surfaceNoiseCutoff, surfaceNoiseCutoff + 0.05, evolvingNoise) * (1.0 - fragColor.a);
+    // Ajustamos el cutoff base para adaptarse a la distribución de la textura de Perlin
+    float surfaceNoiseCutoff = mix(0.55, 0.70, depth); 
+    float surfaceFoam = smoothstep(surfaceNoiseCutoff, surfaceNoiseCutoff + 0.1, evolvingNoise) * (1.0 - fragColor.a);
     
     float finalFoam = clamp(surfaceFoam, 0.0, 1.0);
 

@@ -12,7 +12,7 @@ namespace Config {
     constexpr float ISO_SURFACE = 0.0f;
 
     inline const std::string WORLD_NAME = "world_1";
-    constexpr int WORLD_SEED = 414412;
+    constexpr int WORLD_SEED = 414432;
     
     constexpr int MAX_FPS = 120;
     constexpr int RENDER_DISTANCE = 6;
@@ -27,7 +27,13 @@ namespace Config {
         int tex_x;
         int tex_y;
         bool transparent;
-        bool is_waving; // Propiedad añadida para movimiento de hojas
+        bool is_waving; 
+    };
+
+    struct VoxelData {
+        float density;
+        uint8_t block;
+        uint8_t water;
     };
 
     enum BlockID : uint8_t {

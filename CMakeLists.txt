@@ -25,14 +25,17 @@ if (NOT raylib_FOUND)
 endif()
 
 
-# Recopilar los archivos fuente
-file(GLOB_RECURSE SOURCES "src/*.cpp" "src/*.c")
-
-# Si main.cpp no existe aún, creamos un archivo temporal para que CMake no falle en el primer pase
-if(NOT SOURCES)
-    file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp" "int main() { return 0; }\n")
-    set(SOURCES "src/main.cpp")
-endif()
+set(SOURCES
+    src/Biome.cpp
+    src/Chunk.cpp
+    src/DatabaseIO.cpp
+    src/MarchingCubes.cpp
+    src/Noise.cpp
+    src/UI.cpp
+    src/World.cpp
+    src/main.cpp
+    src/sqlite3.c
+)
 
 # Definir el ejecutable principal
 add_executable(${PROJECT_NAME} ${SOURCES})

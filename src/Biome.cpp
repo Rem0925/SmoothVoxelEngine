@@ -220,27 +220,63 @@ BiomeConfig get_discrete_biome(double wx, double wz, int seed_offset) {
     return get_pure_biome_config(BIOME_PLAINS, temp, hum, cont);
 }
 
+
+struct BiomeTarget {
+    BiomeType type;
+    float c, t, h, m; // Ideal coordinates
+};
+
+static const BiomeTarget BIOME_TARGETS[] = {
+    {BIOME_OCEAN,     -0.2f, 0.5f, 0.5f, 0.0f},
+    {BIOME_BEACH,     -0.03f,0.5f, 0.5f, 0.0f},
+    {BIOME_MOUNTAINS,  0.5f, 0.3f, 0.5f, 0.8f},
+    {BIOME_DESERT,     0.5f, 0.85f,0.15f,0.0f},
+    {BIOME_TAIGA,      0.5f, 0.15f,0.6f, 0.0f},
+    {BIOME_JUNGLE,     0.5f, 0.85f,0.85f,0.0f},
+    {BIOME_FOREST,     0.5f, 0.5f, 0.8f, 0.0f},
+    {BIOME_PLAINS,     0.5f, 0.5f, 0.3f, 0.0f}
+};
+
 BiomeConfig get_blended_biome(double wx, double wz, int seed_offset, int radius) {
-    BiomeConfig c0 = get_discrete_biome(wx, wz, seed_offset);
+    // La identidad central (nombre, bloques, árboles) es 100% estricta
+    BiomeConfig center = get_discrete_biome(wx, wz, seed_offset);
     
-    BiomeConfig c1 = get_discrete_biome(wx + radius, wz, seed_offset);
-    BiomeConfig c2 = get_discrete_biome(wx - radius, wz, seed_offset);
-    BiomeConfig c3 = get_discrete_biome(wx, wz + radius, seed_offset);
-    BiomeConfig c4 = get_discrete_biome(wx, wz - radius, seed_offset);
+    // Mezcla de alturas y estructura en un radio físico (máx 2 chunks = 32 bloques)
+    int r = 24; 
     
-    if (c0.type == c1.type && c0.type == c2.type && c0.type == c3.type && c0.type == c4.type) {
-        return c0;
+    BiomeConfig blended = center;
+    float total_h = 0;
+    float total_m = 0;
+    float total_v_neg = 0;
+    float total_v_pos = 0;
+    float total_d = 0;
+    
+    float w_total = 0;
+    
+    // Muestreo circular físico en lugar de paramétrico
+    for (int dx = -r; dx <= r; dx += 8) {
+        for (int dz = -r; dz <= r; dz += 8) {
+            float dist = std::sqrt(dx*dx + dz*dz);
+            if (dist > r) continue;
+            
+            // Función de peso por distancia al punto exacto
+            float weight = 1.0f / (dist + 4.0f);
+            BiomeConfig c = get_discrete_biome(wx + dx, wz + dz, seed_offset);
+            
+            total_h += c.base_height * weight;
+            total_m += c.mountain_scale * weight;
+            total_v_neg += c.valley_neg_scale * weight;
+            total_v_pos += c.valley_pos_scale * weight;
+            total_d += c.detail_scale * weight;
+            w_total += weight;
+        }
     }
     
-    float w0 = 2.0f, w1 = 1.0f, w2 = 1.0f, w3 = 1.0f, w4 = 1.0f;
-    float total_w = w0 + w1 + w2 + w3 + w4;
-    
-    BiomeConfig blended = c0;
-    blended.base_height = (c0.base_height * w0 + c1.base_height * w1 + c2.base_height * w2 + c3.base_height * w3 + c4.base_height * w4) / total_w;
-    blended.mountain_scale = (c0.mountain_scale * w0 + c1.mountain_scale * w1 + c2.mountain_scale * w2 + c3.mountain_scale * w3 + c4.mountain_scale * w4) / total_w;
-    blended.valley_neg_scale = (c0.valley_neg_scale * w0 + c1.valley_neg_scale * w1 + c2.valley_neg_scale * w2 + c3.valley_neg_scale * w3 + c4.valley_neg_scale * w4) / total_w;
-    blended.valley_pos_scale = (c0.valley_pos_scale * w0 + c1.valley_pos_scale * w1 + c2.valley_pos_scale * w2 + c3.valley_pos_scale * w3 + c4.valley_pos_scale * w4) / total_w;
-    blended.detail_scale = (c0.detail_scale * w0 + c1.detail_scale * w1 + c2.detail_scale * w2 + c3.detail_scale * w3 + c4.detail_scale * w4) / total_w;
+    blended.base_height = total_h / w_total;
+    blended.mountain_scale = total_m / w_total;
+    blended.valley_neg_scale = total_v_neg / w_total;
+    blended.valley_pos_scale = total_v_pos / w_total;
+    blended.detail_scale = total_d / w_total;
     
     return blended;
 }

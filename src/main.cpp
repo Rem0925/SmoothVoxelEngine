@@ -13,6 +13,7 @@
 #include <fstream>
 #include <cstdio>
 #include <sqlite3.h>
+#include "DatabaseIO.hpp"
 
 using namespace Config;
 
@@ -169,9 +170,8 @@ void DrawSkybox(Camera3D camera, Texture2D side, Texture2D top, Texture2D bottom
 }
 
 int main() {
-    SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(1280, 720, "Smooth Voxel Engine C++");
-    SetTargetFPS(60); 
+    SetTargetFPS(MAX_FPS); 
     DisableCursor();
 
     Texture2D spritesheet = LoadTexture("assets/textures/spritesheet_tiles.png");
@@ -198,35 +198,58 @@ int main() {
     SetTextureWrap(sky_bottom, TEXTURE_WRAP_CLAMP);
     
 
-    Shader terrainShader = LoadShader("assets/shaders/terrain.vs", "assets/shaders/terrain.fs");
+    Shader terrainSolidShader = LoadShader("assets/shaders/terrain.vs", "assets/shaders/terrain_solid.fs");
+    Shader terrainPlantsShader = LoadShader("assets/shaders/terrain.vs", "assets/shaders/terrain.fs");
     Shader waterShader = LoadShader("assets/shaders/water.vs", "assets/shaders/water.fs");
     Shader skyboxShader = LoadShader("assets/shaders/skybox.vs", "assets/shaders/skybox.fs");
+    
     int skyboxSunDirLoc = GetShaderLocation(skyboxShader, "sunDir");
-    int terrainSunDirLoc = GetShaderLocation(terrainShader, "sunDir");
+    int terrainSolidSunDirLoc = GetShaderLocation(terrainSolidShader, "sunDir");
+    int terrainPlantsSunDirLoc = GetShaderLocation(terrainPlantsShader, "sunDir");
     int waterSunDirLoc = GetShaderLocation(waterShader, "sunDir");
     
-    int timeLocSolid = GetShaderLocation(terrainShader, "time");
-    int camPosLocSolid = GetShaderLocation(terrainShader, "cameraPos");
+    int timeLocSolid = GetShaderLocation(terrainSolidShader, "time");
+    int camPosLocSolid = GetShaderLocation(terrainSolidShader, "cameraPos");
+    int timeLocPlants = GetShaderLocation(terrainPlantsShader, "time");
+    int camPosLocPlants = GetShaderLocation(terrainPlantsShader, "cameraPos");
     int timeLocWater = GetShaderLocation(waterShader, "time");
     int camPosLocWater = GetShaderLocation(waterShader, "cameraPos");
-    int fogLocSolid = GetShaderLocation(terrainShader, "fogColor");
+    
+    int fogLocSolid = GetShaderLocation(terrainSolidShader, "fogColor");
+    int fogLocPlants = GetShaderLocation(terrainPlantsShader, "fogColor");
     int fogLocWater = GetShaderLocation(waterShader, "fogColor");
-    int fogStartLocSolid = GetShaderLocation(terrainShader, "fogStart");
-    int fogEndLocSolid = GetShaderLocation(terrainShader, "fogEnd");
+    int fogStartLocSolid = GetShaderLocation(terrainSolidShader, "fogStart");
+    int fogEndLocSolid = GetShaderLocation(terrainSolidShader, "fogEnd");
+    int fogStartLocPlants = GetShaderLocation(terrainPlantsShader, "fogStart");
+    int fogEndLocPlants = GetShaderLocation(terrainPlantsShader, "fogEnd");
     int fogStartLocWater = GetShaderLocation(waterShader, "fogStart");
     int fogEndLocWater = GetShaderLocation(waterShader, "fogEnd");
     
+    // Generate Perlin Noise Texture for Water
+    Image noiseImg = GenImagePerlinNoise(256, 256, 0, 0, 4.0f);
+    Texture2D noiseTex = LoadTextureFromImage(noiseImg);
+    UnloadImage(noiseImg);
+    SetTextureFilter(noiseTex, TEXTURE_FILTER_BILINEAR);
+    SetTextureWrap(noiseTex, TEXTURE_WRAP_REPEAT);
+    
     Material mat_solid = LoadMaterialDefault();
-    mat_solid.shader = terrainShader;
-
+    mat_solid.shader = terrainSolidShader;
     mat_solid.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+    
+    Material mat_plants = LoadMaterialDefault();
+    mat_plants.shader = terrainPlantsShader;
+    mat_plants.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
     
     Material mat_water = LoadMaterialDefault();
     mat_water.shader = waterShader;
     mat_water.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
     mat_water.maps[MATERIAL_MAP_DIFFUSE].color = { 255, 255, 255, 200 };
+    
+    // Bind noiseTex to the shader's "noiseTex" uniform using a spare material map
+    waterShader.locs[SHADER_LOC_MAP_EMISSION] = GetShaderLocation(waterShader, "noiseTex");
+    mat_water.maps[MATERIAL_MAP_EMISSION].texture = noiseTex;
 
-    World world(mat_solid, mat_water);
+    World world(mat_solid, mat_plants, mat_water);
     UI ui(spritesheet);
     
     std::string world_name = "world1";
@@ -428,7 +451,8 @@ int main() {
         float shaderTime = GetTime();
         SetShaderValue(world.mat_solid.shader, timeLocSolid, &shaderTime, SHADER_UNIFORM_FLOAT);
         SetShaderValue(world.mat_solid.shader, camPosLocSolid, &camera.position, SHADER_UNIFORM_VEC3);
-        
+        SetShaderValue(world.mat_plants.shader, timeLocPlants, &shaderTime, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(world.mat_plants.shader, camPosLocPlants, &camera.position, SHADER_UNIFORM_VEC3);
         SetShaderValue(world.mat_water.shader, timeLocWater, &shaderTime, SHADER_UNIFORM_FLOAT);
         SetShaderValue(world.mat_water.shader, camPosLocWater, &camera.position, SHADER_UNIFORM_VEC3);
 
@@ -450,11 +474,13 @@ int main() {
         // Pass dynamic fog color to shaders
         float fogColorVec[3] = { sky_color.r / 255.0f, sky_color.g / 255.0f, sky_color.b / 255.0f };
         SetShaderValue(world.mat_solid.shader, fogLocSolid, fogColorVec, SHADER_UNIFORM_VEC3);
+        SetShaderValue(world.mat_plants.shader, fogLocPlants, fogColorVec, SHADER_UNIFORM_VEC3);
         SetShaderValue(world.mat_water.shader, fogLocWater, fogColorVec, SHADER_UNIFORM_VEC3);
         
         SetShaderValue(world.mat_solid.shader, fogStartLocSolid, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
         SetShaderValue(world.mat_solid.shader, fogEndLocSolid, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
-        
+        SetShaderValue(world.mat_plants.shader, fogStartLocPlants, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
+        SetShaderValue(world.mat_plants.shader, fogEndLocPlants, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
         SetShaderValue(world.mat_water.shader, fogStartLocWater, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
         SetShaderValue(world.mat_water.shader, fogEndLocWater, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
         
@@ -477,7 +503,8 @@ int main() {
         
         Vector3 sun_dir_vec = { sun_x, sun_y, 0.0f };
         SetShaderValue(skyboxShader, skyboxSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
-        SetShaderValue(world.mat_solid.shader, terrainSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+        SetShaderValue(world.mat_solid.shader, terrainSolidSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+        SetShaderValue(world.mat_plants.shader, terrainPlantsSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
         SetShaderValue(world.mat_water.shader, waterSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
         
         BeginShaderMode(skyboxShader);
@@ -644,7 +671,7 @@ int main() {
             
             std::vector<Vector3> g_verts, g_norms;
             std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
-            mc::generate(d_slice, nullptr, 3, 3, 3, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
+            mc::generate(nullptr, d_slice, 3, 3, 3, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
             
             rlPushMatrix();
             rlTranslatef(bx - 1.0f, by - 1.0f, bz - 1.0f);
@@ -743,9 +770,10 @@ int main() {
     world.stop_simulation();
     world.save_all();
     global_thread_pool.wait_idle();
+    DatabaseIO::get().wait_idle();
     
     {
-        std::lock_guard<std::mutex> lock(sqlite_mutex);
+        extern sqlite3* db;
         if (db) {
             sqlite3_close(db);
             db = nullptr;

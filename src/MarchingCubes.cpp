@@ -299,30 +299,31 @@ static Vector3 interpolate(float isovalue, Vector3 p1, Vector3 p2, float valp1, 
     };
 }
 
-void generate(const float* density_grid, const uint8_t* block_grid, int size_x, int size_y, int size_z, 
+void generate(const Config::VoxelData* voxels, const float* custom_density, int size_x, int size_y, int size_z, 
               float isovalue, uint8_t default_block,
               std::vector<Vector3>& vertices, 
               std::vector<Vector3>& normals,
               std::vector<Vector2>& uvs,
               std::vector<Vector2>& uvs2,
               std::vector<Color>& colors,
-              float origin_x, float origin_z, int seed_offset) 
+              float origin_x, float origin_z, int seed_offset, int lod) 
 {
     int slice = size_x * size_z;
     
     auto get_val = [&](int x, int y, int z) -> float {
-        return density_grid[y * slice + z * size_x + x];
+        int idx = y * slice + z * size_x + x;
+        return custom_density ? custom_density[idx] : voxels[idx].density;
     };
     
     auto get_block = [&](float vx, float vy, float vz) -> uint8_t {
-        if (!block_grid) return default_block;
+        if (!voxels) return default_block;
         int ix = std::floor(vx);
         int iy = std::floor(vy);
         int iz = std::floor(vz);
         if (ix < 0) ix = 0; if (ix >= size_x) ix = size_x - 1;
         if (iy < 0) iy = 0; if (iy >= size_y) iy = size_y - 1;
         if (iz < 0) iz = 0; if (iz >= size_z) iz = size_z - 1;
-        uint8_t b = block_grid[iy * slice + iz * size_x + ix];
+        uint8_t b = voxels[iy * slice + iz * size_x + ix].block;
         if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = default_block;
         return b;
     };
@@ -331,19 +332,19 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
     float light_len = std::sqrt(light_dir.x*light_dir.x + light_dir.y*light_dir.y + light_dir.z*light_dir.z);
     light_dir.x /= light_len; light_dir.y /= light_len; light_dir.z /= light_len;
 
-    for (int y = 0; y < size_y - 1; ++y) {
-        for (int z = 0; z < size_z - 1; ++z) {
-            for (int x = 0; x < size_x - 1; ++x) {
+    for (int y = 0; y < size_y - lod; y += lod) {
+        for (int z = 0; z < size_z - lod; z += lod) {
+            for (int x = 0; x < size_x - lod; x += lod) {
                 
                 float val[8];
                 val[0] = get_val(x, y, z);
-                val[1] = get_val(x + 1, y, z);
-                val[2] = get_val(x + 1, y, z + 1);
-                val[3] = get_val(x, y, z + 1);
-                val[4] = get_val(x, y + 1, z);
-                val[5] = get_val(x + 1, y + 1, z);
-                val[6] = get_val(x + 1, y + 1, z + 1);
-                val[7] = get_val(x, y + 1, z + 1);
+                val[1] = get_val(x + lod, y, z);
+                val[2] = get_val(x + lod, y, z + lod);
+                val[3] = get_val(x, y, z + lod);
+                val[4] = get_val(x, y + lod, z);
+                val[5] = get_val(x + lod, y + lod, z);
+                val[6] = get_val(x + lod, y + lod, z + lod);
+                val[7] = get_val(x, y + lod, z + lod);
 
                 int cubeindex = 0;
                 if (val[0] < isovalue) cubeindex |= 1;
@@ -360,13 +361,13 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
 
                 Vector3 p[8] = {
                     {(float)x, (float)y, (float)z},
-                    {(float)x + 1, (float)y, (float)z},
-                    {(float)x + 1, (float)y, (float)z + 1},
-                    {(float)x, (float)y, (float)z + 1},
-                    {(float)x, (float)y + 1, (float)z},
-                    {(float)x + 1, (float)y + 1, (float)z},
-                    {(float)x + 1, (float)y + 1, (float)z + 1},
-                    {(float)x, (float)y + 1, (float)z + 1}
+                    {(float)x + lod, (float)y, (float)z},
+                    {(float)x + lod, (float)y, (float)z + lod},
+                    {(float)x, (float)y, (float)z + lod},
+                    {(float)x, (float)y + lod, (float)z},
+                    {(float)x + lod, (float)y + lod, (float)z},
+                    {(float)x + lod, (float)y + lod, (float)z + lod},
+                    {(float)x, (float)y + lod, (float)z + lod}
                 };
 
                 Vector3 vertlist[12];
@@ -410,12 +411,12 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                     
                     // 1. Leer el grid PURO para evitar que el aire se disfrace de pasto
                     auto get_raw_block = [&](int bx, int by, int bz) -> uint8_t {
-                        if (!block_grid) return default_block;
+                        if (!voxels) return default_block;
                         if (bx < 0) bx = 0; if (bx >= size_x) bx = size_x - 1;
                         if (by < 0) by = 0; if (by >= size_y) by = size_y - 1;
                         if (bz < 0) bz = 0; if (bz >= size_z) bz = size_z - 1;
                         int slice = size_x * size_z;
-                        return block_grid[by * slice + bz * size_x + bx];
+                        return voxels[by * slice + bz * size_x + bx].block;
                     };
                     
                     // Lighting calculation sin Ambient Occlusion (el usuario lo pidio)
@@ -526,9 +527,9 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                     float offset_u_sec = b_info_sec.tex_x * tex_w;
                     float offset_v_sec = (10 - 1 - b_info_sec.tex_y) * tex_h;
 
-                    float cx = std::floor((v1.x + v2.x + v3.x) / 3.0f);
-                    float cy = std::floor((v1.y + v2.y + v3.y) / 3.0f);
-                    float cz = std::floor((v1.z + v2.z + v3.z) / 3.0f);
+                    float min_x = std::min(v1.x, std::min(v2.x, v3.x));
+                    float min_y = std::min(v1.y, std::min(v2.y, v3.y));
+                    float min_z = std::min(v1.z, std::min(v2.z, v3.z));
 
                     float abs_x = std::abs(n.x);
                     float abs_y = std::abs(n.y);
@@ -570,16 +571,16 @@ void generate(const float* density_grid, const uint8_t* block_grid, int size_x, 
                         Vector3 vert = (j == 0) ? v3 : (j == 1) ? v2 : v1;
                         
                         if (abs_y >= abs_x && abs_y >= abs_z) { // Dominante Y (Techos y suelos)
-                            uv.x = vert.x - cx; 
-                            uv.y = vert.z - cz; 
+                            uv.x = (vert.x - min_x) / (float)lod; 
+                            uv.y = (vert.z - min_z) / (float)lod; 
                         }
                         else if (abs_x >= abs_y && abs_x >= abs_z) { // Dominante X (Paredes)
-                            uv.x = vert.z - cz; 
-                            uv.y = 1.0f - (vert.y - cy);
+                            uv.x = (vert.z - min_z) / (float)lod; 
+                            uv.y = 1.0f - ((vert.y - min_y) / (float)lod);
                         }
                         else { // Dominante Z (Paredes frontales)
-                            uv.x = vert.x - cx; 
-                            uv.y = 1.0f - (vert.y - cy);
+                            uv.x = (vert.x - min_x) / (float)lod; 
+                            uv.y = 1.0f - ((vert.y - min_y) / (float)lod);
                         }
                         
                         float sway = check_sway(vert) ? 10.0f : 0.0f;

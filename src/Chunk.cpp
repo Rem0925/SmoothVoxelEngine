@@ -10,22 +10,18 @@
 #include <cstring>
 #include <sqlite3.h>
 #include "World.hpp"
+#include "DatabaseIO.hpp"
 
 using namespace Config;
 
 Chunk::Chunk(int x, int z) : cx(x), cz(z) {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
-    density_grid = new float[total_blocks];
-    block_grid = new uint8_t[total_blocks];
-    water_level = new uint8_t[total_blocks];
-    std::memset(water_level, 0, total_blocks * sizeof(uint8_t));
+    voxels.resize(total_blocks);
 }
 
 Chunk::~Chunk() {
     if (gen_future.valid()) gen_future.wait();
-    if (density_grid) delete[] density_grid;
-    if (block_grid) delete[] block_grid;
-    if (water_level) delete[] water_level;
+    voxels.clear();
     if (solid_mesh.vboId) UnloadMesh(solid_mesh);
     if (water_mesh.vboId) UnloadMesh(water_mesh);
     if (plants_mesh.vboId) UnloadMesh(plants_mesh);
@@ -45,27 +41,40 @@ void Chunk::generate_thread() {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
     bool loaded = false;
     {
-        extern sqlite3* db;
-        extern std::mutex sqlite_mutex;
-        std::lock_guard<std::mutex> lock(sqlite_mutex);
-        if (db) {
-            sqlite3_stmt* stmt;
-            const char* sql = "SELECT chunk_data FROM chunks WHERE cx = ? AND cz = ?";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
-                sqlite3_bind_int(stmt, 1, cx);
-                sqlite3_bind_int(stmt, 2, cz);
-                if (sqlite3_step(stmt) == SQLITE_ROW) {
-                    const void* blob = sqlite3_column_blob(stmt, 0);
-                    int bytes = sqlite3_column_bytes(stmt, 0);
-                    if (bytes == total_blocks * (sizeof(float) + sizeof(uint8_t))) {
-                        memcpy(density_grid, blob, total_blocks * sizeof(float));
-                        memcpy(block_grid, (const char*)blob + total_blocks * sizeof(float), total_blocks * sizeof(uint8_t));
-                        loaded = true;
+        auto fut = DatabaseIO::get().enqueue_with_future([&]() -> bool {
+            bool found = false;
+            extern sqlite3* db;
+            if (db) {
+                sqlite3_stmt* stmt;
+                const char* sql = "SELECT chunk_data FROM chunks WHERE cx = ? AND cz = ?";
+                if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, cx);
+                    sqlite3_bind_int(stmt, 2, cz);
+                    if (sqlite3_step(stmt) == SQLITE_ROW) {
+                        const void* blob = sqlite3_column_blob(stmt, 0);
+                        int bytes = sqlite3_column_bytes(stmt, 0);
+                        if (bytes == total_blocks * (sizeof(float) + sizeof(uint8_t))) {
+                            if (bytes == total_blocks * sizeof(Config::VoxelData)) {
+                                memcpy(voxels.data(), blob, bytes);
+                            } else {
+                                // Old format fallback
+                                const float* old_d = (const float*)blob;
+                                const uint8_t* old_b = (const uint8_t*)((const char*)blob + total_blocks * sizeof(float));
+                                for(int i=0; i<total_blocks; i++) {
+                                    voxels[i].density = old_d[i];
+                                    voxels[i].block = old_b[i];
+                                    voxels[i].water = 0;
+                                }
+                            }
+                            found = true;
+                        }
                     }
+                    sqlite3_finalize(stmt);
                 }
-                sqlite3_finalize(stmt);
             }
-        }
+            return found;
+        });
+        loaded = fut.get();
     }
 
     if (!loaded) {
@@ -111,7 +120,30 @@ void Chunk::generate_thread() {
                 
                 for (int y = 0; y < GRID_Y; ++y) {
                     float n3d = pnoise3(sx * 0.05f, y * 0.05f, sz * 0.05f, 2, 0.4f);
-                    float cave_noise = pnoise3(sx * 0.04f, y * 0.04f, sz * 0.04f, 2, 0.5f);
+                    
+                    // 1. Generación de Cuevas (Wormholes / Intersección de 2 ruidos)
+                    // Disminuimos la frecuencia para que las curvas sean más amplias
+                    float n1 = pnoise3(sx * 0.015f, y * 0.015f, sz * 0.015f, 2, 0.5f);
+                    float n2 = pnoise3(sx * 0.015f + 123.4f, y * 0.015f + 567.8f, sz * 0.015f + 910.1f, 2, 0.5f);
+                    
+                    // Ruido extra de "Presencia" para que las cuevas sean más raras (aparezcan menos veces)
+                    float cave_presence = pnoise3(sx * 0.005f, y * 0.005f, sz * 0.005f, 2, 0.5f);
+                    
+                    float base_abs_cave = std::max(std::abs(n1), std::abs(n2));
+                    
+                    // Si presence es bajo, incrementamos artificialmente abs_cave para colapsar y cerrar el túnel
+                    // (Solo las áreas con presence alto tendrán cuevas)
+                    float cave_suppressor = std::max(0.0f, (-cave_presence + 0.1f) * 0.5f); 
+                    float abs_cave = base_abs_cave + cave_suppressor;
+                    
+                    // Aumentamos el radio para que los túneles donde SÍ hay cuevas sean mucho más anchos (para el jugador)
+                    float tunnel_radius = 0.07f; 
+                    
+                    float cave_carve = 0.0f;
+                    if (abs_cave < tunnel_radius) {
+                        float t = std::clamp((tunnel_radius - abs_cave) / tunnel_radius, 0.0f, 1.0f);
+                        cave_carve = t * t * (3.0f - 2.0f * t); 
+                    }
                     
                     float true_depth = (base_h - y) + (n3d * 2.5f);
                     float d = true_depth;
@@ -122,13 +154,19 @@ void Chunk::generate_thread() {
                     d = std::max(-1.0f, std::min(1.0f, d));
                     
                     float depth_below = base_h - y;
-                    float cave_suppression = std::max(0.5f, std::min(1.0f, 0.5f + depth_below / 15.0f));
+                    float cave_suppression = std::clamp(depth_below / 8.0f, 0.0f, 1.0f);
                     
-                    if ((cave_noise * cave_suppression) > 0.4f) {
-                        d = -1.0f;
+                    // Límite de Bedrock irregular para que se vea bien
+                    float bedrock_noise = pnoise3(sx * 0.3f, y * 0.3f, sz * 0.3f, 1, 0.5f);
+                    if (y <= 1 || (y <= 4 && bedrock_noise > -0.2f)) {
+                        d = 1.0f;
+                        cave_carve = 0.0f; // Evitar huecos en el piso
                     }
                     
-                    density_grid[idx(lx, y, lz)] = d;
+                    // Cavar tubo
+                    d -= (cave_carve * 5.0f * cave_suppression);
+                    
+                    voxels[idx(lx, y, lz)].density = d;
                     
                     if (d >= ISO_SURFACE) {
                         highest_y = y;
@@ -163,37 +201,37 @@ void Chunk::generate_thread() {
                 
                 for (int y = 0; y < GRID_Y; ++y) {
                     int i = idx(lx, y, lz);
-                    block_grid[i] = AIR;
+                    voxels[i].block = AIR;
                     
-                    if (density_grid[i] >= ISO_SURFACE) {
-                        block_grid[i] = STONE;
+                    if (voxels[i].density >= ISO_SURFACE) {
+                        voxels[i].block = STONE;
                         if (solid_exists) {
                             if (is_steep_cliff) {
-                                block_grid[i] = STONE;
+                                voxels[i].block = STONE;
                             } else if (biome.type == BIOME_OCEAN || biome.type == BIOME_BEACH) {
                                 if (y > top - 3 && y <= top) {
-                                    block_grid[i] = Config::SAND;
+                                    voxels[i].block = Config::SAND;
                                 } else if (y > top - 6 && y <= top - 3) {
-                                    block_grid[i] = Config::GRAVEL; // Grava bajo la arena marina
+                                    voxels[i].block = Config::GRAVEL; // Grava bajo la arena marina
                                 }
                             } else if (biome.type == BIOME_DESERT) {
                                 if (y > top - 3 && y <= top) {
-                                    block_grid[i] = Config::SAND;
+                                    voxels[i].block = Config::SAND;
                                 } else if (y > top - 7 && y <= top - 3) {
-                                    block_grid[i] = Config::RED_CLAY; // Arcilla roja en el desierto
+                                    voxels[i].block = Config::RED_CLAY; // Arcilla roja en el desierto
                                 }
                             } else {
                                 if (y > top - 2 && y <= top) {
-                                    block_grid[i] = biome.surface_block;
+                                    voxels[i].block = biome.surface_block;
                                 } else if (y > top - 6 && y <= top - 2) {
-                                    block_grid[i] = biome.subsurface_block;
+                                    voxels[i].block = biome.subsurface_block;
                                 }
                             }
                         }
                     }
                     
-                    if (y <= (int)WATER_LEVEL && density_grid[i] < ISO_SURFACE && y >= top) {
-                        block_grid[i] = WATER;
+                    if (y <= (int)WATER_LEVEL && voxels[i].density < ISO_SURFACE && y >= top) {
+                        voxels[i].block = WATER;
                         is_water[i] = true;
                         water_columns[col_idx] = true;
                     }
@@ -223,9 +261,9 @@ void Chunk::generate_thread() {
                 const BiomeConfig& biome = col_biomes[lz * (CHUNK_SIZE + 1) + lx];
                 for (int y = 0; y < GRID_Y; ++y) {
                     int i = idx(lx, y, lz);
-                    if (block_grid[i] == GRASS) {
+                    if (voxels[i].block == GRASS) {
                         if (y < (int)WATER_LEVEL || is_shore) {
-                            block_grid[i] = (biome.type == BIOME_BEACH || biome.type == BIOME_DESERT || biome.type == BIOME_OCEAN) ? Config::SAND : Config::DIRT;
+                            voxels[i].block = (biome.type == BIOME_BEACH || biome.type == BIOME_DESERT || biome.type == BIOME_OCEAN) ? Config::SAND : Config::DIRT;
                         }
                     }
                 }
@@ -239,7 +277,7 @@ void Chunk::generate_thread() {
                 int top = top_solid_y[col_idx];
                 const BiomeConfig& biome = col_biomes[col_idx];
                 
-                if (top > WATER_LEVEL && block_grid[idx(lx, top, lz)] == GRASS && biome.tree_chance > 0) {
+                if (top > WATER_LEVEL && voxels[idx(lx, top, lz)].block == GRASS && biome.tree_chance > 0) {
                     int g_wx = cx * CHUNK_SIZE + lx;
                     int g_wz = cz * CHUNK_SIZE + lz;
                     
@@ -262,8 +300,8 @@ void Chunk::generate_thread() {
                         
                         for (int ty = 1; ty <= tree_h; ++ty) {
                             if (top + ty < GRID_Y) {
-                                block_grid[idx(lx, top + ty, lz)] = trunk_block;
-                                density_grid[idx(lx, top + ty, lz)] = 1.0f;
+                                voxels[idx(lx, top + ty, lz)].block = trunk_block;
+                                voxels[idx(lx, top + ty, lz)].density = 1.0f;
                             }
                         }
                         int r = (biome.type == BIOME_JUNGLE) ? 3 : 2;
@@ -275,9 +313,9 @@ void Chunk::generate_thread() {
                                         int ny = top + tree_h + dy;
                                         int nz = lz + dz;
                                         if (nx >= 0 && nx <= CHUNK_SIZE && nz >= 0 && nz <= CHUNK_SIZE && ny >= 0 && ny < GRID_Y) {
-                                            if (density_grid[idx(nx, ny, nz)] < 0.0f) {
-                                                density_grid[idx(nx, ny, nz)] = 1.0f;
-                                                block_grid[idx(nx, ny, nz)] = LEAVES;
+                                            if (voxels[idx(nx, ny, nz)].density < 0.0f) {
+                                                voxels[idx(nx, ny, nz)].density = 1.0f;
+                                                voxels[idx(nx, ny, nz)].block = LEAVES;
                                             }
                                         }
                                     }
@@ -291,42 +329,43 @@ void Chunk::generate_thread() {
 
         // Save to DB
         {
-            extern sqlite3* db;
-            extern std::mutex sqlite_mutex;
-            std::lock_guard<std::mutex> lock(sqlite_mutex);
-            if (db) {
-                sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
-                sqlite3_stmt* stmt;
-                const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
-                if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
-                    sqlite3_bind_int(stmt, 1, cx);
-                    sqlite3_bind_int(stmt, 2, cz);
-                    std::vector<char> buffer(total_blocks * (sizeof(float) + sizeof(uint8_t)));
-                    memcpy(buffer.data(), density_grid, total_blocks * sizeof(float));
-                    memcpy(buffer.data() + total_blocks * sizeof(float), block_grid, total_blocks * sizeof(uint8_t));
-                    sqlite3_bind_blob(stmt, 3, buffer.data(), buffer.size(), SQLITE_TRANSIENT);
-                    sqlite3_step(stmt);
-                    sqlite3_finalize(stmt);
+            std::vector<char> buffer(total_blocks * sizeof(Config::VoxelData));
+            memcpy(buffer.data(), voxels.data(), buffer.size());
+            
+            int cap_cx = cx;
+            int cap_cz = cz;
+            
+            DatabaseIO::get().enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
+                extern sqlite3* db;
+                if (db) {
+                    sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
+                    sqlite3_stmt* stmt;
+                    const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
+                    if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                        sqlite3_bind_int(stmt, 1, cap_cx);
+                        sqlite3_bind_int(stmt, 2, cap_cz);
+                        sqlite3_bind_blob(stmt, 3, buffer.data(), buffer.size(), SQLITE_TRANSIENT);
+                        sqlite3_step(stmt);
+                        sqlite3_finalize(stmt);
+                    }
+                    sqlite3_exec(db, "COMMIT;", 0, 0, 0);
                 }
-                sqlite3_exec(db, "COMMIT;", 0, 0, 0);
-            }
+            });
         }
     }
 
     for (int i = 0; i < total_blocks; ++i) {
-        water_level[i] = (block_grid[i] == Config::WATER) ? 8 : 0;
+        voxels[i].water = (voxels[i].block == Config::WATER) ? 8 : 0;
     }
 
-    build_mesh_data(density_grid, block_grid, water_level);
+    build_mesh_data(voxels.data(), current_lod.load());
     needs_upload = true;
     is_ready = true;
 }
 
 void Chunk::rebuild_thread() {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
-    std::vector<float> d_copy(total_blocks);
-    std::vector<uint8_t> b_copy(total_blocks);
-    std::vector<uint8_t> w_copy(total_blocks);
+    std::vector<Config::VoxelData> v_copy(total_blocks);
     rebuild_running = true;
     int mode;
     for (;;) {
@@ -338,15 +377,14 @@ void Chunk::rebuild_thread() {
         if (mode == 0) break;
         {
             std::lock_guard<std::mutex> lock(chunk_mutex);
-            memcpy(d_copy.data(), density_grid, total_blocks * sizeof(float));
-            memcpy(b_copy.data(), block_grid, total_blocks * sizeof(uint8_t));
-            memcpy(w_copy.data(), water_level, total_blocks * sizeof(uint8_t));
+            v_copy = voxels;
         }
+        int lod = current_lod.load();
         if (mode >= 2) {
-            build_mesh_data(d_copy.data(), b_copy.data(), w_copy.data());
+            build_mesh_data(v_copy.data(), lod);
             pending_upload_mask.fetch_or(3);
         } else {
-            build_water_mesh(d_copy.data(), b_copy.data(), w_copy.data());
+            build_water_mesh(v_copy.data(), lod);
             pending_upload_mask.fetch_or(1);
         }
     }
@@ -354,7 +392,7 @@ void Chunk::rebuild_thread() {
     needs_upload = true;
 }
 
-void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water) {
+void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
     std::vector<Vector3> ls_vertices, ls_normals;
     std::vector<Vector2> ls_uvs, ls_uvs2;
     std::vector<Color> ls_colors;
@@ -365,7 +403,7 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
 
     // 1. Terrain Mesh (Marching Cubes)
     int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
-    mc::generate(density, blocks, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset);
+    mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod);
     
     // Remap vertices to global coords
     for (auto& v : ls_vertices) {
@@ -520,10 +558,10 @@ void Chunk::build_mesh_data(const float* density, const uint8_t* blocks, const u
         p_colors = std::move(lp_colors);
     }
 
-    build_water_mesh(density, blocks, water);
+    build_water_mesh(voxels_ptr, lod);
 }
 
-void Chunk::build_water_mesh(const float* density, const uint8_t* blocks, const uint8_t* water) {
+void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
     std::vector<Vector3> lw_vertices, lw_normals;
     std::vector<Vector2> lw_uvs, lw_uvs2;
     std::vector<Color> lw_colors;
@@ -537,11 +575,12 @@ void Chunk::build_water_mesh(const float* density, const uint8_t* blocks, const 
             float water_top = -100.0f;
             for (int y = GRID_Y - 1; y >= 0; --y) {
                 int i = idx(x, y, z);
-                if (water_top < -50.0f && water[i] > 0) {
-                    float drop = 0.05f + (8 - water[i]) * 0.10f;
+                if (water_top < -50.0f && voxels_ptr[i].water > 0) {
+                    float drop = 0.05f + (8 - voxels_ptr[i].water) * 0.10f;
                     water_top = (float)y - drop;
                 }
-                if (density[i] >= ISO_SURFACE) {
+                
+                if (voxels_ptr[i].density >= ISO_SURFACE) {
                     break;
                 }
             }
@@ -584,12 +623,12 @@ void Chunk::build_water_mesh(const float* density, const uint8_t* blocks, const 
     int total_blocks = wx * GRID_Y * wz;
     std::vector<float> water_density(total_blocks, 1.0f);
     for (int i = 0; i < total_blocks; ++i) {
-        if (blocks[i] == Config::WATER) {
+        if (voxels_ptr[i].block == Config::WATER) {
             water_density[i] = -1.0f;
         }
     }
 
-    mc::generate(water_density.data(), blocks, wx, GRID_Y, wz, ISO_SURFACE, Config::WATER, lw_vertices, lw_normals, lw_uvs, lw_uvs2, lw_colors);
+    mc::generate(voxels_ptr, water_density.data(), wx, GRID_Y, wz, ISO_SURFACE, Config::WATER, lw_vertices, lw_normals, lw_uvs, lw_uvs2, lw_colors, 0.0f, 0.0f, 0, lod);
 
     std::vector<Vector3> fw_vertices, fw_normals;
     std::vector<Vector2> fw_uvs, fw_uvs2;
@@ -629,7 +668,7 @@ void Chunk::build_water_mesh(const float* density, const uint8_t* blocks, const 
         auto get_d = [&](int x, int y, int z) {
             if (y < 0 || y >= Config::GRID_Y) return 0.0f;
             int idx = y * w * w + z * w + x;
-            return density[idx];
+            return voxels_ptr[idx].density;
         };
         
         float exact_depth = 3.0f; // Default deep
@@ -864,7 +903,7 @@ void Chunk::update_logic(int& upload_budget) {
     }
 }
 
-void Chunk::draw_solid(Material& mat_solid, Vector3 camera_pos) {
+void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos) {
     if (!is_ready || (needs_upload && !s_vertices.empty())) return;
     
     if (solid_mesh.vboId) {
@@ -877,7 +916,7 @@ void Chunk::draw_solid(Material& mat_solid, Vector3 camera_pos) {
         
         if (std::abs(cx_center - camera_pos.x) <= 35.0f && std::abs(cz_center - camera_pos.z) <= 35.0f) {
             rlDisableBackfaceCulling();
-            DrawMesh(plants_mesh, mat_solid, MatrixIdentity()); // Uses same material
+            DrawMesh(plants_mesh, mat_plants, MatrixIdentity());
             rlEnableBackfaceCulling();
         }
     }
@@ -893,7 +932,7 @@ void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
 
 uint8_t Chunk::get_block(int x, int y, int z) const {
     if (x < 0 || x > CHUNK_SIZE || y < 0 || y >= GRID_Y || z < 0 || z > CHUNK_SIZE) return AIR;
-    return block_grid[idx(x, y, z)];
+    return voxels[idx(x, y, z)].block;
 }
 
 void Chunk::set_block(int x, int y, int z, uint8_t type) {
@@ -901,17 +940,18 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
     
     std::lock_guard<std::mutex> lock(chunk_mutex);
     int i = idx(x, y, z);
-    block_grid[i] = type;
+    voxels[i].block = type;
     
     if (type == AIR || type == Config::WATER) {
-        density_grid[i] = -1.0f;
+        voxels[i].density = -1.0f;
     } else {
-        density_grid[i] = 1.0f;
+        voxels[i].density = 1.0f;
     }
     
-    water_level[i] = (type == Config::WATER) ? 8 : 0;
+    voxels[i].water = (type == Config::WATER) ? 8 : 0;
     
     is_dirty = true;
+    needs_save = true;
     water_only_rebuild = false;
 }
 
@@ -931,20 +971,17 @@ void Chunk::rebuild_mesh(bool water_only) {
 
 void Chunk::save_to_disk() {
     int total_blocks = (Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1);
-    std::vector<char> buffer(total_blocks * (sizeof(float) + sizeof(uint8_t)));
+    std::vector<char> buffer(total_blocks * sizeof(Config::VoxelData));
     {
         std::lock_guard<std::mutex> lock(chunk_mutex);
-        memcpy(buffer.data(), density_grid, total_blocks * sizeof(float));
-        memcpy(buffer.data() + total_blocks * sizeof(float), block_grid, total_blocks * sizeof(uint8_t));
+        memcpy(buffer.data(), voxels.data(), buffer.size());
     }
     
     int cap_cx = cx;
     int cap_cz = cz;
     
-    global_thread_pool.enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
+    DatabaseIO::get().enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
         extern sqlite3* db;
-        extern std::mutex sqlite_mutex;
-        std::lock_guard<std::mutex> lock(sqlite_mutex);
         if (db) {
             sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
             sqlite3_stmt* stmt;
@@ -964,28 +1001,28 @@ void Chunk::save_to_disk() {
 
 float Chunk::get_density(int x, int y, int z) const {
     if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return -1.0f;
-    return density_grid[idx(x, y, z)];
+    return voxels[idx(x, y, z)].density;
 }
 
 uint8_t Chunk::get_water_level(int x, int y, int z) const {
     if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return 0;
-    return water_level[idx(x, y, z)];
+    return voxels[idx(x, y, z)].water;
 }
 
 void Chunk::set_water_node(int x, int y, int z, uint8_t level) {
     if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return;
     std::lock_guard<std::mutex> lock(chunk_mutex);
     int i = idx(x, y, z);
-    if (water_level[i] == level && (level > 0) == (block_grid[i] == Config::WATER)) return;
+    if (voxels[i].water == level && (level > 0) == (voxels[i].block == Config::WATER)) return;
     
     if (level > 0) {
-        block_grid[i] = Config::WATER;
-        water_level[i] = (level > 8) ? 8 : level;
-        density_grid[i] = -1.0f;
+        voxels[i].block = Config::WATER;
+        voxels[i].water = (level > 8) ? 8 : level;
+        voxels[i].density = -1.0f;
     } else {
-        block_grid[i] = Config::AIR;
-        water_level[i] = 0;
-        density_grid[i] = -1.0f;
+        voxels[i].block = Config::AIR;
+        voxels[i].water = 0;
+        voxels[i].density = -1.0f;
     }
     
     is_dirty = true;

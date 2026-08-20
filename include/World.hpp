@@ -18,16 +18,16 @@ struct pair_hash {
 };
 
 extern sqlite3* db;
-extern std::mutex sqlite_mutex;
 
 class World {
 public:
     std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash> chunks;
     std::mutex chunks_mutex;
     Material mat_solid;
+    Material mat_plants;
     Material mat_water;
     
-    World(Material solid, Material water);
+    World(Material solid, Material plants, Material water);
     ~World();
 
     void update(Vector3 player_pos);

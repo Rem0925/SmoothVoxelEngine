@@ -12,7 +12,9 @@ public:
     int cx, cz;
     std::atomic<bool> is_ready{false};
     std::atomic<bool> is_dirty{false};
+    std::atomic<bool> needs_save{false};
     std::atomic<bool> needs_upload{false};
+    std::atomic<int> current_lod{1};
     std::atomic<int> rebuild_mode{0};
     std::atomic<bool> rebuild_running{false};
     std::atomic<bool> water_only_rebuild{false};
@@ -22,9 +24,7 @@ public:
     std::mutex rebuild_mutex;
     std::mutex mesh_mutex;
 
-    float* density_grid = nullptr;
-    uint8_t* block_grid = nullptr;
-    uint8_t* water_level = nullptr;
+    std::vector<Config::VoxelData> voxels;
 
     Mesh solid_mesh = { 0 };
     Mesh water_mesh = { 0 };
@@ -47,7 +47,7 @@ public:
 
     void start_generation();
     void update_logic(int& upload_budget);
-    void draw_solid(Material& mat_solid, Vector3 camera_pos);
+    void draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos);
     void draw_water(Material& mat_water, Vector3 camera_pos);
 
     uint8_t get_block(int x, int y, int z) const;
@@ -55,7 +55,7 @@ public:
     void set_block(int x, int y, int z, uint8_t type);
     uint8_t get_water_level(int x, int y, int z) const;
     void set_water_node(int x, int y, int z, uint8_t level);
-    void rebuild_mesh(bool water_only);
+    void rebuild_mesh(bool water_only = false);
     void save_to_disk();
 
 private:
@@ -63,7 +63,7 @@ private:
     
     void generate_thread();
     void rebuild_thread();
-    void build_mesh_data(const float* density, const uint8_t* blocks, const uint8_t* water);
-    void build_water_mesh(const float* density, const uint8_t* blocks, const uint8_t* water);
+    void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1);
+    void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1);
     void upload_meshes();
 };
