@@ -1,4 +1,7 @@
 #include "DatabaseIO.hpp"
+#include <sqlite3.h>
+
+extern sqlite3* db;
 
 DatabaseIO::DatabaseIO() {
     worker = std::thread(&DatabaseIO::worker_loop, this);
@@ -36,19 +39,30 @@ void DatabaseIO::wait_idle() {
 
 void DatabaseIO::worker_loop() {
     while (true) {
-        std::function<void()> task;
+        std::vector<std::function<void()>> batch;
         {
             std::unique_lock<std::mutex> lock(queue_mutex);
             condition.wait(lock, [this] { return stop || !tasks.empty(); });
             if (stop && tasks.empty()) {
                 return;
             }
-            task = std::move(tasks.front());
-            tasks.pop();
-            active_tasks++;
+            constexpr size_t BATCH_SIZE = 32;
+            while (!tasks.empty() && batch.size() < BATCH_SIZE) {
+                batch.push_back(std::move(tasks.front()));
+                tasks.pop();
+                active_tasks++;
+            }
         }
 
-        task();
-        active_tasks--;
+        if (db && batch.size() > 1) {
+            sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
+        }
+        for (auto& task : batch) {
+            task();
+        }
+        if (db && batch.size() > 1) {
+            sqlite3_exec(db, "COMMIT;", 0, 0, 0);
+        }
+        active_tasks -= static_cast<int>(batch.size());
     }
 }

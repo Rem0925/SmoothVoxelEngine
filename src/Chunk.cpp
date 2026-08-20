@@ -22,13 +22,44 @@ Chunk::Chunk(int x, int z) : cx(x), cz(z) {
 Chunk::~Chunk() {
     if (gen_future.valid()) gen_future.wait();
     voxels.clear();
-    if (solid_mesh.vboId) UnloadMesh(solid_mesh);
-    if (water_mesh.vboId) UnloadMesh(water_mesh);
-    if (plants_mesh.vboId) UnloadMesh(plants_mesh);
+    auto free_if_packed = [](Mesh& m) {
+        if (m.vboId) {
+            std::lock_guard<std::mutex> lock(gl_queue_mutex);
+            gl_delete_queue.push_back(m);
+        } else {
+            if (m.vertices) { MemFree(m.vertices); m.vertices = nullptr; }
+            if (m.normals) { MemFree(m.normals); m.normals = nullptr; }
+            if (m.texcoords) { MemFree(m.texcoords); m.texcoords = nullptr; }
+            if (m.texcoords2) { MemFree(m.texcoords2); m.texcoords2 = nullptr; }
+            if (m.colors) { MemFree(m.colors); m.colors = nullptr; }
+        }
+        m = { 0 };
+    };
+    free_if_packed(solid_mesh);
+    free_if_packed(water_mesh);
+    free_if_packed(plants_mesh);
+}
+
+void Chunk::flush_gl_delete_queue() {
+    std::vector<Mesh> pending;
+    {
+        std::lock_guard<std::mutex> lock(gl_queue_mutex);
+        pending.swap(gl_delete_queue);
+    }
+    for (Mesh& m : pending) {
+        UnloadMesh(m);
+        if (m.vertices) { MemFree(m.vertices); m.vertices = nullptr; }
+        if (m.normals) { MemFree(m.normals); m.normals = nullptr; }
+        if (m.texcoords) { MemFree(m.texcoords); m.texcoords = nullptr; }
+        if (m.texcoords2) { MemFree(m.texcoords2); m.texcoords2 = nullptr; }
+        if (m.colors) { MemFree(m.colors); m.colors = nullptr; }
+    }
 }
 
 void Chunk::start_generation() {
-    gen_future = global_thread_pool.enqueue([this] {
+    generating = true;
+    std::shared_ptr<Chunk> holder = shared_from_this();
+    gen_future = global_thread_pool.enqueue([holder, this] {
         this->generate_thread();
     });
 }
@@ -338,7 +369,6 @@ void Chunk::generate_thread() {
             DatabaseIO::get().enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
                 extern sqlite3* db;
                 if (db) {
-                    sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
                     sqlite3_stmt* stmt;
                     const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
                     if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
@@ -348,7 +378,6 @@ void Chunk::generate_thread() {
                         sqlite3_step(stmt);
                         sqlite3_finalize(stmt);
                     }
-                    sqlite3_exec(db, "COMMIT;", 0, 0, 0);
                 }
             });
         }
@@ -358,7 +387,23 @@ void Chunk::generate_thread() {
         voxels[i].water = (voxels[i].block == Config::WATER) ? 8 : 0;
     }
 
+    {
+        std::lock_guard<std::mutex> lock(chunk_mutex);
+        if (!pending_edits.empty()) {
+            for (const auto& e : pending_edits) {
+                int i = idx(e.x, e.y, e.z);
+                voxels[i].block = e.type;
+                voxels[i].density = (e.type == Config::AIR || e.type == Config::WATER) ? -1.0f : 1.0f;
+                voxels[i].water = (e.type == Config::WATER) ? 8 : 0;
+            }
+            pending_edits.clear();
+            needs_save = true;
+        }
+        generating = false;
+    }
+
     build_mesh_data(voxels.data(), current_lod.load());
+    pack_meshes(3);
     needs_upload = true;
     is_ready = true;
 }
@@ -382,10 +427,10 @@ void Chunk::rebuild_thread() {
         int lod = current_lod.load();
         if (mode >= 2) {
             build_mesh_data(v_copy.data(), lod);
-            pending_upload_mask.fetch_or(3);
+            pack_meshes(3);
         } else {
             build_water_mesh(v_copy.data(), lod);
-            pending_upload_mask.fetch_or(1);
+            pack_meshes(1);
         }
     }
     rebuild_running = false;
@@ -756,136 +801,177 @@ void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
     }
 }
 
-void Chunk::upload_meshes() {
-    int mask = pending_upload_mask.exchange(0);
-    if (mask == 0) mask = 3; // Fallback to all if called directly
-
+void Chunk::pack_meshes(int mask) {
     std::lock_guard<std::mutex> lock(mesh_mutex);
 
+    auto free_arrays = [](Mesh& m) {
+        if (m.vertices) { MemFree(m.vertices); m.vertices = nullptr; }
+        if (m.normals) { MemFree(m.normals); m.normals = nullptr; }
+        if (m.texcoords) { MemFree(m.texcoords); m.texcoords = nullptr; }
+        if (m.texcoords2) { MemFree(m.texcoords2); m.texcoords2 = nullptr; }
+        if (m.colors) { MemFree(m.colors); m.colors = nullptr; }
+    };
+
     if ((mask & 2) != 0) {
-        if (solid_mesh.vboId) UnloadMesh(solid_mesh);
-        if (plants_mesh.vboId) UnloadMesh(plants_mesh);
-        solid_mesh = { 0 }; plants_mesh = { 0 };
-    }
-    if ((mask & 1) != 0) {
-        if (water_mesh.vboId) UnloadMesh(water_mesh);
-        water_mesh = { 0 };
-    }
+        if (!s_vertices.empty()) {
+            free_arrays(solid_mesh);
+            solid_mesh.vertexCount = s_vertices.size();
+            solid_mesh.triangleCount = s_vertices.size() / 3;
 
-    if (!s_vertices.empty()) {
-        solid_mesh.vertexCount = s_vertices.size();
-        solid_mesh.triangleCount = s_vertices.size() / 3;
-        
-        solid_mesh.vertices = (float*)MemAlloc(s_vertices.size() * 3 * sizeof(float));
-        solid_mesh.normals = (float*)MemAlloc(s_normals.size() * 3 * sizeof(float));
-        solid_mesh.texcoords = (float*)MemAlloc(s_uvs.size() * 2 * sizeof(float));
-        solid_mesh.texcoords2 = (float*)MemAlloc(s_uvs2.size() * 2 * sizeof(float));
-        solid_mesh.colors = (unsigned char*)MemAlloc(s_colors.size() * 4 * sizeof(unsigned char));
+            solid_mesh.vertices = (float*)MemAlloc(s_vertices.size() * 3 * sizeof(float));
+            solid_mesh.normals = (float*)MemAlloc(s_normals.size() * 3 * sizeof(float));
+            solid_mesh.texcoords = (float*)MemAlloc(s_uvs.size() * 2 * sizeof(float));
+            solid_mesh.texcoords2 = (float*)MemAlloc(s_uvs2.size() * 2 * sizeof(float));
+            solid_mesh.colors = (unsigned char*)MemAlloc(s_colors.size() * 4 * sizeof(unsigned char));
 
-        for (size_t i = 0; i < s_vertices.size(); i++) {
-            solid_mesh.vertices[i*3] = s_vertices[i].x;
-            solid_mesh.vertices[i*3+1] = s_vertices[i].y;
-            solid_mesh.vertices[i*3+2] = s_vertices[i].z;
-            
-            solid_mesh.normals[i*3] = s_normals[i].x;
-            solid_mesh.normals[i*3+1] = s_normals[i].y;
-            solid_mesh.normals[i*3+2] = s_normals[i].z;
-            
-            solid_mesh.texcoords[i*2] = s_uvs[i].x;
-            solid_mesh.texcoords[i*2+1] = s_uvs[i].y;
+            for (size_t i = 0; i < s_vertices.size(); i++) {
+                solid_mesh.vertices[i*3] = s_vertices[i].x;
+                solid_mesh.vertices[i*3+1] = s_vertices[i].y;
+                solid_mesh.vertices[i*3+2] = s_vertices[i].z;
 
-            solid_mesh.texcoords2[i*2] = s_uvs2[i].x;
-            solid_mesh.texcoords2[i*2+1] = s_uvs2[i].y;
-            
-            solid_mesh.colors[i*4] = s_colors[i].r;
-            solid_mesh.colors[i*4+1] = s_colors[i].g;
-            solid_mesh.colors[i*4+2] = s_colors[i].b;
-            solid_mesh.colors[i*4+3] = s_colors[i].a;
-        }
-        UploadMesh(&solid_mesh, false);
-    }
+                solid_mesh.normals[i*3] = s_normals[i].x;
+                solid_mesh.normals[i*3+1] = s_normals[i].y;
+                solid_mesh.normals[i*3+2] = s_normals[i].z;
 
-    if (!w_vertices.empty()) {
-        water_mesh.vertexCount = w_vertices.size();
-        water_mesh.triangleCount = w_vertices.size() / 3;
-        
-        water_mesh.vertices = (float*)MemAlloc(w_vertices.size() * 3 * sizeof(float));
-        water_mesh.normals = (float*)MemAlloc(w_normals.size() * 3 * sizeof(float));
-        water_mesh.texcoords = (float*)MemAlloc(w_uvs.size() * 2 * sizeof(float));
-        water_mesh.texcoords2 = (float*)MemAlloc(w_uvs2.size() * 2 * sizeof(float));
-        water_mesh.colors = (unsigned char*)MemAlloc(w_colors.size() * 4 * sizeof(unsigned char));
+                solid_mesh.texcoords[i*2] = s_uvs[i].x;
+                solid_mesh.texcoords[i*2+1] = s_uvs[i].y;
 
-        for (size_t i = 0; i < w_vertices.size(); i++) {
-            water_mesh.vertices[i*3] = w_vertices[i].x;
-            water_mesh.vertices[i*3+1] = w_vertices[i].y;
-            water_mesh.vertices[i*3+2] = w_vertices[i].z;
-            
-            water_mesh.normals[i*3] = w_normals[i].x;
-            water_mesh.normals[i*3+1] = w_normals[i].y;
-            water_mesh.normals[i*3+2] = w_normals[i].z;
-            
-            water_mesh.texcoords[i*2] = w_uvs[i].x;
-            water_mesh.texcoords[i*2+1] = w_uvs[i].y;
+                solid_mesh.texcoords2[i*2] = s_uvs2[i].x;
+                solid_mesh.texcoords2[i*2+1] = s_uvs2[i].y;
 
-            water_mesh.texcoords2[i*2] = w_uvs2[i].x;
-            water_mesh.texcoords2[i*2+1] = w_uvs2[i].y;
-            
-            water_mesh.colors[i*4] = w_colors[i].r;
-            water_mesh.colors[i*4+1] = w_colors[i].g;
-            water_mesh.colors[i*4+2] = w_colors[i].b;
-            water_mesh.colors[i*4+3] = w_colors[i].a;
-        }
-        UploadMesh(&water_mesh, false);
-    }
-    
-    if (!p_vertices.empty()) {
-        plants_mesh.vertexCount = p_vertices.size();
-        plants_mesh.triangleCount = p_vertices.size() / 3;
-        
-        plants_mesh.vertices = (float*)MemAlloc(p_vertices.size() * 3 * sizeof(float));
-        plants_mesh.normals = (float*)MemAlloc(p_normals.size() * 3 * sizeof(float));
-        plants_mesh.texcoords = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
-        plants_mesh.colors = (unsigned char*)MemAlloc(p_colors.size() * 4 * sizeof(unsigned char));
+                solid_mesh.colors[i*4] = s_colors[i].r;
+                solid_mesh.colors[i*4+1] = s_colors[i].g;
+                solid_mesh.colors[i*4+2] = s_colors[i].b;
+                solid_mesh.colors[i*4+3] = s_colors[i].a;
+            }
 
-        for (size_t i = 0; i < p_vertices.size(); i++) {
-            plants_mesh.vertices[i*3] = p_vertices[i].x;
-            plants_mesh.vertices[i*3+1] = p_vertices[i].y;
-            plants_mesh.vertices[i*3+2] = p_vertices[i].z;
-            
-            plants_mesh.normals[i*3] = p_normals[i].x;
-            plants_mesh.normals[i*3+1] = p_normals[i].y;
-            plants_mesh.normals[i*3+2] = p_normals[i].z;
-            
-            plants_mesh.texcoords[i*2] = p_uvs[i].x;
-            plants_mesh.texcoords[i*2+1] = p_uvs[i].y;
-            
-            plants_mesh.colors[i*4] = p_colors[i].r;
-            plants_mesh.colors[i*4+1] = p_colors[i].g;
-            plants_mesh.colors[i*4+2] = p_colors[i].b;
-            plants_mesh.colors[i*4+3] = p_colors[i].a;
-        }
-        UploadMesh(&plants_mesh, false);
-    }
-
-    if (!rebuild_running) {
-        if ((mask & 2) != 0) {
             std::vector<Vector3>().swap(s_vertices);
             std::vector<Vector3>().swap(s_normals);
             std::vector<Vector2>().swap(s_uvs);
             std::vector<Vector2>().swap(s_uvs2);
             std::vector<Color>().swap(s_colors);
+        }
+
+        if (!p_vertices.empty()) {
+            free_arrays(plants_mesh);
+            plants_mesh.vertexCount = p_vertices.size();
+            plants_mesh.triangleCount = p_vertices.size() / 3;
+
+            plants_mesh.vertices = (float*)MemAlloc(p_vertices.size() * 3 * sizeof(float));
+            plants_mesh.normals = (float*)MemAlloc(p_normals.size() * 3 * sizeof(float));
+            plants_mesh.texcoords = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
+            plants_mesh.colors = (unsigned char*)MemAlloc(p_colors.size() * 4 * sizeof(unsigned char));
+
+            for (size_t i = 0; i < p_vertices.size(); i++) {
+                plants_mesh.vertices[i*3] = p_vertices[i].x;
+                plants_mesh.vertices[i*3+1] = p_vertices[i].y;
+                plants_mesh.vertices[i*3+2] = p_vertices[i].z;
+
+                plants_mesh.normals[i*3] = p_normals[i].x;
+                plants_mesh.normals[i*3+1] = p_normals[i].y;
+                plants_mesh.normals[i*3+2] = p_normals[i].z;
+
+                plants_mesh.texcoords[i*2] = p_uvs[i].x;
+                plants_mesh.texcoords[i*2+1] = p_uvs[i].y;
+
+                plants_mesh.colors[i*4] = p_colors[i].r;
+                plants_mesh.colors[i*4+1] = p_colors[i].g;
+                plants_mesh.colors[i*4+2] = p_colors[i].b;
+                plants_mesh.colors[i*4+3] = p_colors[i].a;
+            }
+
             std::vector<Vector3>().swap(p_vertices);
             std::vector<Vector3>().swap(p_normals);
             std::vector<Vector2>().swap(p_uvs);
             std::vector<Color>().swap(p_colors);
         }
-        if ((mask & 1) != 0) {
+    }
+
+    if ((mask & 1) != 0) {
+        if (!w_vertices.empty()) {
+            free_arrays(water_mesh);
+            water_mesh.vertexCount = w_vertices.size();
+            water_mesh.triangleCount = w_vertices.size() / 3;
+
+            water_mesh.vertices = (float*)MemAlloc(w_vertices.size() * 3 * sizeof(float));
+            water_mesh.normals = (float*)MemAlloc(w_normals.size() * 3 * sizeof(float));
+            water_mesh.texcoords = (float*)MemAlloc(w_uvs.size() * 2 * sizeof(float));
+            water_mesh.texcoords2 = (float*)MemAlloc(w_uvs2.size() * 2 * sizeof(float));
+            water_mesh.colors = (unsigned char*)MemAlloc(w_colors.size() * 4 * sizeof(unsigned char));
+
+            for (size_t i = 0; i < w_vertices.size(); i++) {
+                water_mesh.vertices[i*3] = w_vertices[i].x;
+                water_mesh.vertices[i*3+1] = w_vertices[i].y;
+                water_mesh.vertices[i*3+2] = w_vertices[i].z;
+
+                water_mesh.normals[i*3] = w_normals[i].x;
+                water_mesh.normals[i*3+1] = w_normals[i].y;
+                water_mesh.normals[i*3+2] = w_normals[i].z;
+
+                water_mesh.texcoords[i*2] = w_uvs[i].x;
+                water_mesh.texcoords[i*2+1] = w_uvs[i].y;
+
+                water_mesh.texcoords2[i*2] = w_uvs2[i].x;
+                water_mesh.texcoords2[i*2+1] = w_uvs2[i].y;
+
+                water_mesh.colors[i*4] = w_colors[i].r;
+                water_mesh.colors[i*4+1] = w_colors[i].g;
+                water_mesh.colors[i*4+2] = w_colors[i].b;
+                water_mesh.colors[i*4+3] = w_colors[i].a;
+            }
+
             std::vector<Vector3>().swap(w_vertices);
             std::vector<Vector3>().swap(w_normals);
             std::vector<Vector2>().swap(w_uvs);
             std::vector<Vector2>().swap(w_uvs2);
             std::vector<Color>().swap(w_colors);
         }
+    }
+
+    pending_upload_mask.fetch_or(mask);
+}
+
+void Chunk::upload_meshes() {
+    int mask = pending_upload_mask.exchange(0);
+    if (mask == 0) mask = 3; // Fallback to all if called directly
+
+    std::lock_guard<std::mutex> lock(mesh_mutex);
+
+    auto upload_mesh = [](Mesh& m) {
+        if (m.vboId) {
+            float* verts = m.vertices;
+            float* norms = m.normals;
+            float* tcs = m.texcoords;
+            float* tcs2 = m.texcoords2;
+            unsigned char* cols = m.colors;
+            int vcount = m.vertexCount;
+            int tcount = m.triangleCount;
+
+            rlUnloadVertexArray(m.vaoId);
+            for (int i = 0; i < 9; i++) rlUnloadVertexBuffer(m.vboId[i]);
+            MemFree(m.vboId);
+            m = { 0 };
+
+            m.vertices = verts;
+            m.normals = norms;
+            m.texcoords = tcs;
+            m.texcoords2 = tcs2;
+            m.colors = cols;
+            m.vertexCount = vcount;
+            m.triangleCount = tcount;
+        }
+
+        if (m.vertexCount > 0) {
+            UploadMesh(&m, false);
+        }
+    };
+
+    if ((mask & 2) != 0) {
+        upload_mesh(solid_mesh);
+        upload_mesh(plants_mesh);
+    }
+    if ((mask & 1) != 0) {
+        upload_mesh(water_mesh);
     }
 }
 
@@ -904,7 +990,7 @@ void Chunk::update_logic(int& upload_budget) {
 }
 
 void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos) {
-    if (!is_ready || (needs_upload && !s_vertices.empty())) return;
+    if (!is_ready || needs_upload) return;
     
     if (solid_mesh.vboId) {
         DrawMesh(solid_mesh, mat_solid, MatrixIdentity());
@@ -923,7 +1009,7 @@ void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera
 }
 
 void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
-    if (!is_ready || (needs_upload && !w_vertices.empty())) return;
+    if (!is_ready || needs_upload) return;
     
     if (water_mesh.vboId) {
         DrawMesh(water_mesh, mat_water, MatrixIdentity());
@@ -939,6 +1025,11 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
     if (x < 0 || x > CHUNK_SIZE || y < 0 || y >= GRID_Y || z < 0 || z > CHUNK_SIZE) return;
     
     std::lock_guard<std::mutex> lock(chunk_mutex);
+    if (generating) {
+        pending_edits.push_back({x, y, z, type});
+        needs_save = true;
+        return;
+    }
     int i = idx(x, y, z);
     voxels[i].block = type;
     
@@ -964,37 +1055,39 @@ void Chunk::rebuild_mesh(bool water_only) {
         return;
     }
     rebuild_mode.store(want);
-    global_thread_pool.enqueue([this] {
-        this->rebuild_thread();
+    std::shared_ptr<Chunk> holder = shared_from_this();
+    global_thread_pool.enqueue([holder] {
+        holder->rebuild_thread();
     });
 }
 
 void Chunk::save_to_disk() {
-    int total_blocks = (Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1);
-    std::vector<char> buffer(total_blocks * sizeof(Config::VoxelData));
-    {
-        std::lock_guard<std::mutex> lock(chunk_mutex);
-        memcpy(buffer.data(), voxels.data(), buffer.size());
-    }
-    
     int cap_cx = cx;
     int cap_cz = cz;
+    std::shared_ptr<Chunk> holder = shared_from_this();
     
-    DatabaseIO::get().enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
-        extern sqlite3* db;
-        if (db) {
-            sqlite3_exec(db, "BEGIN TRANSACTION;", 0, 0, 0);
-            sqlite3_stmt* stmt;
-            const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
-            if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
-                sqlite3_bind_int(stmt, 1, cap_cx);
-                sqlite3_bind_int(stmt, 2, cap_cz);
-                sqlite3_bind_blob(stmt, 3, buffer.data(), buffer.size(), SQLITE_TRANSIENT);
-                sqlite3_step(stmt);
-                sqlite3_finalize(stmt);
-            }
-            sqlite3_exec(db, "COMMIT;", 0, 0, 0);
+    global_thread_pool.enqueue([holder, cap_cx, cap_cz]() {
+        int total_blocks = (Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1);
+        std::vector<char> buffer(total_blocks * sizeof(Config::VoxelData));
+        {
+            std::lock_guard<std::mutex> lock(holder->chunk_mutex);
+            memcpy(buffer.data(), holder->voxels.data(), buffer.size());
         }
+        
+        DatabaseIO::get().enqueue([cap_cx, cap_cz, buffer = std::move(buffer)]() {
+            extern sqlite3* db;
+            if (db) {
+                sqlite3_stmt* stmt;
+                const char* sql = "INSERT OR REPLACE INTO chunks (cx, cz, chunk_data) VALUES (?, ?, ?)";
+                if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                    sqlite3_bind_int(stmt, 1, cap_cx);
+                    sqlite3_bind_int(stmt, 2, cap_cz);
+                    sqlite3_bind_blob(stmt, 3, buffer.data(), buffer.size(), SQLITE_TRANSIENT);
+                    sqlite3_step(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
+        });
     });
     is_dirty = false;
 }

@@ -7,7 +7,7 @@
 #include <future>
 #include "Config.hpp"
 
-class Chunk {
+class Chunk : public std::enable_shared_from_this<Chunk> {
 public:
     int cx, cz;
     std::atomic<bool> is_ready{false};
@@ -19,6 +19,7 @@ public:
     std::atomic<bool> rebuild_running{false};
     std::atomic<bool> water_only_rebuild{false};
     std::atomic<int> pending_upload_mask{0};
+    std::atomic<bool> generating{false};
     
     std::mutex chunk_mutex;
     std::mutex rebuild_mutex;
@@ -45,6 +46,8 @@ public:
     Chunk(int x, int z);
     ~Chunk();
 
+    static void flush_gl_delete_queue();
+
     void start_generation();
     void update_logic(int& upload_budget);
     void draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos);
@@ -60,10 +63,20 @@ public:
 
 private:
     std::future<void> gen_future;
-    
+
+    struct PendingEdit {
+        int x, y, z;
+        uint8_t type;
+    };
+    std::vector<PendingEdit> pending_edits;
+
+    static inline std::mutex gl_queue_mutex;
+    static inline std::vector<Mesh> gl_delete_queue;
+
     void generate_thread();
     void rebuild_thread();
     void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1);
     void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1);
+    void pack_meshes(int mask);
     void upload_meshes();
 };

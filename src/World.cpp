@@ -36,13 +36,22 @@ void World::sim_loop() {
 }
 
 void World::update(Vector3 player_pos) {
+    Chunk::flush_gl_delete_queue();
+    
     int pcx = std::floor(player_pos.x / CHUNK_SIZE);
     int pcz = std::floor(player_pos.z / CHUNK_SIZE);
     
     int load_radius = Config::RENDER_DISTANCE;
-    upload_budget = 2;
     
     std::lock_guard<std::mutex> map_lock(chunks_mutex);
+    
+    int pending_uploads = 0;
+    for (const auto& pair : chunks) {
+        if (pair.second->needs_upload) pending_uploads++;
+    }
+    
+    upload_budget = 2 + pending_uploads / 12;
+    if (upload_budget > 6) upload_budget = 6;
     for (auto it = chunks.begin(); it != chunks.end();) {
         int cx = it->first.first;
         int cz = it->first.second;
