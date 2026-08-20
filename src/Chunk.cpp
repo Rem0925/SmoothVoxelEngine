@@ -2,6 +2,7 @@
 #include "Noise.hpp"
 #include "MarchingCubes.hpp"
 #include "Biome.hpp"
+#include "Caves.hpp"
 #include <rlgl.h>
 #include <raymath.h>
 #include <cmath>
@@ -114,6 +115,10 @@ void Chunk::generate_thread() {
         std::vector<int> top_solid_y( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1), 0 );
         std::vector<bool> has_solid( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1), false );
         std::vector<BiomeConfig> col_biomes( (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1) );
+        std::vector<bool> cave_air( (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1), false );
+
+        Caves::CaveMap cave_map;
+        cave_map.generate(cx, cz, (uint32_t)Config::WORLD_SEED);
 
         for (int lx = 0; lx <= CHUNK_SIZE; ++lx) {
             for (int lz = 0; lz <= CHUNK_SIZE; ++lz) {
@@ -148,32 +153,30 @@ void Chunk::generate_thread() {
                 float base_h = (float)raw_h; // 100% suave, sin saltos de redondeo
                 
                 int highest_y = 0;
-                
+
+                // ¿Esta columna permite que las cuevas abran a la superficie? (aleatorio pero determinista)
+                uint32_t bh = (static_cast<uint32_t>(wx) * 374761393U) ^
+                              (static_cast<uint32_t>(wz) * 668265263U) ^
+                              (static_cast<uint32_t>(seed_offset) * 1274126177U);
+                bh = (bh ^ (bh >> 13)) * 1274126177U;
+                bh = bh ^ (bh >> 16);
+                bool cave_can_break_surface = ((bh >> 8) % 1000) < 180; // ~18% de las columnas
+
                 for (int y = 0; y < GRID_Y; ++y) {
                     float n3d = pnoise3(sx * 0.05f, y * 0.05f, sz * 0.05f, 2, 0.4f);
                     
-                    // 1. Generación de Cuevas (Wormholes / Intersección de 2 ruidos)
-                    // Disminuimos la frecuencia para que las curvas sean más amplias
-                    float n1 = pnoise3(sx * 0.015f, y * 0.015f, sz * 0.015f, 2, 0.5f);
-                    float n2 = pnoise3(sx * 0.015f + 123.4f, y * 0.015f + 567.8f, sz * 0.015f + 910.1f, 2, 0.5f);
-                    
-                    // Ruido extra de "Presencia" para que las cuevas sean más raras (aparezcan menos veces)
-                    float cave_presence = pnoise3(sx * 0.005f, y * 0.005f, sz * 0.005f, 2, 0.5f);
-                    
-                    float base_abs_cave = std::max(std::abs(n1), std::abs(n2));
-                    
-                    // Si presence es bajo, incrementamos artificialmente abs_cave para colapsar y cerrar el túnel
-                    // (Solo las áreas con presence alto tendrán cuevas)
-                    float cave_suppressor = std::max(0.0f, (-cave_presence + 0.1f) * 0.5f); 
-                    float abs_cave = base_abs_cave + cave_suppressor;
-                    
-                    // Aumentamos el radio para que los túneles donde SÍ hay cuevas sean mucho más anchos (para el jugador)
-                    float tunnel_radius = 0.07f; 
-                    
+                    // 1. Generación de Cuevas (Perlin Worms — túneles conectados estilo Minecraft)
                     float cave_carve = 0.0f;
-                    if (abs_cave < tunnel_radius) {
-                        float t = std::clamp((tunnel_radius - abs_cave) / tunnel_radius, 0.0f, 1.0f);
-                        cave_carve = t * t * (3.0f - 2.0f * t); 
+                    if (y >= 3 && y <= 72) {
+                        cave_carve = cave_map.carve_at((float)wx, (float)y, (float)wz);
+                        if (cave_carve > 0.0f) {
+                            // Rugosidad orgánica sutil en las paredes del túnel
+                            cave_carve *= 0.85f + 0.3f * (float)pnoise3(sx * 0.08f, (double)y * 0.08f, sz * 0.08f, 2, 0.5f);
+                        }
+                        // Supresión cerca de la superficie, salvo en columnas con abertura permitida
+                        if (base_h - y < 6.0f && !cave_can_break_surface) {
+                            cave_carve *= std::clamp((base_h - y) / 6.0f, 0.0f, 1.0f);
+                        }
                     }
                     
                     float true_depth = (base_h - y) + (n3d * 2.5f);
@@ -196,6 +199,7 @@ void Chunk::generate_thread() {
                     
                     // Cavar tubo
                     d -= (cave_carve * 5.0f * cave_suppression);
+                    cave_air[idx(lx, y, lz)] = (cave_carve > 0.0f);
                     
                     voxels[idx(lx, y, lz)].density = d;
                     
@@ -261,7 +265,7 @@ void Chunk::generate_thread() {
                         }
                     }
                     
-                    if (y <= (int)WATER_LEVEL && voxels[i].density < ISO_SURFACE && y >= top) {
+                    if (y <= (int)WATER_LEVEL && voxels[i].density < ISO_SURFACE && y >= top && !cave_air[i]) {
                         voxels[i].block = WATER;
                         is_water[i] = true;
                         water_columns[col_idx] = true;
