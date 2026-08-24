@@ -36,6 +36,12 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
         float max_r = max_dist + (Config::CHUNK_SIZE * 1.5f);
         if (dist_sq > max_r * max_r) continue;
         
+        BoundingBox box = { 
+            { (float)(c->cx * Config::CHUNK_SIZE), 0.0f, (float)(c->cz * Config::CHUNK_SIZE) },
+            { (float)((c->cx + 1) * Config::CHUNK_SIZE), (float)Config::GRID_Y, (float)((c->cz + 1) * Config::CHUNK_SIZE) }
+        };
+        if (!GetRayCollisionBox(ray, box).hit) continue;
+
         RayCollision mesh_hit = GetRayCollisionMesh(ray, c->solid_mesh, MatrixIdentity());
         if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
             closest_hit = mesh_hit;

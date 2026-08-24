@@ -310,6 +310,12 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
               float origin_x, float origin_z, int seed_offset, int lod,
               const Color* grass_tint_cache, const Color* foliage_tint_cache) 
 {
+    vertices.reserve(vertices.size() + 2048);
+    normals.reserve(normals.size() + 2048);
+    uvs.reserve(uvs.size() + 2048);
+    uvs2.reserve(uvs2.size() + 2048);
+    colors.reserve(colors.size() + 2048);
+
     int slice = size_x * size_z;
     
     auto get_val = [&](int x, int y, int z) -> float {
@@ -565,24 +571,19 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     colors[colors.size() - 3].a = (b3 == b_primary) ? 255 : 0; // v3
 
                     auto check_sway = [&](Vector3 v) -> bool {
-                        int ix = std::round(v.x);
-                        int iy = std::round(v.y);
-                        int iz = std::round(v.z);
                         bool has_waving = false;
-                        for (int dx=-1; dx<=0; dx++) {
-                            for (int dy=-1; dy<=0; dy++) {
-                                for (int dz=-1; dz<=0; dz++) {
-                                    int bx = std::floor(v.x) + dx + 1;
-                                    int by = std::floor(v.y) + dy + 1;
-                                    int bz = std::floor(v.z) + dz + 1;
-                                    uint8_t b = get_raw_block(bx, by, bz);
-                                    if (b == 255 || b == 7 || b == Config::TALL_GRASS) continue;
-                                    if (Config::BLOCKS.find(b) != Config::BLOCKS.end()) {
-                                        if (!Config::BLOCKS.at(b).is_waving) {
-                                            return false;
-                                        } else {
-                                            has_waving = true;
-                                        }
+                        int base_x = std::floor(v.x);
+                        int base_y = std::floor(v.y);
+                        int base_z = std::floor(v.z);
+                        
+                        for (int dx = 0; dx <= 1; dx++) {
+                            for (int dy = 0; dy <= 1; dy++) {
+                                for (int dz = 0; dz <= 1; dz++) {
+                                    uint8_t b = get_raw_block(base_x + dx, base_y + dy, base_z + dz);
+                                    if (b == 255 || b == 7 || b == Config::TALL_GRASS || b == Config::AIR) continue;
+                                    if (Config::BLOCKS.count(b)) {
+                                        if (!Config::BLOCKS.at(b).is_waving) return false;
+                                        has_waving = true;
                                     }
                                 }
                             }

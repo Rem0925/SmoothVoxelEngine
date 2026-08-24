@@ -65,9 +65,6 @@ void Chunk::start_generation() {
     });
 }
 
-inline int idx(int x, int y, int z) {
-    return y * (CHUNK_SIZE + 1) * (CHUNK_SIZE + 1) + z * (CHUNK_SIZE + 1) + x;
-}
 
 void Chunk::generate_thread() {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
@@ -193,9 +190,9 @@ void Chunk::generate_thread() {
                     
                     // Cavar tubo
                     d -= (cave_carve * 5.0f * cave_suppression);
-                    cave_air[idx(lx, y, lz)] = (cave_carve > 0.0f);
+                    cave_air[get_idx(lx, y, lz)] = (cave_carve > 0.0f);
                     
-                    voxels[idx(lx, y, lz)].density = d;
+                    voxels[get_idx(lx, y, lz)].density = d;
                     
                     if (d >= ISO_SURFACE) {
                         highest_y = y;
@@ -229,7 +226,7 @@ void Chunk::generate_thread() {
                 bool is_steep_cliff = (biome.type == BIOME_MOUNTAINS && (max_slope >= 3 || top > 108));
                 
                 for (int y = 0; y < GRID_Y; ++y) {
-                    int i = idx(lx, y, lz);
+                    int i = get_idx(lx, y, lz);
                     voxels[i].block = AIR;
                     
                     if (voxels[i].density >= ISO_SURFACE) {
@@ -289,7 +286,7 @@ void Chunk::generate_thread() {
                 bool is_shore = shore_columns[lz * (CHUNK_SIZE + 1) + lx];
                 const BiomeConfig& biome = col_biomes[lz * (CHUNK_SIZE + 1) + lx];
                 for (int y = 0; y < GRID_Y; ++y) {
-                    int i = idx(lx, y, lz);
+                    int i = get_idx(lx, y, lz);
                     if (voxels[i].block == GRASS) {
                         if (y < (int)WATER_LEVEL || is_shore) {
                             voxels[i].block = (biome.type == BIOME_BEACH || biome.type == BIOME_DESERT || biome.type == BIOME_OCEAN) ? Config::SAND : Config::DIRT;
@@ -306,7 +303,7 @@ void Chunk::generate_thread() {
                 int top = top_solid_y[col_idx];
                 const BiomeConfig& biome = col_biomes[col_idx];
                 
-                if (top > WATER_LEVEL && voxels[idx(lx, top, lz)].block == GRASS && biome.tree_chance > 0) {
+                if (top > WATER_LEVEL && voxels[get_idx(lx, top, lz)].block == GRASS && biome.tree_chance > 0) {
                     int g_wx = cx * CHUNK_SIZE + lx;
                     int g_wz = cz * CHUNK_SIZE + lz;
                     
@@ -329,8 +326,8 @@ void Chunk::generate_thread() {
                         
                         for (int ty = 1; ty <= tree_h; ++ty) {
                             if (top + ty < GRID_Y) {
-                                voxels[idx(lx, top + ty, lz)].block = trunk_block;
-                                voxels[idx(lx, top + ty, lz)].density = 1.0f;
+                                voxels[get_idx(lx, top + ty, lz)].block = trunk_block;
+                                voxels[get_idx(lx, top + ty, lz)].density = 1.0f;
                             }
                         }
                         int r = (biome.type == BIOME_JUNGLE) ? 3 : 2;
@@ -342,9 +339,9 @@ void Chunk::generate_thread() {
                                         int ny = top + tree_h + dy;
                                         int nz = lz + dz;
                                         if (nx >= 0 && nx <= CHUNK_SIZE && nz >= 0 && nz <= CHUNK_SIZE && ny >= 0 && ny < GRID_Y) {
-                                            if (voxels[idx(nx, ny, nz)].density < 0.0f) {
-                                                voxels[idx(nx, ny, nz)].density = 1.0f;
-                                                voxels[idx(nx, ny, nz)].block = LEAVES;
+                                            if (voxels[get_idx(nx, ny, nz)].density < 0.0f) {
+                                                voxels[get_idx(nx, ny, nz)].density = 1.0f;
+                                                voxels[get_idx(nx, ny, nz)].block = LEAVES;
                                             }
                                         }
                                     }
@@ -389,7 +386,7 @@ void Chunk::generate_thread() {
         std::lock_guard<std::mutex> lock(chunk_mutex);
         if (!pending_edits.empty()) {
             for (const auto& e : pending_edits) {
-                int i = idx(e.x, e.y, e.z);
+                int i = get_idx(e.x, e.y, e.z);
                 voxels[i].block = e.type;
                 voxels[i].density = (e.type == Config::AIR || e.type == Config::WATER) ? -1.0f : 1.0f;
                 voxels[i].water = (e.type == Config::WATER) ? 8 : 0;
@@ -626,7 +623,7 @@ void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
         for (int z = 0; z < wz; ++z) {
             float water_top = -100.0f;
             for (int y = GRID_Y - 1; y >= 0; --y) {
-                int i = idx(x, y, z);
+                int i = get_idx(x, y, z);
                 if (water_top < -50.0f && voxels_ptr[i].water > 0) {
                     float drop = 0.05f + (8 - voxels_ptr[i].water) * 0.10f;
                     water_top = (float)y - drop;
@@ -820,36 +817,38 @@ void Chunk::pack_meshes(int mask) {
     };
 
     if ((mask & 2) != 0) {
+        free_arrays(next_solid_mesh);
+        next_solid_mesh = {0};
+        
         if (!s_vertices.empty()) {
-            free_arrays(solid_mesh);
-            solid_mesh.vertexCount = s_vertices.size();
-            solid_mesh.triangleCount = s_vertices.size() / 3;
+            next_solid_mesh.vertexCount = s_vertices.size();
+            next_solid_mesh.triangleCount = s_vertices.size() / 3;
 
-            solid_mesh.vertices = (float*)MemAlloc(s_vertices.size() * 3 * sizeof(float));
-            solid_mesh.normals = (float*)MemAlloc(s_normals.size() * 3 * sizeof(float));
-            solid_mesh.texcoords = (float*)MemAlloc(s_uvs.size() * 2 * sizeof(float));
-            solid_mesh.texcoords2 = (float*)MemAlloc(s_uvs2.size() * 2 * sizeof(float));
-            solid_mesh.colors = (unsigned char*)MemAlloc(s_colors.size() * 4 * sizeof(unsigned char));
+            next_solid_mesh.vertices = (float*)MemAlloc(s_vertices.size() * 3 * sizeof(float));
+            next_solid_mesh.normals = (float*)MemAlloc(s_normals.size() * 3 * sizeof(float));
+            next_solid_mesh.texcoords = (float*)MemAlloc(s_uvs.size() * 2 * sizeof(float));
+            next_solid_mesh.texcoords2 = (float*)MemAlloc(s_uvs2.size() * 2 * sizeof(float));
+            next_solid_mesh.colors = (unsigned char*)MemAlloc(s_colors.size() * 4 * sizeof(unsigned char));
 
             for (size_t i = 0; i < s_vertices.size(); i++) {
-                solid_mesh.vertices[i*3] = s_vertices[i].x;
-                solid_mesh.vertices[i*3+1] = s_vertices[i].y;
-                solid_mesh.vertices[i*3+2] = s_vertices[i].z;
+                next_solid_mesh.vertices[i*3] = s_vertices[i].x;
+                next_solid_mesh.vertices[i*3+1] = s_vertices[i].y;
+                next_solid_mesh.vertices[i*3+2] = s_vertices[i].z;
 
-                solid_mesh.normals[i*3] = s_normals[i].x;
-                solid_mesh.normals[i*3+1] = s_normals[i].y;
-                solid_mesh.normals[i*3+2] = s_normals[i].z;
+                next_solid_mesh.normals[i*3] = s_normals[i].x;
+                next_solid_mesh.normals[i*3+1] = s_normals[i].y;
+                next_solid_mesh.normals[i*3+2] = s_normals[i].z;
 
-                solid_mesh.texcoords[i*2] = s_uvs[i].x;
-                solid_mesh.texcoords[i*2+1] = s_uvs[i].y;
+                next_solid_mesh.texcoords[i*2] = s_uvs[i].x;
+                next_solid_mesh.texcoords[i*2+1] = s_uvs[i].y;
 
-                solid_mesh.texcoords2[i*2] = s_uvs2[i].x;
-                solid_mesh.texcoords2[i*2+1] = s_uvs2[i].y;
+                next_solid_mesh.texcoords2[i*2] = s_uvs2[i].x;
+                next_solid_mesh.texcoords2[i*2+1] = s_uvs2[i].y;
 
-                solid_mesh.colors[i*4] = s_colors[i].r;
-                solid_mesh.colors[i*4+1] = s_colors[i].g;
-                solid_mesh.colors[i*4+2] = s_colors[i].b;
-                solid_mesh.colors[i*4+3] = s_colors[i].a;
+                next_solid_mesh.colors[i*4] = s_colors[i].r;
+                next_solid_mesh.colors[i*4+1] = s_colors[i].g;
+                next_solid_mesh.colors[i*4+2] = s_colors[i].b;
+                next_solid_mesh.colors[i*4+3] = s_colors[i].a;
             }
 
             std::vector<Vector3>().swap(s_vertices);
@@ -859,32 +858,34 @@ void Chunk::pack_meshes(int mask) {
             std::vector<Color>().swap(s_colors);
         }
 
-        if (!p_vertices.empty()) {
-            free_arrays(plants_mesh);
-            plants_mesh.vertexCount = p_vertices.size();
-            plants_mesh.triangleCount = p_vertices.size() / 3;
+        free_arrays(next_plants_mesh);
+        next_plants_mesh = {0};
 
-            plants_mesh.vertices = (float*)MemAlloc(p_vertices.size() * 3 * sizeof(float));
-            plants_mesh.normals = (float*)MemAlloc(p_normals.size() * 3 * sizeof(float));
-            plants_mesh.texcoords = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
-            plants_mesh.colors = (unsigned char*)MemAlloc(p_colors.size() * 4 * sizeof(unsigned char));
+        if (!p_vertices.empty()) {
+            next_plants_mesh.vertexCount = p_vertices.size();
+            next_plants_mesh.triangleCount = p_vertices.size() / 3;
+
+            next_plants_mesh.vertices = (float*)MemAlloc(p_vertices.size() * 3 * sizeof(float));
+            next_plants_mesh.normals = (float*)MemAlloc(p_normals.size() * 3 * sizeof(float));
+            next_plants_mesh.texcoords = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
+            next_plants_mesh.colors = (unsigned char*)MemAlloc(p_colors.size() * 4 * sizeof(unsigned char));
 
             for (size_t i = 0; i < p_vertices.size(); i++) {
-                plants_mesh.vertices[i*3] = p_vertices[i].x;
-                plants_mesh.vertices[i*3+1] = p_vertices[i].y;
-                plants_mesh.vertices[i*3+2] = p_vertices[i].z;
+                next_plants_mesh.vertices[i*3] = p_vertices[i].x;
+                next_plants_mesh.vertices[i*3+1] = p_vertices[i].y;
+                next_plants_mesh.vertices[i*3+2] = p_vertices[i].z;
 
-                plants_mesh.normals[i*3] = p_normals[i].x;
-                plants_mesh.normals[i*3+1] = p_normals[i].y;
-                plants_mesh.normals[i*3+2] = p_normals[i].z;
+                next_plants_mesh.normals[i*3] = p_normals[i].x;
+                next_plants_mesh.normals[i*3+1] = p_normals[i].y;
+                next_plants_mesh.normals[i*3+2] = p_normals[i].z;
 
-                plants_mesh.texcoords[i*2] = p_uvs[i].x;
-                plants_mesh.texcoords[i*2+1] = p_uvs[i].y;
+                next_plants_mesh.texcoords[i*2] = p_uvs[i].x;
+                next_plants_mesh.texcoords[i*2+1] = p_uvs[i].y;
 
-                plants_mesh.colors[i*4] = p_colors[i].r;
-                plants_mesh.colors[i*4+1] = p_colors[i].g;
-                plants_mesh.colors[i*4+2] = p_colors[i].b;
-                plants_mesh.colors[i*4+3] = p_colors[i].a;
+                next_plants_mesh.colors[i*4] = p_colors[i].r;
+                next_plants_mesh.colors[i*4+1] = p_colors[i].g;
+                next_plants_mesh.colors[i*4+2] = p_colors[i].b;
+                next_plants_mesh.colors[i*4+3] = p_colors[i].a;
             }
 
             std::vector<Vector3>().swap(p_vertices);
@@ -895,36 +896,38 @@ void Chunk::pack_meshes(int mask) {
     }
 
     if ((mask & 1) != 0) {
-        if (!w_vertices.empty()) {
-            free_arrays(water_mesh);
-            water_mesh.vertexCount = w_vertices.size();
-            water_mesh.triangleCount = w_vertices.size() / 3;
+        free_arrays(next_water_mesh);
+        next_water_mesh = {0};
 
-            water_mesh.vertices = (float*)MemAlloc(w_vertices.size() * 3 * sizeof(float));
-            water_mesh.normals = (float*)MemAlloc(w_normals.size() * 3 * sizeof(float));
-            water_mesh.texcoords = (float*)MemAlloc(w_uvs.size() * 2 * sizeof(float));
-            water_mesh.texcoords2 = (float*)MemAlloc(w_uvs2.size() * 2 * sizeof(float));
-            water_mesh.colors = (unsigned char*)MemAlloc(w_colors.size() * 4 * sizeof(unsigned char));
+        if (!w_vertices.empty()) {
+            next_water_mesh.vertexCount = w_vertices.size();
+            next_water_mesh.triangleCount = w_vertices.size() / 3;
+
+            next_water_mesh.vertices = (float*)MemAlloc(w_vertices.size() * 3 * sizeof(float));
+            next_water_mesh.normals = (float*)MemAlloc(w_normals.size() * 3 * sizeof(float));
+            next_water_mesh.texcoords = (float*)MemAlloc(w_uvs.size() * 2 * sizeof(float));
+            next_water_mesh.texcoords2 = (float*)MemAlloc(w_uvs2.size() * 2 * sizeof(float));
+            next_water_mesh.colors = (unsigned char*)MemAlloc(w_colors.size() * 4 * sizeof(unsigned char));
 
             for (size_t i = 0; i < w_vertices.size(); i++) {
-                water_mesh.vertices[i*3] = w_vertices[i].x;
-                water_mesh.vertices[i*3+1] = w_vertices[i].y;
-                water_mesh.vertices[i*3+2] = w_vertices[i].z;
+                next_water_mesh.vertices[i*3] = w_vertices[i].x;
+                next_water_mesh.vertices[i*3+1] = w_vertices[i].y;
+                next_water_mesh.vertices[i*3+2] = w_vertices[i].z;
 
-                water_mesh.normals[i*3] = w_normals[i].x;
-                water_mesh.normals[i*3+1] = w_normals[i].y;
-                water_mesh.normals[i*3+2] = w_normals[i].z;
+                next_water_mesh.normals[i*3] = w_normals[i].x;
+                next_water_mesh.normals[i*3+1] = w_normals[i].y;
+                next_water_mesh.normals[i*3+2] = w_normals[i].z;
 
-                water_mesh.texcoords[i*2] = w_uvs[i].x;
-                water_mesh.texcoords[i*2+1] = w_uvs[i].y;
+                next_water_mesh.texcoords[i*2] = w_uvs[i].x;
+                next_water_mesh.texcoords[i*2+1] = w_uvs[i].y;
 
-                water_mesh.texcoords2[i*2] = w_uvs2[i].x;
-                water_mesh.texcoords2[i*2+1] = w_uvs2[i].y;
+                next_water_mesh.texcoords2[i*2] = w_uvs2[i].x;
+                next_water_mesh.texcoords2[i*2+1] = w_uvs2[i].y;
 
-                water_mesh.colors[i*4] = w_colors[i].r;
-                water_mesh.colors[i*4+1] = w_colors[i].g;
-                water_mesh.colors[i*4+2] = w_colors[i].b;
-                water_mesh.colors[i*4+3] = w_colors[i].a;
+                next_water_mesh.colors[i*4] = w_colors[i].r;
+                next_water_mesh.colors[i*4+1] = w_colors[i].g;
+                next_water_mesh.colors[i*4+2] = w_colors[i].b;
+                next_water_mesh.colors[i*4+3] = w_colors[i].a;
             }
 
             std::vector<Vector3>().swap(w_vertices);
@@ -944,41 +947,32 @@ void Chunk::upload_meshes() {
 
     std::lock_guard<std::mutex> lock(mesh_mutex);
 
-    auto upload_mesh = [](Mesh& m) {
-        if (m.vboId) {
-            float* verts = m.vertices;
-            float* norms = m.normals;
-            float* tcs = m.texcoords;
-            float* tcs2 = m.texcoords2;
-            unsigned char* cols = m.colors;
-            int vcount = m.vertexCount;
-            int tcount = m.triangleCount;
-
-            rlUnloadVertexArray(m.vaoId);
-            for (int i = 0; i < 9; i++) rlUnloadVertexBuffer(m.vboId[i]);
-            MemFree(m.vboId);
-            m = { 0 };
-
-            m.vertices = verts;
-            m.normals = norms;
-            m.texcoords = tcs;
-            m.texcoords2 = tcs2;
-            m.colors = cols;
-            m.vertexCount = vcount;
-            m.triangleCount = tcount;
+    auto upload_and_swap = [](Mesh& current, Mesh& next) {
+        if (current.vboId) {
+            rlUnloadVertexArray(current.vaoId);
+            for (int i = 0; i < 9; i++) rlUnloadVertexBuffer(current.vboId[i]);
+            MemFree(current.vboId);
+            if (current.vertices) MemFree(current.vertices);
+            if (current.normals) MemFree(current.normals);
+            if (current.texcoords) MemFree(current.texcoords);
+            if (current.texcoords2) MemFree(current.texcoords2);
+            if (current.colors) MemFree(current.colors);
         }
-
-        if (m.vertexCount > 0) {
-            UploadMesh(&m, false);
+        
+        current = next;
+        next = {0};
+        
+        if (current.vertexCount > 0) {
+            UploadMesh(&current, false);
         }
     };
 
     if ((mask & 2) != 0) {
-        upload_mesh(solid_mesh);
-        upload_mesh(plants_mesh);
+        upload_and_swap(solid_mesh, next_solid_mesh);
+        upload_and_swap(plants_mesh, next_plants_mesh);
     }
     if ((mask & 1) != 0) {
-        upload_mesh(water_mesh);
+        upload_and_swap(water_mesh, next_water_mesh);
     }
 }
 
@@ -997,7 +991,7 @@ void Chunk::update_logic(int& upload_budget) {
 }
 
 void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos) {
-    if (!is_ready || needs_upload) return;
+    if (!is_ready) return;
     
     if (solid_mesh.vboId) {
         DrawMesh(solid_mesh, mat_solid, MatrixIdentity());
@@ -1016,17 +1010,13 @@ void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera
 }
 
 void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
-    if (!is_ready || needs_upload) return;
+    if (!is_ready) return;
     
     if (water_mesh.vboId) {
         DrawMesh(water_mesh, mat_water, MatrixIdentity());
     }
 }
 
-uint8_t Chunk::get_block(int x, int y, int z) const {
-    if (x < 0 || x > CHUNK_SIZE || y < 0 || y >= GRID_Y || z < 0 || z > CHUNK_SIZE) return AIR;
-    return voxels[idx(x, y, z)].block;
-}
 
 void Chunk::set_block(int x, int y, int z, uint8_t type) {
     if (x < 0 || x > CHUNK_SIZE || y < 0 || y >= GRID_Y || z < 0 || z > CHUNK_SIZE) return;
@@ -1037,7 +1027,7 @@ void Chunk::set_block(int x, int y, int z, uint8_t type) {
         needs_save = true;
         return;
     }
-    int i = idx(x, y, z);
+    int i = get_idx(x, y, z);
     voxels[i].block = type;
     
     if (type == AIR || type == Config::WATER) {
@@ -1099,20 +1089,12 @@ void Chunk::save_to_disk() {
     is_dirty = false;
 }
 
-float Chunk::get_density(int x, int y, int z) const {
-    if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return -1.0f;
-    return voxels[idx(x, y, z)].density;
-}
 
-uint8_t Chunk::get_water_level(int x, int y, int z) const {
-    if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return 0;
-    return voxels[idx(x, y, z)].water;
-}
 
 void Chunk::set_water_node(int x, int y, int z, uint8_t level) {
     if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return;
     std::lock_guard<std::mutex> lock(chunk_mutex);
-    int i = idx(x, y, z);
+    int i = get_idx(x, y, z);
     if (voxels[i].water == level && (level > 0) == (voxels[i].block == Config::WATER)) return;
     
     if (level > 0) {

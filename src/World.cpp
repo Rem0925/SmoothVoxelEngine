@@ -67,16 +67,20 @@ void World::update(Vector3 player_pos) {
     
     int chunks_started = 0;
     
-    std::vector<std::pair<int, int>> chunk_coords;
-    for (int x = -load_radius; x <= load_radius; x++) {
-        for (int z = -load_radius; z <= load_radius; z++) {
-            chunk_coords.push_back({x, z});
+    static std::vector<std::pair<int, int>> chunk_coords;
+    static int cached_load_radius = -1;
+    if (cached_load_radius != load_radius) {
+        chunk_coords.clear();
+        for (int x = -load_radius; x <= load_radius; x++) {
+            for (int z = -load_radius; z <= load_radius; z++) {
+                chunk_coords.push_back({x, z});
+            }
         }
+        std::sort(chunk_coords.begin(), chunk_coords.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
+            return (a.first * a.first + a.second * a.second) < (b.first * b.first + b.second * b.second);
+        });
+        cached_load_radius = load_radius;
     }
-    
-    std::sort(chunk_coords.begin(), chunk_coords.end(), [](const std::pair<int, int>& a, const std::pair<int, int>& b) {
-        return (a.first * a.first + a.second * a.second) < (b.first * b.first + b.second * b.second);
-    });
     
     for (const auto& coord : chunk_coords) {
         int cx = pcx + coord.first;
@@ -127,11 +131,18 @@ void World::simulate_water() {
     }
     if (snap.empty()) return;
 
+    std::sort(snap.begin(), snap.end(), [](const auto& a, const auto& b) {
+        if (a.first.first != b.first.first) return a.first.first < b.first.first;
+        return a.first.second < b.first.second;
+    });
+
     auto snap_find = [&](int cx, int cz) -> std::shared_ptr<Chunk>* {
         auto key = std::make_pair(cx, cz);
-        for (auto& entry : snap) {
-            if (entry.first == key && entry.second->is_ready) return &entry.second;
-        }
+        auto it = std::lower_bound(snap.begin(), snap.end(), key, [](const auto& a, const auto& b_key) {
+            if (a.first.first != b_key.first) return a.first.first < b_key.first;
+            return a.first.second < b_key.second;
+        });
+        if (it != snap.end() && it->first == key && it->second->is_ready) return &it->second;
         return nullptr;
     };
 
@@ -281,6 +292,8 @@ void World::simulate_water() {
 
     {
         std::lock_guard<std::mutex> lock(active_mutex);
+        std::sort(next_active.begin(), next_active.end());
+        next_active.erase(std::unique(next_active.begin(), next_active.end()), next_active.end());
         for (uint64_t k : next_active) {
             if (active_cells.size() < 5000) active_cells.push_back(k);
         }
@@ -296,11 +309,12 @@ void World::set_water_node(const std::vector<std::pair<std::pair<int,int>, std::
 
     auto apply = [&](int ccx, int ccz, int llx, int llz) {
         auto key = std::make_pair(ccx, ccz);
-        for (auto& entry : snap) {
-            if (entry.first == key && entry.second->is_ready) {
-                entry.second->set_water_node(llx, wy, llz, level);
-                return;
-            }
+        auto it = std::lower_bound(snap.begin(), snap.end(), key, [](const auto& a, const auto& b_key) {
+            if (a.first.first != b_key.first) return a.first.first < b_key.first;
+            return a.first.second < b_key.second;
+        });
+        if (it != snap.end() && it->first == key && it->second->is_ready) {
+            it->second->set_water_node(llx, wy, llz, level);
         }
     };
 

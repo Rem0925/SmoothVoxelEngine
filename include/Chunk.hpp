@@ -31,6 +31,10 @@ public:
     Mesh water_mesh = { 0 };
     Mesh plants_mesh = { 0 }; // For tall grass
 
+    Mesh next_solid_mesh = { 0 };
+    Mesh next_water_mesh = { 0 };
+    Mesh next_plants_mesh = { 0 };
+
     std::vector<Vector3> s_vertices, s_normals;
     std::vector<Vector2> s_uvs, s_uvs2;
     std::vector<Color> s_colors;
@@ -53,10 +57,26 @@ public:
     void draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos);
     void draw_water(Material& mat_water, Vector3 camera_pos);
 
-    uint8_t get_block(int x, int y, int z) const;
-    float get_density(int x, int y, int z) const;
+    inline int get_idx(int x, int y, int z) const {
+        return y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + z * (Config::CHUNK_SIZE + 1) + x;
+    }
+
+    inline uint8_t get_block(int x, int y, int z) const {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return Config::AIR;
+        return voxels[get_idx(x, y, z)].block;
+    }
+
+    inline float get_density(int x, int y, int z) const {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return -1.0f;
+        return voxels[get_idx(x, y, z)].density;
+    }
+
+    inline uint8_t get_water_level(int x, int y, int z) const {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return 0;
+        return voxels[get_idx(x, y, z)].water;
+    }
+
     void set_block(int x, int y, int z, uint8_t type);
-    uint8_t get_water_level(int x, int y, int z) const;
     void set_water_node(int x, int y, int z, uint8_t level);
     void rebuild_mesh(bool water_only = false);
     void save_to_disk();

@@ -1,64 +1,51 @@
 # Smooth Voxel Engine - Contexto y Arquitectura para IA (AI Context)
 
 ## 📌 Propósito de este archivo
-Este documento explica la arquitectura y el funcionamiento interno del **Smooth Voxel Engine**. Sirve como un mapa mental detallado para que cualquier asistente de IA entienda cómo interactúan los sistemas principales del código actual, facilitando la adición de nuevas características, la depuración y el mantenimiento. No contiene problemas a solucionar, sino la descripción de cómo funciona el motor en su estado actual.
+Este documento explica la arquitectura y el funcionamiento interno del **Smooth Voxel Engine**. Sirve como un mapa mental detallado para que cualquier asistente de IA entienda cómo interactúan los sistemas principales del código actual, facilitando la adición de nuevas características, la depuración y el mantenimiento. No contiene problemas a solucionar, sino la descripción de cómo funciona el motor en su estado actual, tras un proceso intensivo de optimización.
 
 ## 🏗️ Arquitectura General
-El motor está escrito en **C++17** y utiliza **Raylib** para la gestión de la ventana, inputs y renderizado base. Implementa generación de terreno procedural mediante **Marching Cubes**, un sistema de mundos infinitos basado en **Chunks**, persistencia de datos local con **SQLite** (amalgamation) y efectos visuales avanzados a través de **Shaders GLSL personalizados**.
+El motor está escrito en **C++17** y utiliza **Raylib** para la gestión de la ventana, inputs y renderizado base. Implementa generación de terreno procedural mediante **Marching Cubes** y sistemas de ruido continuos, un mundo tridimensional estructurado en **Chunks**, persistencia de datos concurrente con **SQLite**, simulación celular de fluidos y efectos visuales impulsados por **Shaders GLSL personalizados**.
 
 ---
 
 ## ⚙️ Sistemas Principales y Flujo de Datos
 
 ### 1. Sistema de Mundo y Chunks (`World.hpp/cpp`, `Chunk.hpp/cpp`)
-*   **Gestión Espacial:** El mundo (`World`) es un entorno infinito que maneja la carga y descarga de segmentos a través de un `std::unordered_map`. Las coordenadas `(x, z)` actúan como claves usando una estructura `std::pair<int, int>` combinada con una función hash personalizada (`pair_hash`).
-*   **Estructura del Chunk:** Cada objeto `Chunk` representa un volumen 3D (definido por `CHUNK_SIZE` en la configuración). Internamente almacena:
-    *   `float* density_grid`: Un arreglo tridimensional que guarda los valores continuos del ruido. Define la *forma geométrica* del terreno.
-    *   `uint8_t* block_grid`: Un arreglo tridimensional de IDs (Vóxeles) que define el *material* de ese punto en el espacio.
-*   **Separación de Mallas:** Un único chunk genera y dibuja múltiples mallas independientes para permitir distintos shaders de Raylib y comportamientos:
-    *   `solid_mesh`: Terreno general opaco.
-    *   `water_mesh`: Líquidos con transparencia y shader de deformación.
-    *   `plants_mesh`: Vegetación (como hierba alta) que no tiene colisión sólida.
-*   **Multithreading Centralizado (ThreadPool):** La generación procedural y la construcción de la malla ocurren en segundo plano. Existe un `ThreadPool` global instanciado en `World.cpp` calibrado por `MAX_WORKER_THREADS` (definido en `Config.hpp`). Los objetos `Chunk` ya no gestionan hilos individuales, sino que envían sus tareas pesadas (`generate_thread()`, `rebuild_thread()`) a la cola concurrente de este pool global usando lambdas y son sincronizadas con `std::future`.
-*   **Gestión de Memoria (Render Distance y Unloading):** El mundo controla un área dinámica delimitada por `RENDER_DISTANCE` en `Config.hpp`. Cuando un Chunk queda fuera del rango `RENDER_DISTANCE + 1`, el sistema ejecuta una rutina de descarga (Unloading). Si el chunk tiene datos nuevos (`is_dirty`), invoca asíncronamente `save_to_disk()` para almacenar el estado exacto en la base de datos (SQLite), previniendo pérdida de mundo antes de liberar su memoria RAM al destruirse de `std::unordered_map chunks`.
-*   **Carga Deslimitada y Frustum Culling:** El mundo evalúa e inyecta la carga de nuevos chunks al pool sin retrasos artificiales dentro de `RENDER_DISTANCE`. En el renderizado (`World::draw`), los chunks calculan matemáticamente su posición frente a la cámara (mediante intersección por distancia y ángulo del cono) para aplicar **Frustum Culling**. Si están fuera de visión, sus llamadas de dibujado se omiten totalmente.
+*   **Gestión Espacial y Vóxeles:** El mundo es un espacio infinito gestionado por un mapa de segmentos (`std::unordered_map`). La estructura base del espacio está condensada en `Config::VoxelData`, la cual contiene `{float density; uint8_t block; uint8_t water;}` para unificar la forma geométrica, el material sólido y el estado del agua en una misma estructura continua y amigable con el caché de la CPU.
+*   **Separación de Mallas:** Un único chunk (`CHUNK_SIZE`, altura `GRID_Y`) genera mallas independientes procesadas asíncronamente en un `ThreadPool`:
+    *   `solid_mesh`: Terreno opaco con colisión.
+    *   `water_mesh`: Renderizado volumétrico de agua y fluidos.
+    *   `plants_mesh`: Vegetación no sólida que ondea (cross-quads).
+*   **Accesos Ultra-rápidos (Inlining):** Los métodos `get_block`, `get_density` y `get_water_level` operan de forma `inline` directamente en la cabecera `Chunk.hpp`, lo que anula el coste de llamadas a función durante las miles de iteraciones que ocurren en físicas o simulaciones.
+*   **Ciclo de Actualización Optimizado (`World::update`):** El patrón radial de carga de chunks dentro de `RENDER_DISTANCE` se precalcula (`static std::vector`) en memoria, eliminando asignaciones dinámicas y reordenamientos en cada frame. 
+*   **Culling Activo:** Durante el renderizado, el mundo usa **Frustum Culling** basado en un cono visual, y el sistema de físicas (Raycasting) cuenta con un culling previo tipo **AABB** (Caja Delimitadora de Ejes) por chunk, que permite descartar miles de triángulos instantáneamente si el jugador no los está apuntando. 
+*   **Liberación Segura OpenGL:** Al destruir los chunks, sus búferes (VBO/VAO) se envían al hilo principal a través de `Chunk::flush_gl_delete_queue()` para que Raylib los destruya sin violar el contexto de OpenGL.
 
-### 2. Generación Procedural y Marching Cubes (`Noise.hpp/cpp`, `MarchingCubes.hpp/cpp`)
-*   **Ruido Perlin 3D:** En `Noise.cpp` reside la implementación matemática (`PerlinNoise3D`). Se utiliza Movimiento Browniano Fraccionario (FBM) mediante la función `pnoise3`, sumando múltiples *octavas* de ruido para dar una forma orgánica y natural a montañas, valles y cuevas.
-*   **Evaluación de Isosuperficie:** En `MarchingCubes.cpp`, el algoritmo recorre cada "cubo" imaginario formado por 8 puntos adyacentes del `density_grid`. Compara estos puntos contra un valor umbral (`ISO_SURFACE`). Basándose en esto, interpola las posiciones de los vértices a lo largo de las aristas del cubo para generar mallas suaves y contorneadas en lugar de formas cúbicas.
+### 2. Base de Datos Asíncrona y Guardado (`DatabaseIO.hpp/cpp`)
+*   **Integración Local:** Emplea SQLite (amalgamation) para el guardado nativo, optimizado con `PRAGMA journal_mode=WAL` (Write-Ahead Logging) y `synchronous=NORMAL`.
+*   **Worker Thread Dedicado:** La persistencia ocurre en una clase estática asíncrona (`DatabaseIO`). Los hilos del pool envían comandos de guardado (`enqueue` / `enqueue_with_future`) a esta clase, la cual agrupa las peticiones en lotes (Batches) y las envuelve en transacciones SQL (`BEGIN TRANSACTION` / `COMMIT`). Esto evita que el disco y las concurrencias congelen los fotogramas del juego.
 
-### 3. Persistencia y Base de Datos (`sqlite3.h/c`)
-*   El motor integra SQLite directamente en el árbol de dependencias del código fuente (amalgamation de C).
-*   Existe un puntero global `extern sqlite3* db` y un mutex concurrente `extern std::mutex sqlite_mutex` (definidos en `World.hpp`). Esto permite que múltiples hilos de chunks puedan leer o persistir en disco el estado de los bloques (cuando el usuario construye/destruye) de manera segura (Thread-safe) en la base de datos local.
-*   **Optimización de Disco:** Para maximizar la eficiencia y prevenir bloqueos I/O del SO durante guardados asíncronos concurrentes, se utiliza `PRAGMA journal_mode=WAL;` y `PRAGMA synchronous=NORMAL;`. Además, las operaciones de guardado se envuelven en transacciones (`BEGIN TRANSACTION` y `COMMIT`).
+### 3. Simulación de Fluidos (`World::simulate_water`)
+*   **Autómata Celular Eficiente:** El agua y otros fluidos operan bajo un modelo de celdas ejecutado concurrentemente. Las celdas activas se procesan codificando sus posiciones absolutas 3D en índices de 64 bits (`uint64_t cell_key`).
+*   **Búsqueda Logarítmica:** Para encontrar a qué chunk pertenece una gota de agua, el mundo realiza una copia (`snapshot`) del arreglo actual de chunks, lo ordena internamente y usa **Búsqueda Binaria** (`std::lower_bound`, completada en pasos $O(\log N)$) en lugar de búsquedas lineales.
+*   **Características del fluido:** Las masas de agua soportan propagación lateral basada en presión, caídas verticales aceleradas (cascadas) y la fusión de corrientes vecinas para generar fuentes de agua infinitas.
 
-### 4. Shaders y Efectos Visuales (`assets/shaders/`)
-*   **Terreno (`terrain.vs` / `terrain.fs`):**
-    *   *Flat Shading Dinámico:* Como Marching Cubes genera vértices compartidos (smooth normals), el *fragment shader* reconstruye las normales planas (estilo low-poly) en tiempo real usando derivadas espaciales (`dFdx`, `dFdy` -> `cross(dpdx, dpdy)`), lo que le da su aspecto de polígonos afilados característico.
-    *   *Texturizado Triplanar & Blending:* Las texturas se proyectan basándose en la normal de la superficie (proyección triplanar). Para evitar islas flotantes, el shader fusiona las texturas (`texPrimary`, `texSecondary`) utilizando un factor de ruido matemático para transiciones duras.
-    *   *Ondulación (Viento):* El *vertex shader* intercepta coordenadas UV específicas (ej. `TexCoord.x > 5.0`) para identificar hojas y pasto, aplicando un desplazamiento trigonométrico animado por la variable de tiempo (`time`).
-*   **Agua Estilo Toon (`water.vs` / `water.fs`):**
-    *   *Olas Base:* El *vertex shader* altera la posición `Y` usando seno/coseno del tiempo. Utiliza el canal Alpha (`vertexColor.a`) como una máscara (`shoreMask`) para anclar el agua a las orillas y evitar que se separe de la tierra.
-    *   *Profundidad y Espuma Procedural:* El *fragment shader* simula profundidad y mezcla colores (cyan/azul profundo). Renderiza espuma ("Foam") animada en la superficie evaluando funciones de ruido en tiempo real (`valueNoise`), controlando el corte (cutoff) dependiendo de la cercanía a la costa.
+### 4. Generador de Terreno y Cuevas (`Caves.hpp/cpp`, `Biome.hpp/cpp`, `Noise.hpp/cpp`)
+*   **Evaluación Biómica Continua:** Un sistema paramétrico macro-escalar de Ruido Perlin 2D (Continentalidad, Temperatura, Humedad) define mapas continuos. Esto clasifica zonas fluidamente en océanos, playas, llanuras, bosques, montañas y selvas sin transiciones bruscas.
+*   **Tinte Bilineal Inteligente:** El terreno de césped y hojas aplica `compute_chunk_tint_cache()` para convolucionar biomas en una grilla de puntos clave (suavizado $25 \times 25$). Marching Cubes luego evalúa colores en tiempo real con interpolación bilineal directa, previniendo bordes de color asimétricos o cuellos de botella en CPU.
+*   **Red de Cuevas Subterráneas (`CaveMap`):** Usa un sistema de gusanos 3D conectados (Perlin worms) distribuidos por todo el mundo con un hash grid espacial. Controlan aperturas orgánicas hacia la superficie y dejan un fondo impenetrable en la coordenada base (Bedrock). Se optimizó su radio de sondeo para preservar continuidad lateral sin estresar la memoria.
 
-*   **Centralización de Uniforms:** Los parámetros estéticos ambientales de ambos shaders, como `fogStart` y `fogEnd`, están controlados globalmente desde constantes en `Config.hpp`. Estos valores se envían dinámicamente cada fotograma a la GPU mediante `SetShaderValue()` en C++.
+### 5. Algoritmos de Renderizado (`MarchingCubes.hpp/cpp`)
+*   El terreno es generado empleando **Marching Cubes** en una isosuperficie definida dinámicamente (`Config::ISO_SURFACE`), procesada con paso ajustable de nivel de detalle (`LOD`).
+*   **Manejo Avanzado del Viento:** El sistema detecta materiales biológicos (`b_info_pri.is_waving`). Gracias a esto, no es necesario ejecutar pesadas comprobaciones adyacentes para el `sway`, reduciendo lecturas masivas.
+*   El renderizado de fluidos utiliza una variante de Marching Cubes invertido para crear agua volumétrica que no requiere colisiones, rellenando espacios según un valor umbral denso.
 
-### 5. Sistema de Biomas y Climas (`Biome.hpp/cpp`)
-*   **Capas de Ruido Continuo 2D:** El sistema evalúa Continentalidad ($C$), Temperatura ($T$) y Humedad ($H$) a macro-escala para determinar biomas sin romper la continuidad del terreno:
-    *   `BIOME_OCEAN`: Fondo marino profundo ($Y \approx 24 \sim 29$), lecho de arena bajo `WATER_LEVEL = 38.0f`.
-    *   `BIOME_BEACH`: Pendientes suaves de arena en las costas.
-    *   `BIOME_PLAINS`: Praderas y llanuras templadas con abundante pasto alto.
-    *   `BIOME_FOREST`: Bosques frondosos con alta densidad de árboles.
-    *   `BIOME_MOUNTAINS`: Montañas colosales y empinadas ($Y=85 \sim 115$) con roca expuesta en picos y laderas.
-    *   `BIOME_DESERT`: Grandes extensiones de arena, dunas suaves y clima árido.
-    *   `BIOME_TAIGA`: Bosques boreales fríos con coníferas altas y pasto verdeazulado.
-    *   `BIOME_JUNGLE`: Selvas tropicales densas con árboles gigantescos y vegetación esmeralda hipervibrante.
-*   **Tintado Dinámico por Temperatura:**
-    *   Los bloques de `GRASS`, `TALL_GRASS` y `LEAVES` son tintados a nivel de vértice multiplicando la intensidad lumínica por el tinte RGB del bioma correspondiente.
-    *   Los bloques de piedra, madera, tierra y arena conservan sus texturas y colores naturales intactos.
-*   **Altura Vertical (`GRID_Y = 128`):** El motor soporta 128 bloques de altura vertical, permitiendo cordilleras de gran altitud y fosas oceánicas profundas.
+### 6. Shaders y Efectos (`assets/shaders/`)
+*   **Terreno Sólido (`terrain_solid.fs`):** Flat-shading computado enteramente por derivadas locales en la tarjeta gráfica (`dFdx/dFdy`). Proyección triplanar pura, difuminado atmosférico gradual (Fog) e iluminación base paramétrica.
+*   **Vegetación (`terrain.fs`):** Shader dedicado con interpolación de viento ondulante desde las coordenadas base. 
+*   **Agua (`water.fs`):** Aplica animación paramétrica en vértices. Interpola una textura de ruido dinámico renderizada vía `GenImagePerlinNoise()` y evalúa el canal Alfa en los vértices del Marching Cubes para generar efecto dinámico de espuma al golpear costas o terrenos bajos.
+*   **Atmósfera (`skybox.vs/fs`):** Cielo procesado dinámicamente según la hora del día en el motor. Sol y luna volumétricos orbitando el jugador que controlan los colores y opacidades ambientales mediante interpolación temporal.
 
-### 6. Configuración y UI (`Config.hpp`, `UI.hpp/cpp`)
-*   **El diccionario `BLOCKS`:** En `Config.hpp`, un `std::unordered_map` unifica todos los datos de los bloques (ID, Nombre de visualización, coordenadas de textura `tex_x/tex_y`, si es transparente y si tiene flag `is_waving` para ondular con el viento).
-*   **Vegetación y Decoraciones:** El motor incluye bloques decorativos no sólidos como el `TALL_GRASS`. Este bloque mantiene la lógica de vegetación pero se guarda en el arreglo `block_grid`. Al construir la malla (`build_mesh_data()`), el motor ignora estos IDs para no formar cubos sólidos (a través del algoritmo Marching Cubes), y en su lugar emite cuádruples transversales (cross-quads) que se envían directamente a la `plants_mesh`, manteniendo su animación de viento mediante el shader y adoptando el tinte de color de su bioma.
-*   **Inventario (UI):** La clase `UI` abstrae las lógicas de interfaz 2D de Raylib. Genera visualmente la barra de acceso rápido (Hotbar), lee el sprite principal (`spritesheet_tiles.png`) y recorta los iconos 2D correspondientes de la cuadrícula a partir de la configuración del bloque seleccionado en 3D.
+### 7. Control e Inventario (`UI.hpp/cpp`)
+*   Motor HUD 2D nativo integrado. Lee el inventario (bloques mapeados por IDs planos para accesos veloces).
+*   Muestra guías holográficas de colocación (Wireframe/Ghost voxel), minado sin trabas a pesar del retraso de sincronización y físicas "Auto-Step" compensadas que detectan paredes a nivel de tobillo para escalar bloques sin necesidad de saltos constantes. 
