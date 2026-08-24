@@ -72,6 +72,6 @@ namespace Config {
         {GRAVEL, {"Grava", 6, 9, false, false}},
         {RED_CLAY, {"Arcilla Roja", 3, 0, false, false}},
         {BIRCH_WOOD, {"Madera Abedul", 0, 1, false, false}},
-        {CACTUS, {"Cactus", 8, 7, false, false}}
+        {CACTUS, {"Cactus", 8, 8, false, false}}
     };
 }

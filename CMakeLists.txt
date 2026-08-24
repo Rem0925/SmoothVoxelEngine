@@ -33,6 +33,8 @@ endif()
 set(SOURCES
     src/Biome.cpp
     src/Caves.cpp
+    src/Chat.cpp
+    src/CommandHandler.cpp
     src/Chunk.cpp
     src/DatabaseIO.cpp
     src/MarchingCubes.cpp

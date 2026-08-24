@@ -1,0 +1,33 @@
+--- src/main.cpp
++++ src/main.cpp
+@@ -105,8 +105,8 @@
+     
+     unsigned char c = (unsigned char)(255.0f * sky_intensity);
+     rlPushMatrix();
+-        rlTranslatef(camera.position.x, Config::WATER_LEVEL, camera.position.z);
+-        float s = 1000.0f; // Aumentar tamaño para que no te salgas al volar alto
++        rlTranslatef(camera.position.x, camera.position.y, camera.position.z);
++        float s = 500.0f * 1.01f;
+         float u0 = 0.005f;
+         float u1 = 0.995f;
+         
+@@ -534,7 +534,8 @@
+ 
+         BeginMode3D(camera);
+         
+-        Vector3 sun_dir_vec = { sun_x, sun_y, 0.0f };
++        Vector3 sun_center = { camera.position.x + 400.0f * sun_x, camera.position.y + 400.0f * sun_y, camera.position.z };
++        Vector3 sun_dir_vec = Vector3Normalize(Vector3Subtract(sun_center, camera.position));
+         
+         SetShaderValue(skyboxShader, skyboxSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+         SetShaderValue(world.mat_solid.shader, terrainSolidSunDirLoc, &sun_dir_vec, SHADER_UNIFORM_VEC3);
+@@ -559,7 +560,7 @@
+         
+         rlPushMatrix();
+             // Fijar la órbita celeste al nivel del agua del mundo, NO a la cámara,
+             // para que no parezcan elevarse si el jugador vuela hacia arriba
+-            rlTranslatef(camera.position.x, Config::WATER_LEVEL, camera.position.z);
++            rlTranslatef(camera.position.x, camera.position.y, camera.position.z);
+             
+             // Sun (Perfect flat quad)
+             if (sun_alpha > 0) {
