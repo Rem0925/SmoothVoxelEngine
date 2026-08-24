@@ -31,6 +31,7 @@ static inline BiomeConfig get_pure_biome_config(BiomeType type, float temp, floa
     cfg.red_mushroom_chance = 0;
     cfg.brown_mushroom_chance = 0;
     cfg.dead_bush_chance = 0;
+    cfg.cactus_chance = 0;
     
     switch (type) {
         case BIOME_OCEAN:
@@ -93,6 +94,7 @@ static inline BiomeConfig get_pure_biome_config(BiomeType type, float temp, floa
             cfg.subsurface_block = Config::RED_CLAY;
             cfg.tree_chance = 0;
             cfg.dead_bush_chance = 15;
+            cfg.cactus_chance = 12;
             cfg.grass_tint = {174, 178, 72, 255};
             cfg.foliage_tint = {160, 165, 65, 255};
             break;
@@ -201,11 +203,11 @@ BiomeConfig get_discrete_biome(double wx, double wz, int seed_offset) {
     if (cont < -0.01f) {
         return get_pure_biome_config(BIOME_BEACH, temp, hum, cont);
     }
+    if (temp > 0.65f && hum < 0.35f) {
+        return get_pure_biome_config(BIOME_DESERT, temp, hum, cont);
+    }
     if (n_mount > 0.30) {
         return get_pure_biome_config(BIOME_MOUNTAINS, temp, hum, cont);
-    }
-    if (temp > 0.68f && hum < 0.32f) {
-        return get_pure_biome_config(BIOME_DESERT, temp, hum, cont);
     }
     if (temp < 0.35f) {
         return get_pure_biome_config(BIOME_TAIGA, temp, hum, cont);

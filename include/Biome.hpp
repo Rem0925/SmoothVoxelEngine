@@ -42,6 +42,7 @@ struct BiomeConfig {
     int red_mushroom_chance;  // Probabilidad (sobre 1000)
     int brown_mushroom_chance;// Probabilidad (sobre 1000)
     int dead_bush_chance;     // Probabilidad (sobre 1000)
+    int cactus_chance;        // Probabilidad (sobre 1000)
     
     // Tintes de color puros
     Color grass_tint;

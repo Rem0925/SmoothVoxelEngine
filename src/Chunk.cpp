@@ -303,48 +303,65 @@ void Chunk::generate_thread() {
                 int top = top_solid_y[col_idx];
                 const BiomeConfig& biome = col_biomes[col_idx];
                 
-                if (top > WATER_LEVEL && voxels[get_idx(lx, top, lz)].block == GRASS && biome.tree_chance > 0) {
-                    int g_wx = cx * CHUNK_SIZE + lx;
-                    int g_wz = cz * CHUNK_SIZE + lz;
+                if (top > WATER_LEVEL) {
+                    uint8_t surface_block = voxels[get_idx(lx, top, lz)].block;
+                    bool can_tree = (surface_block == Config::GRASS && biome.tree_chance > 0);
+                    bool can_cactus = (surface_block == Config::SAND && biome.cactus_chance > 0);
                     
-                    // Hash 2D de alta entropia para distribucion organica uniforme
-                    uint32_t th = (static_cast<uint32_t>(g_wx) * 374761393U) ^ 
-                                  (static_cast<uint32_t>(g_wz) * 668265263U) ^ 
-                                  (static_cast<uint32_t>(seed_offset) * 1274126177U);
-                    th = (th ^ (th >> 13)) * 1274126177U;
-                    th = th ^ (th >> 16);
-                    int tree_hash = (int)(th % 1000U);
-                    
-                    if (tree_hash < biome.tree_chance) {
-                        int h_range = std::max(1, biome.tree_max_h - biome.tree_min_h + 1);
-                        int tree_h = biome.tree_min_h + (tree_hash % h_range);
+                    if (can_tree || can_cactus) {
+                        int g_wx = cx * CHUNK_SIZE + lx;
+                        int g_wz = cz * CHUNK_SIZE + lz;
                         
-                        // Determinar especie: Roble (WOOD) o Abedul (BIRCH_WOOD)
-                        int species_val = (int)((th / 1000U) % 100U);
-                        bool is_birch = (biome.birch_tree_ratio > 0.0f) && (species_val < (int)(biome.birch_tree_ratio * 100.0f));
-                        uint8_t trunk_block = is_birch ? Config::BIRCH_WOOD : Config::WOOD;
+                        // Hash 2D de alta entropia para distribucion organica uniforme
+                        uint32_t th = (static_cast<uint32_t>(g_wx) * 374761393U) ^ 
+                                      (static_cast<uint32_t>(g_wz) * 668265263U) ^ 
+                                      (static_cast<uint32_t>(seed_offset) * 1274126177U);
+                        th = (th ^ (th >> 13)) * 1274126177U;
+                        th = th ^ (th >> 16);
+                        int spawn_hash = (int)(th % 1000U);
                         
-                        for (int ty = 1; ty <= tree_h; ++ty) {
-                            if (top + ty < GRID_Y) {
-                                voxels[get_idx(lx, top + ty, lz)].block = trunk_block;
-                                voxels[get_idx(lx, top + ty, lz)].density = 1.0f;
+                        if (can_tree && spawn_hash < biome.tree_chance) {
+                            int h_range = std::max(1, biome.tree_max_h - biome.tree_min_h + 1);
+                            int tree_h = biome.tree_min_h + (spawn_hash % h_range);
+                            
+                            // Determinar especie: Roble (WOOD) o Abedul (BIRCH_WOOD)
+                            int species_val = (int)((th / 1000U) % 100U);
+                            bool is_birch = (biome.birch_tree_ratio > 0.0f) && (species_val < (int)(biome.birch_tree_ratio * 100.0f));
+                            uint8_t trunk_block = is_birch ? Config::BIRCH_WOOD : Config::WOOD;
+                            
+                            for (int ty = 1; ty <= tree_h; ++ty) {
+                                if (top + ty < GRID_Y) {
+                                    voxels[get_idx(lx, top + ty, lz)].block = trunk_block;
+                                    voxels[get_idx(lx, top + ty, lz)].density = 1.0f;
+                                }
                             }
-                        }
-                        int r = (biome.type == BIOME_JUNGLE) ? 3 : 2;
-                        for (int dx = -r; dx <= r; ++dx) {
-                            for (int dy = -r; dy <= r; ++dy) {
-                                for (int dz = -r; dz <= r; ++dz) {
-                                    if (dx*dx + dy*dy + dz*dz <= r*r + 1) {
-                                        int nx = lx + dx;
-                                        int ny = top + tree_h + dy;
-                                        int nz = lz + dz;
-                                        if (nx >= 0 && nx <= CHUNK_SIZE && nz >= 0 && nz <= CHUNK_SIZE && ny >= 0 && ny < GRID_Y) {
-                                            if (voxels[get_idx(nx, ny, nz)].density < 0.0f) {
-                                                voxels[get_idx(nx, ny, nz)].density = 1.0f;
-                                                voxels[get_idx(nx, ny, nz)].block = LEAVES;
+                            int r = (biome.type == BIOME_JUNGLE) ? 3 : 2;
+                            for (int dx = -r; dx <= r; ++dx) {
+                                for (int dy = -r; dy <= r; ++dy) {
+                                    for (int dz = -r; dz <= r; ++dz) {
+                                        if (dx*dx + dy*dy + dz*dz <= r*r + 1) {
+                                            int nx = lx + dx;
+                                            int ny = top + tree_h + dy;
+                                            int nz = lz + dz;
+                                            if (nx >= 0 && nx <= CHUNK_SIZE && nz >= 0 && nz <= CHUNK_SIZE && ny >= 0 && ny < GRID_Y) {
+                                                if (voxels[get_idx(nx, ny, nz)].density < 0.0f) {
+                                                    voxels[get_idx(nx, ny, nz)].density = 1.0f;
+                                                    voxels[get_idx(nx, ny, nz)].block = Config::LEAVES;
+                                                }
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                        else if (can_cactus && spawn_hash < biome.cactus_chance) {
+                            int h_range = 3; // 4 - 2 + 1
+                            int cactus_h = 2 + (spawn_hash % h_range);
+                            
+                            for (int ty = 1; ty <= cactus_h; ++ty) {
+                                if (top + ty < GRID_Y) {
+                                    voxels[get_idx(lx, top + ty, lz)].block = Config::CACTUS;
+                                    voxels[get_idx(lx, top + ty, lz)].density = 1.0f;
                                 }
                             }
                         }
