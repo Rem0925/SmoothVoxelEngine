@@ -117,12 +117,23 @@ void World::activate(int wx, int wy, int wz) {
 }
 
 void World::simulate_water() {
-    std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash> snap;
+    std::vector<std::pair<std::pair<int,int>, std::shared_ptr<Chunk>>> snap;
     {
         std::lock_guard<std::mutex> lock(chunks_mutex);
-        snap = chunks;
+        snap.reserve(chunks.size());
+        for (auto& kv : chunks) {
+            snap.emplace_back(kv.first, kv.second);
+        }
     }
     if (snap.empty()) return;
+
+    auto snap_find = [&](int cx, int cz) -> std::shared_ptr<Chunk>* {
+        auto key = std::make_pair(cx, cz);
+        for (auto& entry : snap) {
+            if (entry.first == key && entry.second->is_ready) return &entry.second;
+        }
+        return nullptr;
+    };
 
     std::vector<uint64_t> to_process;
     {
@@ -155,9 +166,9 @@ void World::simulate_water() {
 
         int ccx = std::floor((float)wx / Config::CHUNK_SIZE);
         int ccz = std::floor((float)wz / Config::CHUNK_SIZE);
-        auto it = snap.find({ccx, ccz});
-        if (it == snap.end() || !it->second->is_ready) continue;
-        Chunk* c = it->second.get();
+        std::shared_ptr<Chunk>* found = snap_find(ccx, ccz);
+        if (!found) continue;
+        Chunk* c = found->get();
         int lx = wx - ccx * Config::CHUNK_SIZE;
         int lz = wz - ccz * Config::CHUNK_SIZE;
 
@@ -167,8 +178,8 @@ void World::simulate_water() {
         auto get_target = [&](int wwx, int wwz) -> Chunk* {
             int ncx = std::floor((float)wwx / Config::CHUNK_SIZE);
             int ncz = std::floor((float)wwz / Config::CHUNK_SIZE);
-            auto tit = snap.find({ncx, ncz});
-            return (tit != snap.end() && tit->second->is_ready) ? tit->second.get() : nullptr;
+            std::shared_ptr<Chunk>* nb = snap_find(ncx, ncz);
+            return nb ? nb->get() : nullptr;
         };
 
         auto read_block = [&](int wx2, int wy2, int wz2) -> uint8_t {
@@ -276,7 +287,7 @@ void World::simulate_water() {
     }
 }
 
-void World::set_water_node(const std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash>& snap, int wx, int wy, int wz, uint8_t level) {
+void World::set_water_node(const std::vector<std::pair<std::pair<int,int>, std::shared_ptr<Chunk>>>& snap, int wx, int wy, int wz, uint8_t level) {
     if (wy < 0 || wy >= Config::GRID_Y) return;
     int cx = std::floor((float)wx / CHUNK_SIZE);
     int cz = std::floor((float)wz / CHUNK_SIZE);
@@ -284,8 +295,13 @@ void World::set_water_node(const std::unordered_map<std::pair<int, int>, std::sh
     int lz = wz - cz * CHUNK_SIZE;
 
     auto apply = [&](int ccx, int ccz, int llx, int llz) {
-        auto it = snap.find({ccx, ccz});
-        if (it != snap.end() && it->second->is_ready) it->second->set_water_node(llx, wy, llz, level);
+        auto key = std::make_pair(ccx, ccz);
+        for (auto& entry : snap) {
+            if (entry.first == key && entry.second->is_ready) {
+                entry.second->set_water_node(llx, wy, llz, level);
+                return;
+            }
+        }
     };
 
     apply(cx, cz, lx, lz);

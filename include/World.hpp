@@ -43,7 +43,7 @@ public:
 
 private:
     void simulate_water();
-    void set_water_node(const std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash>& snap, int wx, int wy, int wz, uint8_t level);
+    void set_water_node(const std::vector<std::pair<std::pair<int,int>, std::shared_ptr<Chunk>>>& snap, int wx, int wy, int wz, uint8_t level);
     void sim_loop();
     void activate(int wx, int wy, int wz);
     int upload_budget = 2;

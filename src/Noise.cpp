@@ -1,11 +1,12 @@
 #include "Noise.hpp"
+#include "Config.hpp"
 #include <cmath>
 #include <numeric>
 #include <random>
 #include <algorithm>
 #include <vector>
 
-PerlinNoise3D g_perlin_gen;
+PerlinNoise3D g_perlin_gen(Config::WORLD_SEED);
 
 PerlinNoise3D::PerlinNoise3D(int seed) {
     std::vector<int> p_temp(256);
@@ -35,14 +36,23 @@ double PerlinNoise3D::grad(int hash_val, double x, double y, double z) {
     return (((h & 1) == 0) ? u : -u) + (((h & 2) == 0) ? v : -v);
 }
 
-double PerlinNoise3D::noise(double x, double y, double z) const {
-    int X = static_cast<int>(std::floor(x)) & 255;
-    int Y = static_cast<int>(std::floor(y)) & 255;
-    int Z = static_cast<int>(std::floor(z)) & 255;
+static inline int fast_floor(double x) {
+    int xi = (int)x;
+    return x < xi ? xi - 1 : xi;
+}
 
-    x -= std::floor(x);
-    y -= std::floor(y);
-    z -= std::floor(z);
+double PerlinNoise3D::noise(double x, double y, double z) const {
+    int X_floor = fast_floor(x);
+    int Y_floor = fast_floor(y);
+    int Z_floor = fast_floor(z);
+
+    int X = X_floor & 255;
+    int Y = Y_floor & 255;
+    int Z = Z_floor & 255;
+
+    x -= X_floor;
+    y -= Y_floor;
+    z -= Z_floor;
 
     double u = fade(x);
     double v = fade(y);

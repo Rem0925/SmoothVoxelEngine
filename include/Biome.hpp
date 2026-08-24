@@ -60,18 +60,21 @@ namespace Biome {
     BiomeConfig get_blended_biome(double wx, double wz, int seed_offset, int radius = 10);
     
     // Tintes con degradado suave en fronteras entre biomas
-    Color get_blended_grass_tint(double wx, double wz, int seed_offset, int radius = 8);
-    Color get_blended_foliage_tint(double wx, double wz, int seed_offset, int radius = 8);
+    Color get_blended_grass_tint(double wx, double wz, int seed_offset, int radius = 6);
+    Color get_blended_foliage_tint(double wx, double wz, int seed_offset, int radius = 6);
+    
+    // Precalculo ultrarrapido de cache de tintes para un chunk completo (17x17 columnas)
+    void compute_chunk_tint_cache(int cx, int cz, int seed_offset, Color* out_grass, Color* out_foliage);
     
     // Alias directos
     inline BiomeConfig get_biome_at(double wx, double wz, int seed_offset) {
         return get_blended_biome(wx, wz, seed_offset, 10);
     }
     inline Color get_grass_tint_at(double wx, double wz, int seed_offset) {
-        return get_blended_grass_tint(wx, wz, seed_offset, 8);
+        return get_blended_grass_tint(wx, wz, seed_offset, 6);
     }
     inline Color get_foliage_tint_at(double wx, double wz, int seed_offset) {
-        return get_blended_foliage_tint(wx, wz, seed_offset, 8);
+        return get_blended_foliage_tint(wx, wz, seed_offset, 6);
     }
     
     const char* get_biome_name_at(double wx, double wz, int seed_offset);

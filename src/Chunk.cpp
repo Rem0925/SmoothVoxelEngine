@@ -73,40 +73,34 @@ void Chunk::generate_thread() {
     int total_blocks = (CHUNK_SIZE + 1) * GRID_Y * (CHUNK_SIZE + 1);
     bool loaded = false;
     {
-        auto fut = DatabaseIO::get().enqueue_with_future([&]() -> bool {
-            bool found = false;
-            extern sqlite3* db;
-            if (db) {
-                sqlite3_stmt* stmt;
-                const char* sql = "SELECT chunk_data FROM chunks WHERE cx = ? AND cz = ?";
-                if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
-                    sqlite3_bind_int(stmt, 1, cx);
-                    sqlite3_bind_int(stmt, 2, cz);
-                    if (sqlite3_step(stmt) == SQLITE_ROW) {
-                        const void* blob = sqlite3_column_blob(stmt, 0);
-                        int bytes = sqlite3_column_bytes(stmt, 0);
-                        if (bytes == total_blocks * (sizeof(float) + sizeof(uint8_t))) {
-                            if (bytes == total_blocks * sizeof(Config::VoxelData)) {
-                                memcpy(voxels.data(), blob, bytes);
-                            } else {
-                                // Old format fallback
-                                const float* old_d = (const float*)blob;
-                                const uint8_t* old_b = (const uint8_t*)((const char*)blob + total_blocks * sizeof(float));
-                                for(int i=0; i<total_blocks; i++) {
-                                    voxels[i].density = old_d[i];
-                                    voxels[i].block = old_b[i];
-                                    voxels[i].water = 0;
-                                }
+        extern sqlite3* db;
+        if (db) {
+            sqlite3_stmt* stmt;
+            const char* sql = "SELECT chunk_data FROM chunks WHERE cx = ? AND cz = ?";
+            if (sqlite3_prepare_v2(db, sql, -1, &stmt, 0) == SQLITE_OK) {
+                sqlite3_bind_int(stmt, 1, cx);
+                sqlite3_bind_int(stmt, 2, cz);
+                if (sqlite3_step(stmt) == SQLITE_ROW) {
+                    const void* blob = sqlite3_column_blob(stmt, 0);
+                    int bytes = sqlite3_column_bytes(stmt, 0);
+                    if (bytes == total_blocks * (sizeof(float) + sizeof(uint8_t))) {
+                        if (bytes == total_blocks * sizeof(Config::VoxelData)) {
+                            memcpy(voxels.data(), blob, bytes);
+                        } else {
+                            const float* old_d = (const float*)blob;
+                            const uint8_t* old_b = (const uint8_t*)((const char*)blob + total_blocks * sizeof(float));
+                            for(int i=0; i<total_blocks; i++) {
+                                voxels[i].density = old_d[i];
+                                voxels[i].block = old_b[i];
+                                voxels[i].water = 0;
                             }
-                            found = true;
                         }
+                        loaded = true;
                     }
-                    sqlite3_finalize(stmt);
                 }
+                sqlite3_finalize(stmt);
             }
-            return found;
-        });
-        loaded = fut.get();
+        }
     }
 
     if (!loaded) {
@@ -452,7 +446,14 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
 
     // 1. Terrain Mesh (Marching Cubes)
     int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
-    mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod);
+
+    // Pre-compute tint cache per column (17x17 for CHUNK_SIZE+1) using fast grid convolution
+    const int CACHE_SIZE = CHUNK_SIZE + 1;
+    std::vector<Color> grass_tint_cache(CACHE_SIZE * CACHE_SIZE);
+    std::vector<Color> foliage_tint_cache(CACHE_SIZE * CACHE_SIZE);
+    Biome::compute_chunk_tint_cache(cx, cz, seed_offset, grass_tint_cache.data(), foliage_tint_cache.data());
+
+    mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod, grass_tint_cache.data(), foliage_tint_cache.data());
     
     // Remap vertices to global coords
     for (auto& v : ls_vertices) {
@@ -470,16 +471,18 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
                                (ls_vertices[i].y + ls_vertices[i+1].y + ls_vertices[i+2].y) / 3.0f,
                                (ls_vertices[i].z + ls_vertices[i+1].z + ls_vertices[i+2].z) / 3.0f };
                                
-            int lx = std::floor(center.x) - cx * CHUNK_SIZE;
-            int ly = std::floor(center.y);
-            int lz = std::floor(center.z) - cz * CHUNK_SIZE;
+            int lx = std::clamp((int)std::floor(center.x) - cx * CHUNK_SIZE, 0, CHUNK_SIZE);
+            int ly = (int)std::floor(center.y);
+            int lz = std::clamp((int)std::floor(center.z) - cz * CHUNK_SIZE, 0, CHUNK_SIZE);
             
             uint8_t b1 = get_block(lx, ly, lz);
             uint8_t b2 = get_block(lx, ly - 1, lz);
             bool on_grass = (b1 == Config::GRASS || b2 == Config::GRASS);
             bool on_sand  = (b1 == Config::SAND  || b2 == Config::SAND);
             
-            BiomeConfig biome = Biome::get_biome_at(center.x, center.z, seed_offset);
+            int cache_idx = lz * CACHE_SIZE + lx;
+            BiomeConfig biome = Biome::get_discrete_biome(center.x, center.z, seed_offset);
+            Color plant_grass_tint = grass_tint_cache[cache_idx];
             
             // Hash 2D de alta entropia para plantas (sin lineas diagonales)
             int cell_x = (int)std::floor(center.x * 3.0f);
@@ -499,7 +502,7 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
             
             if (b1 == Config::TALL_GRASS || b2 == Config::TALL_GRASS) {
                 plant_type = Config::TALL_GRASS;
-                plant_color = Biome::get_grass_tint_at(center.x, center.z, seed_offset);
+                plant_color = plant_grass_tint;
             } else if (b1 == Config::RED_MUSHROOM || b2 == Config::RED_MUSHROOM) {
                 plant_type = Config::RED_MUSHROOM;
                 plant_height = 0.55f;
@@ -512,7 +515,7 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
             } else if (on_grass) {
                 if (hash < biome.tall_grass_chance) {
                     plant_type = Config::TALL_GRASS;
-                    plant_color = Biome::get_grass_tint_at(center.x, center.z, seed_offset);
+                    plant_color = plant_grass_tint;
                     tile_var = hash % 3;
                 } else if (hash < biome.tall_grass_chance + biome.red_mushroom_chance) {
                     plant_type = Config::RED_MUSHROOM;

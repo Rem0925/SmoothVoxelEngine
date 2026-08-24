@@ -768,6 +768,7 @@ int main() {
     }
     
     world.stop_simulation();
+    global_thread_pool.clear_queue();
     world.save_all();
     global_thread_pool.wait_idle();
     DatabaseIO::get().wait_idle();

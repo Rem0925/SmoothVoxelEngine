@@ -2,6 +2,7 @@
 #include "Config.hpp"
 #include "Biome.hpp"
 #include <cmath>
+#include <algorithm>
 
 namespace mc {
 
@@ -306,7 +307,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
               std::vector<Vector2>& uvs,
               std::vector<Vector2>& uvs2,
               std::vector<Color>& colors,
-              float origin_x, float origin_z, int seed_offset, int lod) 
+              float origin_x, float origin_z, int seed_offset, int lod,
+              const Color* grass_tint_cache, const Color* foliage_tint_cache) 
 {
     int slice = size_x * size_z;
     
@@ -446,19 +448,15 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     else if (b3 != b1) b_secondary = b3;
 
                     auto get_vertex_col = [&](Vector3 v, uint8_t b) -> Color {
-                        double gx = v.x + origin_x;
-                        double gz = v.z + origin_z;
                         unsigned char r = col_val;
                         unsigned char g = col_val;
                         unsigned char b_col = col_val;
                         
-                        if (b == Config::GRASS) {
-                            Color tint = Biome::get_grass_tint_at(gx, gz, seed_offset);
-                            r = (unsigned char)((col_val * tint.r) / 255);
-                            g = (unsigned char)((col_val * tint.g) / 255);
-                            b_col = (unsigned char)((col_val * tint.b) / 255);
-                        } else if (b == Config::LEAVES) {
-                            Color tint = Biome::get_foliage_tint_at(gx, gz, seed_offset);
+                        if ((b == Config::GRASS || b == Config::LEAVES) && grass_tint_cache && foliage_tint_cache) {
+                            int cx = std::clamp((int)std::floor(v.x), 0, size_x - 1);
+                            int cz = std::clamp((int)std::floor(v.z), 0, size_z - 1);
+                            int cache_idx = cz * size_x + cx;
+                            Color tint = (b == Config::GRASS) ? grass_tint_cache[cache_idx] : foliage_tint_cache[cache_idx];
                             r = (unsigned char)((col_val * tint.r) / 255);
                             g = (unsigned char)((col_val * tint.g) / 255);
                             b_col = (unsigned char)((col_val * tint.b) / 255);
@@ -484,15 +482,41 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
 
                     float foliage_pri_offset = pri_is_foliage ? 10.0f : 0.0f;
                     float foliage_sec_offset = sec_is_foliage ? 10.0f : 0.0f;
+                    auto sample_bilinear_tint = [&](float px, float pz, const Color* cache) -> Color {
+                        float cx = std::clamp(px, 0.0f, (float)(size_x - 1));
+                        float cz = std::clamp(pz, 0.0f, (float)(size_z - 1));
+                        int x0 = (int)cx;
+                        int z0 = (int)cz;
+                        int x1 = std::min(x0 + 1, size_x - 1);
+                        int z1 = std::min(z0 + 1, size_z - 1);
+                        float tx = cx - x0;
+                        float tz = cz - z0;
 
-                    // Color de tinte para el triángulo (hojas o pasto)
-                    double tri_gx = (v1.x + v2.x + v3.x) / 3.0 + origin_x;
-                    double tri_gz = (v1.z + v2.z + v3.z) / 3.0 + origin_z;
-                    Color tri_tint;
-                    if (b_primary == Config::LEAVES || b_secondary == Config::LEAVES) {
-                        tri_tint = Biome::get_foliage_tint_at(tri_gx, tri_gz, seed_offset);
-                    } else {
-                        tri_tint = Biome::get_grass_tint_at(tri_gx, tri_gz, seed_offset);
+                        Color c00 = cache[z0 * size_x + x0];
+                        Color c10 = cache[z0 * size_x + x1];
+                        Color c01 = cache[z1 * size_x + x0];
+                        Color c11 = cache[z1 * size_x + x1];
+
+                        float r0 = c00.r * (1.0f - tx) + c10.r * tx;
+                        float r1 = c01.r * (1.0f - tx) + c10.r * tx;
+                        float r = r0 * (1.0f - tz) + (c01.r * (1.0f - tx) + c11.r * tx) * tz;
+
+                        float g0 = c00.g * (1.0f - tx) + c10.g * tx;
+                        float g = g0 * (1.0f - tz) + (c01.g * (1.0f - tx) + c11.g * tx) * tz;
+
+                        float b0 = c00.b * (1.0f - tx) + c10.b * tx;
+                        float b_val = b0 * (1.0f - tz) + (c01.b * (1.0f - tx) + c11.b * tx) * tz;
+
+                        return Color{ (unsigned char)r, (unsigned char)g, (unsigned char)b_val, 255 };
+                    };
+
+                    // Color de tinte para el triángulo con interpolación bilineal suave
+                    Color tri_tint = {255, 255, 255, 255};
+                    if (grass_tint_cache && foliage_tint_cache) {
+                        float tri_x = (v1.x + v2.x + v3.x) / 3.0f;
+                        float tri_z = (v1.z + v2.z + v3.z) / 3.0f;
+                        const Color* target_cache = (b_primary == Config::LEAVES || b_secondary == Config::LEAVES) ? foliage_tint_cache : grass_tint_cache;
+                        tri_tint = sample_bilinear_tint(tri_x, tri_z, target_cache);
                     }
 
                     Color tri_color = Color{

@@ -17,6 +17,7 @@ public:
     auto enqueue(F&& f, Args&&... args) -> std::future<typename std::invoke_result<F, Args...>::type>;
 
     void wait_idle();
+    void clear_queue();
 
 private:
     std::vector<std::thread> workers;
@@ -88,4 +89,11 @@ inline ThreadPool::~ThreadPool() {
 inline void ThreadPool::wait_idle() {
     std::unique_lock<std::mutex> lock(queue_mutex);
     idle_condition.wait(lock, [this]{ return tasks.empty() && active == 0; });
+}
+
+inline void ThreadPool::clear_queue() {
+    std::unique_lock<std::mutex> lock(queue_mutex);
+    std::queue<std::function<void()>> empty;
+    std::swap(tasks, empty);
+    if (active == 0) idle_condition.notify_all();
 }

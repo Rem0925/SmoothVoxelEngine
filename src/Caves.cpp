@@ -80,7 +80,7 @@ void CaveMap::insert(float x, float y, float z, float radius) {
 void CaveMap::generate(int chunk_cx, int chunk_cz, uint32_t world_seed) {
     cells.clear();
 
-    const float MAX_REACH = 115.0f;
+    const float MAX_REACH = 70.0f;
     int cell_range = (int)std::ceil(MAX_REACH / CHUNK);
 
     int wx0 = chunk_cx * CHUNK - 8;

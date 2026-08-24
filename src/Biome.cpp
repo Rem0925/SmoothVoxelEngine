@@ -281,74 +281,145 @@ BiomeConfig get_blended_biome(double wx, double wz, int seed_offset, int radius)
     return blended;
 }
 
-Color get_blended_grass_tint(double wx, double wz, int seed_offset, int /*radius*/) {
-    double sx = wx + seed_offset;
-    double sz = wz + seed_offset;
-    
-    double n_temp  = pnoise3(sx * 0.0009, 250.0, sz * 0.0009, 3, 0.5);
-    double n_hum   = pnoise3(sx * 0.0009, 450.0, sz * 0.0009, 3, 0.5);
-    double n_mount = pnoise3(sx * 0.0011, 750.0, sz * 0.0011, 3, 0.5);
-    
-    float temp = std::clamp((float)((n_temp + 0.8) * 0.625), 0.0f, 1.0f);
-    float hum  = std::clamp((float)((n_hum + 0.8) * 0.625), 0.0f, 1.0f);
-    float mount_t = std::clamp((float)((n_mount - 0.15) / 0.35), 0.0f, 1.0f);
-    float mount_f = mount_t * mount_t * (3.0f - 2.0f * mount_t);
-    
-    Color col_taiga   = {72, 133, 98, 255};   // Frio
-    Color col_plains  = {124, 189, 45, 255};  // Templado medio
-    Color col_forest  = {88, 156, 40, 255};   // Templado humedo
-    Color col_desert  = {174, 178, 72, 255};  // Calido seco
-    Color col_jungle  = {50, 200, 34, 255};   // Calido humedo
-    Color col_alpine  = {138, 182, 120, 255}; // Montana
-    
-    Color col_dry, col_wet;
-    if (temp < 0.5f) {
-        float t = temp / 0.5f;
-        col_dry = lerp_color(col_taiga, col_plains, t);
-        col_wet = lerp_color(col_taiga, col_forest, t);
-    } else {
-        float t = (temp - 0.5f) / 0.5f;
-        col_dry = lerp_color(col_plains, col_desert, t);
-        col_wet = lerp_color(col_forest, col_jungle, t);
+void compute_chunk_tint_cache(int cx, int cz, int seed_offset, Color* out_grass, Color* out_foliage) {
+    if (!out_grass || !out_foliage) return;
+
+    constexpr int CHUNK_DIM = Config::CHUNK_SIZE + 1; // 17
+    constexpr int R = 4; // Radio de mezcla estilo Minecraft
+    constexpr int GRID_DIM = CHUNK_DIM + 2 * R; // 17 + 8 = 25
+
+    // 1. Evaluar biomas discretos en la grilla mínima con padding
+    Color grid_grass[GRID_DIM * GRID_DIM];
+    Color grid_foliage[GRID_DIM * GRID_DIM];
+
+    double base_wx = (double)(cx * Config::CHUNK_SIZE - R);
+    double base_wz = (double)(cz * Config::CHUNK_SIZE - R);
+
+    for (int gz = 0; gz < GRID_DIM; ++gz) {
+        double wz = base_wz + gz;
+        for (int gx = 0; gx < GRID_DIM; ++gx) {
+            double wx = base_wx + gx;
+            BiomeConfig b = get_discrete_biome(wx, wz, seed_offset);
+            grid_grass[gz * GRID_DIM + gx] = b.grass_tint;
+            grid_foliage[gz * GRID_DIM + gx] = b.foliage_tint;
+        }
     }
-    
-    Color climate_col = lerp_color(col_dry, col_wet, hum);
-    return lerp_color(climate_col, col_alpine, mount_f * 0.7f);
+
+    // 2. Precalcular pesos del kernel de distancia
+    float kernel_weights[(2 * R + 1) * (2 * R + 1)];
+    int k_dim = 2 * R + 1;
+    for (int dz = -R; dz <= R; ++dz) {
+        for (int dx = -R; dx <= R; ++dx) {
+            float dist = std::sqrt((float)(dx * dx + dz * dz));
+            float w = (dist <= (float)R) ? (1.0f / (dist + 1.0f)) : 0.0f;
+            kernel_weights[(dz + R) * k_dim + (dx + R)] = w;
+        }
+    }
+
+    // 3. Convolución rápida 2D en memoria para los 17x17 puntos del chunk
+    for (int lz = 0; lz < CHUNK_DIM; ++lz) {
+        for (int lx = 0; lx < CHUNK_DIM; ++lx) {
+            float total_gr_r = 0, total_gr_g = 0, total_gr_b = 0;
+            float total_fl_r = 0, total_fl_g = 0, total_fl_b = 0;
+            float w_total = 0;
+
+            int center_gx = lx + R;
+            int center_gz = lz + R;
+
+            for (int dz = -R; dz <= R; ++dz) {
+                int gz = center_gz + dz;
+                int k_row = (dz + R) * k_dim;
+                int g_row = gz * GRID_DIM;
+
+                for (int dx = -R; dx <= R; ++dx) {
+                    float w = kernel_weights[k_row + (dx + R)];
+                    if (w <= 0.0f) continue;
+
+                    int gx = center_gx + dx;
+                    Color gc = grid_grass[g_row + gx];
+                    Color fc = grid_foliage[g_row + gx];
+
+                    total_gr_r += gc.r * w;
+                    total_gr_g += gc.g * w;
+                    total_gr_b += gc.b * w;
+
+                    total_fl_r += fc.r * w;
+                    total_fl_g += fc.g * w;
+                    total_fl_b += fc.b * w;
+
+                    w_total += w;
+                }
+            }
+
+            int out_idx = lz * CHUNK_DIM + lx;
+            out_grass[out_idx] = Color{
+                (unsigned char)(total_gr_r / w_total),
+                (unsigned char)(total_gr_g / w_total),
+                (unsigned char)(total_gr_b / w_total),
+                255
+            };
+            out_foliage[out_idx] = Color{
+                (unsigned char)(total_fl_r / w_total),
+                (unsigned char)(total_fl_g / w_total),
+                (unsigned char)(total_fl_b / w_total),
+                255
+            };
+        }
+    }
 }
 
-Color get_blended_foliage_tint(double wx, double wz, int seed_offset, int /*radius*/) {
-    double sx = wx + seed_offset;
-    double sz = wz + seed_offset;
-    
-    double n_temp  = pnoise3(sx * 0.0009, 250.0, sz * 0.0009, 3, 0.5);
-    double n_hum   = pnoise3(sx * 0.0009, 450.0, sz * 0.0009, 3, 0.5);
-    double n_mount = pnoise3(sx * 0.0011, 750.0, sz * 0.0011, 3, 0.5);
-    
-    float temp = std::clamp((float)((n_temp + 0.8) * 0.625), 0.0f, 1.0f);
-    float hum  = std::clamp((float)((n_hum + 0.8) * 0.625), 0.0f, 1.0f);
-    float mount_t = std::clamp((float)((n_mount - 0.15) / 0.35), 0.0f, 1.0f);
-    float mount_f = mount_t * mount_t * (3.0f - 2.0f * mount_t);
-    
-    Color col_taiga   = {60, 120, 85, 255};
-    Color col_plains  = {110, 175, 40, 255};
-    Color col_forest  = {75, 145, 35, 255};
-    Color col_desert  = {160, 165, 65, 255};
-    Color col_jungle  = {40, 185, 30, 255};
-    Color col_alpine  = {115, 165, 110, 255};
-    
-    Color col_dry, col_wet;
-    if (temp < 0.5f) {
-        float t = temp / 0.5f;
-        col_dry = lerp_color(col_taiga, col_plains, t);
-        col_wet = lerp_color(col_taiga, col_forest, t);
-    } else {
-        float t = (temp - 0.5f) / 0.5f;
-        col_dry = lerp_color(col_plains, col_desert, t);
-        col_wet = lerp_color(col_forest, col_jungle, t);
+Color get_blended_grass_tint(double wx, double wz, int seed_offset, int radius) {
+    int r = (radius > 0) ? radius : 4;
+    float total_r = 0, total_g = 0, total_b = 0;
+    float w_total = 0;
+
+    for (int dx = -r; dx <= r; ++dx) {
+        for (int dz = -r; dz <= r; ++dz) {
+            float dist = std::sqrt(dx * dx + dz * dz);
+            if (dist > r) continue;
+
+            BiomeConfig nb = get_discrete_biome(wx + dx, wz + dz, seed_offset);
+            float weight = 1.0f / (dist + 1.0f);
+            total_r += nb.grass_tint.r * weight;
+            total_g += nb.grass_tint.g * weight;
+            total_b += nb.grass_tint.b * weight;
+            w_total += weight;
+        }
     }
-    
-    Color climate_col = lerp_color(col_dry, col_wet, hum);
-    return lerp_color(climate_col, col_alpine, mount_f * 0.7f);
+
+    return Color{
+        (unsigned char)(total_r / w_total),
+        (unsigned char)(total_g / w_total),
+        (unsigned char)(total_b / w_total),
+        255
+    };
+}
+
+Color get_blended_foliage_tint(double wx, double wz, int seed_offset, int radius) {
+    int r = (radius > 0) ? radius : 4;
+    float total_r = 0, total_g = 0, total_b = 0;
+    float w_total = 0;
+
+    for (int dx = -r; dx <= r; ++dx) {
+        for (int dz = -r; dz <= r; ++dz) {
+            float dist = std::sqrt(dx * dx + dz * dz);
+            if (dist > r) continue;
+
+            BiomeConfig nb = get_discrete_biome(wx + dx, wz + dz, seed_offset);
+            float weight = 1.0f / (dist + 1.0f);
+            total_r += nb.foliage_tint.r * weight;
+            total_g += nb.foliage_tint.g * weight;
+            total_b += nb.foliage_tint.b * weight;
+            w_total += weight;
+        }
+    }
+
+    return Color{
+        (unsigned char)(total_r / w_total),
+        (unsigned char)(total_g / w_total),
+        (unsigned char)(total_b / w_total),
+        255
+    };
 }
 
 const char* get_biome_name_at(double wx, double wz, int seed_offset) {
@@ -359,3 +430,4 @@ const char* get_biome_name_at(double wx, double wz, int seed_offset) {
 }
 
 }
+
