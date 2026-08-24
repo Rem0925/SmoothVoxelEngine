@@ -165,7 +165,7 @@ void Chunk::generate_thread() {
                     // Comprobación de cuevas subterráneas limpias y contiguas en 3D
                     bool in_cave = false;
                     if (y >= 3 && y <= 72) {
-                        in_cave = cave_map.is_cave_at((float)wx, (float)y, (float)wz, base_h);
+                        in_cave = cave_map.is_cave_at((float)wx, (float)y, (float)wz, base_h, seed_offset);
                     }
                     
                     // Límite de Bedrock irregular para que se vea bien

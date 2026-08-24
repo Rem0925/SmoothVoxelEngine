@@ -23,7 +23,7 @@ namespace Caves {
     class CaveMap {
     public:
         void generate(int chunk_cx, int chunk_cz, uint32_t world_seed);
-        bool is_cave_at(float wx, float wy, float wz, float base_h) const;
+        bool is_cave_at(float wx, float wy, float wz, float base_h, int seed_offset) const;
 
     private:
         static constexpr int CELL = 6;

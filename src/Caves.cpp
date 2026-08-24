@@ -121,21 +121,21 @@ void CaveMap::generate(int chunk_cx, int chunk_cz, uint32_t world_seed) {
             state ^= (uint64_t)(uint32_t)ocz * 0x94D049BB133111EBULL;
             state = splitmix64(state);
 
-            // Probabilidad realista de inicio de cueva por chunk (~14%)
-            if (hash_unit(state) >= 0.14f) continue;
+            // Probabilidad moderada y balanceada de inicio de cueva por chunk (~18%)
+            if (hash_unit(state) >= 0.18f) continue;
 
-            int num_worms = (hash_unit(state) < 0.25f) ? 2 : 1;
+            int num_worms = (hash_unit(state) < 0.20f) ? 2 : 1;
             for (int nw = 0; nw < num_worms; ++nw) {
-                float start_y = 10.0f + hash_unit(state) * 45.0f;
+                float start_y = 10.0f + hash_unit(state) * 48.0f;
                 Worm w;
                 w.sx = ocx * CHUNK + hash_unit(state) * CHUNK;
                 w.sz = ocz * CHUNK + hash_unit(state) * CHUNK;
                 w.sy = start_y;
                 w.yaw = hash_unit(state) * 6.2831853f;
-                w.pitch = (hash_unit(state) - 0.5f) * 0.4f;
-                w.len = 40.0f + hash_unit(state) * 65.0f;
+                w.pitch = (hash_unit(state) - 0.5f) * 0.5f;
+                w.len = 40.0f + hash_unit(state) * 60.0f;
                 w.base_radius = 2.3f + hash_unit(state) * 1.3f;
-                w.turn_rate = 0.26f + hash_unit(state) * 0.20f;
+                w.turn_rate = 0.28f + hash_unit(state) * 0.22f;
                 w.noise_a = hash_unit(state) * 200.0f;
                 w.noise_b = hash_unit(state) * 200.0f;
                 w.noise_r = hash_unit(state) * 200.0f;
@@ -147,7 +147,7 @@ void CaveMap::generate(int chunk_cx, int chunk_cz, uint32_t world_seed) {
     }
 }
 
-bool CaveMap::is_cave_at(float wx, float wy, float wz, float base_h) const {
+bool CaveMap::is_cave_at(float wx, float wy, float wz, float base_h, int seed_offset) const {
     if (wy <= 2.0f) return false;
 
     int cx = (int)std::floor((wx - gx0) / CELL);
@@ -155,7 +155,10 @@ bool CaveMap::is_cave_at(float wx, float wy, float wz, float base_h) const {
     int cz = (int)std::floor((wz - gz0) / CELL);
 
     float depth = base_h - wy;
+    double sx = (double)wx + seed_offset;
+    double sz = (double)wz + seed_offset;
 
+    // 1. Red de Túneles y Salas con Rugosidad Geológica Orgánica
     for (int dz = -1; dz <= 1; ++dz) {
         int zz = cz + dz;
         if (zz < 0 || zz >= gnz) continue;
@@ -173,17 +176,15 @@ bool CaveMap::is_cave_at(float wx, float wy, float wz, float base_h) const {
                     float d2 = ddx * ddx + ddy * ddy + ddz * ddz;
                     float r2 = s.radius * s.radius;
                     
-                    if (d2 < r2 * 1.35f) {
-                        // Rugosidad orgánica en las paredes para romper la simetría de tubo perfecto
-                        float wall_noise = (float)pnoise3((double)wx * 0.12, (double)wy * 0.12, (double)wz * 0.12, 2, 0.5);
-                        float effective_r = s.radius * (0.88f + 0.24f * wall_noise);
+                    if (d2 < r2 * 1.45f) {
+                        // Deformación fractal 3D de las paredes para romper la simetría de tubo
+                        float wall_noise = (float)pnoise3(sx * 0.14, (double)wy * 0.14, sz * 0.14, 2, 0.5);
+                        float effective_r = s.radius * (0.82f + 0.36f * wall_noise);
                         
                         if (d2 < effective_r * effective_r) {
-                            // Si el túnel no tiene permiso de abrir a superficie, proteger la corteza
                             if (!s.can_break_surface && depth < 4.5f) {
                                 continue;
                             }
-                            // Proteger lagos y océanos contra inundación
                             if (base_h <= 38.0f + 2.0f && wy >= base_h - 4.0f) {
                                 continue;
                             }
@@ -194,6 +195,38 @@ bool CaveMap::is_cave_at(float wx, float wy, float wz, float base_h) const {
             }
         }
     }
+
+    // 2. Grandes Cavernas 3D a Alturas Dinámicas Variables
+    if (depth >= 5.5f && base_h > 38.0f + 2.0f && wy >= 6.0f) {
+        // Altura central y grosor variables dinámicamente según la región
+        float cav_center_y = 14.0f + 26.0f * (float)(pnoise3(sx * 0.005, 0.0, sz * 0.005, 2, 0.5) * 0.5 + 0.5);
+        float cav_half_h = 9.0f + 11.0f * (float)(pnoise3(sx * 0.008 + 60.0, 0.0, sz * 0.008 + 60.0, 2, 0.5) * 0.5 + 0.5);
+
+        float dy = std::abs(wy - cav_center_y) / cav_half_h;
+        if (dy < 1.0f) {
+            // Máscara regional balanceada (~20% de presencia subterránea)
+            double cavern_mask = pnoise3(sx * 0.008 + 311.0, (double)wy * 0.008, sz * 0.008 + 173.0, 2, 0.5);
+            if (cavern_mask > 0.16) {
+                float vertical_fade = 1.0f - dy * dy;
+                double cavern_shape = pnoise3(sx * 0.022, (double)wy * 0.025, sz * 0.022, 2, 0.5);
+                float mask_intensity = std::clamp((float)((cavern_mask - 0.16) / 0.22), 0.0f, 1.0f);
+                float threshold = 0.38f - 0.12f * mask_intensity;
+                if (cavern_shape * vertical_fade > threshold) {
+                    return true;
+                }
+            }
+        }
+
+        // 3. Túneles 3D "Noodle" Conectores Estilizados
+        if (wy >= 8.0f && wy <= 56.0f) {
+            double n1 = pnoise3(sx * 0.026 + 210.0, (double)wy * 0.026, sz * 0.026, 2, 0.5);
+            double n2 = pnoise3(sx * 0.026, (double)wy * 0.026 + 210.0, sz * 0.026 + 210.0, 2, 0.5);
+            if ((n1 * n1 + n2 * n2) < 0.0045) {
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
