@@ -145,30 +145,8 @@ void Chunk::generate_thread() {
                 
                 int highest_y = 0;
 
-                // ¿Esta columna permite que las cuevas abran a la superficie? (aleatorio pero determinista)
-                uint32_t bh = (static_cast<uint32_t>(wx) * 374761393U) ^
-                              (static_cast<uint32_t>(wz) * 668265263U) ^
-                              (static_cast<uint32_t>(seed_offset) * 1274126177U);
-                bh = (bh ^ (bh >> 13)) * 1274126177U;
-                bh = bh ^ (bh >> 16);
-                bool cave_can_break_surface = ((bh >> 8) % 1000) < 180; // ~18% de las columnas
-
                 for (int y = 0; y < GRID_Y; ++y) {
                     float n3d = pnoise3(sx * 0.05f, y * 0.05f, sz * 0.05f, 2, 0.4f);
-                    
-                    // 1. Generación de Cuevas (Perlin Worms — túneles conectados estilo Minecraft)
-                    float cave_carve = 0.0f;
-                    if (y >= 3 && y <= 72) {
-                        cave_carve = cave_map.carve_at((float)wx, (float)y, (float)wz);
-                        if (cave_carve > 0.0f) {
-                            // Rugosidad orgánica sutil en las paredes del túnel
-                            cave_carve *= 0.85f + 0.3f * (float)pnoise3(sx * 0.08f, (double)y * 0.08f, sz * 0.08f, 2, 0.5f);
-                        }
-                        // Supresión cerca de la superficie, salvo en columnas con abertura permitida
-                        if (base_h - y < 6.0f && !cave_can_break_surface) {
-                            cave_carve *= std::clamp((base_h - y) / 6.0f, 0.0f, 1.0f);
-                        }
-                    }
                     
                     float true_depth = (base_h - y) + (n3d * 2.5f);
                     float d = true_depth;
@@ -178,26 +156,33 @@ void Chunk::generate_thread() {
                     
                     d = std::max(-1.0f, std::min(1.0f, d));
                     
-                    float depth_below = base_h - y;
-                    float cave_suppression = std::clamp(depth_below / 8.0f, 0.0f, 1.0f);
+                    // Determinar la cota real de la superficie del terreno antes de tallar cuevas
+                    if (d >= ISO_SURFACE) {
+                        highest_y = y;
+                        has_solid[lz * (CHUNK_SIZE + 1) + lx] = true;
+                    }
+                    
+                    // Comprobación de cuevas subterráneas limpias y contiguas en 3D
+                    bool in_cave = false;
+                    if (y >= 3 && y <= 72) {
+                        in_cave = cave_map.is_cave_at((float)wx, (float)y, (float)wz, base_h);
+                    }
                     
                     // Límite de Bedrock irregular para que se vea bien
                     float bedrock_noise = pnoise3(sx * 0.3f, y * 0.3f, sz * 0.3f, 1, 0.5f);
                     if (y <= 1 || (y <= 4 && bedrock_noise > -0.2f)) {
                         d = 1.0f;
-                        cave_carve = 0.0f; // Evitar huecos en el piso
+                        in_cave = false; // Evitar huecos en el piso de bedrock
                     }
                     
-                    // Cavar tubo
-                    d -= (cave_carve * 5.0f * cave_suppression);
-                    cave_air[get_idx(lx, y, lz)] = (cave_carve > 0.0f);
+                    if (in_cave) {
+                        d = -1.0f; // Bloque de aire / vacío puro
+                        cave_air[get_idx(lx, y, lz)] = true;
+                    } else {
+                        cave_air[get_idx(lx, y, lz)] = false;
+                    }
                     
                     voxels[get_idx(lx, y, lz)].density = d;
-                    
-                    if (d >= ISO_SURFACE) {
-                        highest_y = y;
-                        has_solid[lz * (CHUNK_SIZE + 1) + lx] = true;
-                    }
                 }
                 top_solid_y[lz * (CHUNK_SIZE + 1) + lx] = highest_y;
             }
