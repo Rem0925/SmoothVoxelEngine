@@ -1470,9 +1470,7 @@ void Chunk::set_block(int x, int y, int z, uint8_t type, uint8_t rotation) {
     voxels[i].rotation = rotation;
     
     if (type == AIR || type == Config::WATER) {
-        if (voxels[i].density > 0.0f) {
-            voxels[i].density = -1.0f;
-        }
+        voxels[i].density = -1.0f;
     } else {
         bool is_terrain = true;
         if (Config::BLOCKS.find(type) != Config::BLOCKS.end()) {
@@ -1481,9 +1479,7 @@ void Chunk::set_block(int x, int y, int z, uint8_t type, uint8_t rotation) {
         if (is_terrain) {
             voxels[i].density = 1.0f;
         } else {
-            if (voxels[i].density > 0.0f) {
-                voxels[i].density = -1.0f;
-            }
+            voxels[i].density = -1.0f;
         }
     }
     

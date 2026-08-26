@@ -486,16 +486,17 @@ float World::get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea
 int World::flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, UI* ui) {
     // Aplana el terreno tomando wy como piso plano de referencia.
     // 1. Desbasta y recolecta las elevaciones por encima de wy hasta area.max_h.
-    // 2. Nivela la pendiente del suelo en wy a una superficie 100% plana con su bloque natural.
+    // 2. Nivela la base en wy a una superficie 100% plana con su bloque natural SOLO si ya es sólida.
     int broken_count = 0;
     
     for (int dx = area.min_dx; dx <= area.max_dx; dx++) {
         for (int dz = area.min_dz; dz <= area.max_dz; dz++) {
+            int bx = wx + dx;
+            int bz = wz + dz;
+
             // 1. Limpiar elevaciones superiores
             for (int dy = area.max_h; dy >= 1; dy--) {
-                int bx = wx + dx;
                 int by = wy + dy;
-                int bz = wz + dz;
                 if (by < 0 || by >= GRID_Y) continue;
                 
                 uint8_t b = get_block(bx, by, bz);
@@ -514,16 +515,14 @@ int World::flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int t
                     }
                     set_block(bx, by, bz, AIR);
                     broken_count++;
-                } else if (b == AIR) {
-                    // Asegurar que cualquier residuo de rampa en alturas superiores quede en aire puro
+                } else {
+                    // Asegurar que cualquier residuo de rampa en alturas superiores quede en aire puro (-1.0)
                     set_block(bx, by, bz, AIR);
                 }
             }
             
-            // 2. Nivelar la base en wy (convirtiendo cualquier rampa/inclinación en plano horizontal perfecto)
-            int bx = wx + dx;
+            // 2. Nivelar la base en wy SOLO si ya es sólida (sin inventar material de la nada)
             int by = wy;
-            int bz = wz + dz;
             if (by >= 0 && by < GRID_Y) {
                 uint8_t b = get_block(bx, by, bz);
                 if (b != AIR && b != WATER) {

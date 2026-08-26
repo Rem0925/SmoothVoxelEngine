@@ -416,31 +416,6 @@ int main() {
         }
     }
 
-    // Entregar 64 unidades de cada bloque nuevo para pruebas (hotbar y storage)
-    uint8_t starter_blocks[] = {
-        Config::PLANKS_CUBE,
-        Config::STONE_BRICK,
-        Config::STAIRS_WOOD,
-        Config::STAIRS_STONE,
-        Config::FENCE_WOOD,
-        Config::TORCH,
-        Config::DOOR_WOOD,
-        Config::CHEST,
-        Config::FURNACE,
-        Config::CRAFTING_TABLE,
-        Config::GLASS
-    };
-    for (uint8_t b : starter_blocks) {
-        if (ui.count_block(b) < 64) {
-            ui.add_resource(b, 64);
-        }
-    }
-    if (!ui.has_item(Config::ITEM_COAL, 10)) ui.add_item(Config::ITEM_COAL, 64);
-    if (ui.count_block(Config::IRON_ORE) < 10) ui.add_resource(Config::IRON_ORE, 64);
-    if (ui.count_block(Config::GOLD_ORE) < 10) ui.add_resource(Config::GOLD_ORE, 64);
-    if (ui.count_block(Config::SILVER_ORE) < 10) ui.add_resource(Config::SILVER_ORE, 64);
-    if (ui.count_block(Config::SAND) < 10) ui.add_resource(Config::SAND, 64);
-
     while (!WindowShouldClose()) {
         bool ray_hit_valid = false;
         Vector3 hit = {0}, target_solid = {0}, target_empty = {0};
@@ -1233,18 +1208,18 @@ int main() {
                                             int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
                                             d_slice[idx] = -1.0f;
                                         }
-                                    } else if (b == AIR) {
+                                    } else {
                                         int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
                                         d_slice[idx] = -1.0f;
                                     }
                                 }
                             }
                             
-                            // En dy = 0, si hay terreno, fijar densidad a 1.0 para previsualizar plano perfecto
+                            // En dy = 0, SOLO si hay terreno existente, fijar densidad a 1.0 para previsualizar plano
                             uint8_t b_base = world.get_block(bx + dx, by, bz + dz);
                             if (b_base != AIR && b_base != WATER) {
-                                int idx = (0 + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
-                                d_slice[idx] = 1.0f;
+                                int idx_base = (0 + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                                d_slice[idx_base] = 1.0f;
                             }
                         }
                     }
