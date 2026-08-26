@@ -280,43 +280,102 @@ void Chunk::generate_thread() {
             }
         }
         
-        // Generacion de minerales (vetas subterraneas)
-        // Orden: primero los profundos, luego los superficiales (carbon al final)
+        // Generacion de minerales (vetas y menas 3D organicas en clusters)
         {
-            int seed_offset = (int)((int64_t)Config::WORLD_SEED * 7919);
-            for (int lx = 0; lx <= CHUNK_SIZE; ++lx) {
-                for (int lz = 0; lz <= CHUNK_SIZE; ++lz) {
-                    for (int y = 1; y < GRID_Y - 1; ++y) {
-                        int i = get_idx(lx, y, lz);
-                        if (voxels[i].block != STONE) continue;
+            struct OreVeinConfig {
+                Config::BlockID block;
+                int min_y;
+                int max_y;
+                int veins_per_chunk;
+                int min_size;
+                int max_size;
+                float radius_scale;
+            };
 
-                        int wx = cx * CHUNK_SIZE + lx;
-                        int wz = cz * CHUNK_SIZE + lz;
+            static const OreVeinConfig ORE_CONFIGS[] = {
+                // Diamante: Muy profundo, cerca del Bedrock (Y=2..18), vetas compactas de 2 a 5 bloques
+                { Config::DIAMOND_ORE, 2,  18,  2,  2,  5, 1.4f },
+                // Oro: Subsuelo profundo (Y=5..35), vetas de 3 a 7 bloques
+                { Config::GOLD_ORE,    5,  35,  4,  3,  7, 1.7f },
+                // Plata: Subsuelo medio-bajo (Y=10..52), vetas de 4 a 8 bloques
+                { Config::SILVER_ORE,  10, 52,  5,  4,  8, 1.8f },
+                // Hierro: Amplia presencia en cuevas y subsuelo (Y=5..75), vetas de 5 a 12 bloques
+                { Config::IRON_ORE,    5,  75, 12,  5, 12, 2.2f },
+                // Carbon: Comun en subsuelo y expuesto en montañas (Y=15..115), vetas de 8 a 18 bloques
+                { Config::COAL_ORE,   15, 115, 16,  8, 18, 2.8f },
+            };
 
-                        // Diamante: prof 110+, el mas raro primero
-                        if (y >= 110) {
-                            float n = (float)pnoise3(wx * 0.04f + seed_offset + 2000, y * 0.04f, wz * 0.04f + seed_offset + 2000, 3, 0.5f);
-                            if (n > 0.78f) { voxels[i].block = DIAMOND_ORE; continue; }
-                        }
-                        // Oro: prof 80-110
-                        if (y >= 80 && y < 110) {
-                            float n = (float)pnoise3(wx * 0.05f + seed_offset + 1500, y * 0.05f, wz * 0.05f + seed_offset + 1500, 3, 0.5f);
-                            if (n > 0.73f) { voxels[i].block = GOLD_ORE; continue; }
-                        }
-                        // Plata: prof 60-90
-                        if (y >= 60 && y < 90) {
-                            float n = (float)pnoise3(wx * 0.06f + seed_offset + 1000, y * 0.06f, wz * 0.06f + seed_offset + 1000, 3, 0.5f);
-                            if (n > 0.70f) { voxels[i].block = SILVER_ORE; continue; }
-                        }
-                        // Hierro: prof 40-80
-                        if (y >= 40 && y < 80) {
-                            float n = (float)pnoise3(wx * 0.07f + seed_offset + 500, y * 0.07f, wz * 0.07f + seed_offset + 500, 3, 0.5f);
-                            if (n > 0.65f) { voxels[i].block = IRON_ORE; continue; }
-                        }
-                        // Carbon: prof 0-60, comun pero al final para no comerse otros
-                        if (y < 60) {
-                            float n = (float)pnoise3(wx * 0.09f + seed_offset, y * 0.09f, wz * 0.09f + seed_offset, 3, 0.5f);
-                            if (n > 0.72f) { voxels[i].block = COAL_ORE; continue; }
+            for (size_t ore_idx = 0; ore_idx < sizeof(ORE_CONFIGS)/sizeof(ORE_CONFIGS[0]); ++ore_idx) {
+                const auto& ore = ORE_CONFIGS[ore_idx];
+                
+                for (int v = 0; v < ore.veins_per_chunk; ++v) {
+                    // Semilla determinista de alta entropía por veta, ore y chunk
+                    uint64_t rng_state = (static_cast<uint64_t>(cx) * 73856093ULL) ^
+                                         (static_cast<uint64_t>(cz) * 19349663ULL) ^
+                                         (static_cast<uint64_t>(Config::WORLD_SEED) * 83492791ULL) ^
+                                         (static_cast<uint64_t>(ore_idx) * 2654435761ULL) ^
+                                         (static_cast<uint64_t>(v) * 961748941ULL);
+
+                    auto next_u32 = [&rng_state]() -> uint32_t {
+                        rng_state ^= (rng_state >> 12);
+                        rng_state ^= (rng_state << 25);
+                        rng_state ^= (rng_state >> 27);
+                        return static_cast<uint32_t>((rng_state * 0x2545F4914F6CDD1DULL) >> 32);
+                    };
+
+                    auto next_float = [&next_u32]() -> float {
+                        return (next_u32() & 0xFFFFFF) / 16777216.0f;
+                    };
+
+                    float cx_local = next_float() * (float)CHUNK_SIZE;
+                    float cz_local = next_float() * (float)CHUNK_SIZE;
+                    float cy = (float)ore.min_y + next_float() * (float)(ore.max_y - ore.min_y);
+
+                    int count = ore.min_size + (int)(next_float() * (float)(ore.max_size - ore.min_size + 1));
+                    
+                    float angle = next_float() * 3.14159265f;
+                    float dx = std::sin(angle) * ((float)count / 8.0f);
+                    float dz = std::cos(angle) * ((float)count / 8.0f);
+                    float dy = (next_float() - 0.5f) * 2.0f;
+
+                    float x0 = cx_local - dx, x1 = cx_local + dx;
+                    float z0 = cz_local - dz, z1 = cz_local + dz;
+                    float y0 = cy - dy,       y1 = cy + dy;
+
+                    for (int step = 0; step < count; ++step) {
+                        float t = (float)step / (float)count;
+                        float cur_x = x0 + (x1 - x0) * t;
+                        float cur_y = y0 + (y1 - y0) * t;
+                        float cur_z = z0 + (z1 - z0) * t;
+
+                        float radius_factor = std::sin(t * 3.14159265f);
+                        float rx = (radius_factor * ore.radius_scale + 1.0f) * 0.5f;
+                        float ry = (radius_factor * ore.radius_scale + 1.0f) * 0.5f;
+                        float rz = (radius_factor * ore.radius_scale + 1.0f) * 0.5f;
+
+                        int min_bx = std::max(0, (int)std::floor(cur_x - rx));
+                        int max_bx = std::min(CHUNK_SIZE, (int)std::ceil(cur_x + rx));
+                        int min_by = std::max(1, (int)std::floor(cur_y - ry));
+                        int max_by = std::min(GRID_Y - 2, (int)std::ceil(cur_y + ry));
+                        int min_bz = std::max(0, (int)std::floor(cur_z - rz));
+                        int max_bz = std::min(CHUNK_SIZE, (int)std::ceil(cur_z + rz));
+
+                        for (int bx = min_bx; bx <= max_bx; ++bx) {
+                            float ddx = (bx - cur_x) / rx;
+                            if (ddx * ddx > 1.0f) continue;
+                            for (int bz = min_bz; bz <= max_bz; ++bz) {
+                                float ddz = (bz - cur_z) / rz;
+                                if (ddx * ddx + ddz * ddz > 1.0f) continue;
+                                for (int by = min_by; by <= max_by; ++by) {
+                                    float ddy = (by - cur_y) / ry;
+                                    if (ddx * ddx + ddy * ddy + ddz * ddz <= 1.0f) {
+                                        int idx = get_idx(bx, by, bz);
+                                        if (voxels[idx].block == Config::STONE) {
+                                            voxels[idx].block = ore.block;
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 }
