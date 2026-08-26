@@ -27,6 +27,7 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
     closest_hit.distance = max_dist;
     closest_hit.hit = false;
     
+    bool hit_is_build = false;
     for (auto& pair : world.chunks) {
         Chunk* c = pair.second.get();
         if (!c->is_ready) continue;
@@ -40,8 +41,8 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
         if (dist_sq > max_r * max_r) continue;
         
         BoundingBox box = { 
-            { (float)(c->cx * Config::CHUNK_SIZE), 0.0f, (float)(c->cz * Config::CHUNK_SIZE) },
-            { (float)((c->cx + 1) * Config::CHUNK_SIZE), (float)Config::GRID_Y, (float)((c->cz + 1) * Config::CHUNK_SIZE) }
+            { (float)(c->cx * Config::CHUNK_SIZE) - 1.0f, 0.0f, (float)(c->cz * Config::CHUNK_SIZE) - 1.0f },
+            { (float)((c->cx + 1) * Config::CHUNK_SIZE) + 1.0f, (float)Config::GRID_Y, (float)((c->cz + 1) * Config::CHUNK_SIZE) + 1.0f }
         };
         if (!GetRayCollisionBox(ray, box).hit) continue;
 
@@ -49,6 +50,7 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
             RayCollision mesh_hit = GetRayCollisionMesh(ray, c->solid_mesh, MatrixIdentity());
             if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
                 closest_hit = mesh_hit;
+                hit_is_build = false;
             }
         }
 
@@ -56,6 +58,7 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
             RayCollision build_hit = GetRayCollisionMesh(ray, c->build_mesh, MatrixIdentity());
             if (build_hit.hit && build_hit.distance < closest_hit.distance) {
                 closest_hit = build_hit;
+                hit_is_build = true;
             }
         }
     }
@@ -63,6 +66,28 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
     if (closest_hit.hit) {
         out_hit = closest_hit.point;
         
+        if (hit_is_build) {
+            // El rayo impactó DIRECTAMENTE en los polígonos del bloque de construcción
+            int bx = std::round(out_hit.x - closest_hit.normal.x * 0.02f);
+            int by = std::round(out_hit.y - closest_hit.normal.y * 0.02f);
+            int bz = std::round(out_hit.z - closest_hit.normal.z * 0.02f);
+            out_solid = { (float)bx, (float)by, (float)bz };
+            
+            // Determinar cara para colocar bloque adyacente
+            Vector3 n = closest_hit.normal;
+            Vector3 card = {0, 0, 0};
+            if (std::abs(n.y) >= std::abs(n.x) && std::abs(n.y) >= std::abs(n.z)) {
+                card.y = (n.y > 0) ? 1.0f : -1.0f;
+            } else if (std::abs(n.x) >= std::abs(n.y) && std::abs(n.x) >= std::abs(n.z)) {
+                card.x = (n.x > 0) ? 1.0f : -1.0f;
+            } else {
+                card.z = (n.z > 0) ? 1.0f : -1.0f;
+            }
+            out_empty = Vector3Add(out_solid, card);
+            return true;
+        }
+
+        // El rayo impactó en el terreno natural Marching Cubes
         int ix = std::floor(out_hit.x);
         int iy = std::floor(out_hit.y);
         int iz = std::floor(out_hit.z);
@@ -82,12 +107,10 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
                     
                     if (ny >= 0 && ny < Config::GRID_Y) {
                         float den = world.get_density(nx, ny, nz);
-                        uint8_t blk = world.get_block(nx, ny, nz);
                         Vector3 node_pos = { (float)nx, (float)ny, (float)nz };
                         float dist = Vector3Distance(out_hit, node_pos);
                         
-                        bool is_node_solid = (den >= Config::ISO_SURFACE) || (blk != Config::AIR && blk != Config::WATER);
-                        if (is_node_solid) {
+                        if (den >= Config::ISO_SURFACE) {
                             if (dist < best_dist_solid) {
                                 best_dist_solid = dist;
                                 best_solid = node_pos;
@@ -1084,10 +1107,6 @@ int main() {
             
             Vector3 target_node = (ui.selected_slot == 0) ? target_solid : target_empty;
             
-            float scale = 0.2f + std::sin(GetTime() * 8.0f) * 0.05f;
-            Color cursor_color = (ui.selected_slot == 0) ? Color{255, 40, 40, 255} : Color{40, 255, 100, 255};
-            DrawCube(target_node, scale, scale, scale, cursor_color);
-            
             rlDisableBackfaceCulling(); // Re-disable to show the inside of the concave crater hologram
             
             int bx = std::floor(target_node.x);
@@ -1114,6 +1133,25 @@ int main() {
             
             uint8_t held_b = (ui.selected_slot != 0) ? ui.slots[ui.selected_slot].id : Config::AIR;
             bool is_construction_held = (ui.selected_slot != 0 && Config::BLOCKS.find(held_b) != Config::BLOCKS.end() && Config::BLOCKS.at(held_b).shape != Config::SHAPE_TERRAIN);
+            
+            uint8_t target_b = (ui.selected_slot == 0) ? world.get_block(bx, by, bz) : Config::AIR;
+            bool is_construction_targeted = (ui.selected_slot == 0 && target_b != AIR && target_b != WATER && BLOCKS.count(target_b) && BLOCKS.at(target_b).shape != Config::SHAPE_TERRAIN);
+
+            // Obtener rotación del bloque objetivo
+            uint8_t target_rot = 0;
+            if (is_construction_targeted) {
+                int cx = std::floor((float)bx / Config::CHUNK_SIZE);
+                int cz = std::floor((float)bz / Config::CHUNK_SIZE);
+                Chunk* chk = world.get_chunk(cx, cz);
+                if (chk) {
+                    int lx = bx - cx * Config::CHUNK_SIZE;
+                    int lz = bz - cz * Config::CHUNK_SIZE;
+                    if (lx >= 0 && lx <= Config::CHUNK_SIZE && lz >= 0 && lz <= Config::CHUNK_SIZE && by >= 0 && by < Config::GRID_Y) {
+                        std::lock_guard<std::mutex> lock(chk->chunk_mutex);
+                        target_rot = chk->voxels[chk->get_idx(lx, by, lz)].rotation;
+                    }
+                }
+            }
 
             if (is_construction_held) {
                 float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
@@ -1124,6 +1162,51 @@ int main() {
                 Vector3 c_pos = { (float)bx, (float)by, (float)bz };
                 DrawCubeWires(c_pos, 1.0f, 1.0f, 1.0f, wire_col);
                 DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
+            } else if (is_construction_targeted) {
+                float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
+                unsigned char alpha = (unsigned char)(pulse * 255);
+                Color wire_col = Color{255, 45, 45, alpha};
+                Color solid_col = Color{255, 25, 25, 40};
+                
+                auto shape = BLOCKS.at(target_b).shape;
+                if (shape == SHAPE_CHEST) {
+                    DrawCubeWires({(float)bx, (float)by - 0.06f, (float)bz}, 0.89f, 0.89f, 0.89f, wire_col);
+                    DrawCube({(float)bx, (float)by - 0.06f, (float)bz}, 0.88f, 0.88f, 0.88f, solid_col);
+                } else if (shape == SHAPE_TORCH) {
+                    DrawCubeWires({(float)bx, (float)by - 0.15f, (float)bz}, 0.16f, 0.70f, 0.16f, wire_col);
+                    DrawCube({(float)bx, (float)by - 0.15f, (float)bz}, 0.14f, 0.68f, 0.14f, solid_col);
+                } else if (shape == SHAPE_FENCE) {
+                    DrawCubeWires({(float)bx, (float)by, (float)bz}, 0.26f, 1.002f, 0.26f, wire_col);
+                    DrawCube({(float)bx, (float)by, (float)bz}, 0.25f, 1.0f, 0.25f, solid_col);
+                } else if (shape == SHAPE_DOOR) {
+                    if (target_rot == 0 || target_rot == 2) {
+                        DrawCubeWires({(float)bx, (float)by + 0.5f, (float)bz}, 1.002f, 2.002f, 0.14f, wire_col);
+                        DrawCube({(float)bx, (float)by + 0.5f, (float)bz}, 1.0f, 2.0f, 0.12f, solid_col);
+                    } else {
+                        DrawCubeWires({(float)bx, (float)by + 0.5f, (float)bz}, 0.14f, 2.002f, 1.002f, wire_col);
+                        DrawCube({(float)bx, (float)by + 0.5f, (float)bz}, 0.12f, 2.0f, 1.0f, solid_col);
+                    }
+                } else if (shape == SHAPE_STAIRS) {
+                    DrawCubeWires({(float)bx, (float)by - 0.25f, (float)bz}, 1.002f, 0.502f, 1.002f, wire_col);
+                    DrawCube({(float)bx, (float)by - 0.25f, (float)bz}, 1.0f, 0.5f, 1.0f, solid_col);
+                    if (target_rot == 0) {
+                        DrawCubeWires({(float)bx, (float)by + 0.25f, (float)bz - 0.25f}, 1.002f, 0.502f, 0.502f, wire_col);
+                        DrawCube({(float)bx, (float)by + 0.25f, (float)bz - 0.25f}, 1.0f, 0.5f, 0.5f, solid_col);
+                    } else if (target_rot == 1) {
+                        DrawCubeWires({(float)bx + 0.25f, (float)by + 0.25f, (float)bz}, 0.502f, 0.502f, 1.002f, wire_col);
+                        DrawCube({(float)bx + 0.25f, (float)by + 0.25f, (float)bz}, 0.5f, 0.5f, 1.0f, solid_col);
+                    } else if (target_rot == 2) {
+                        DrawCubeWires({(float)bx, (float)by + 0.25f, (float)bz + 0.25f}, 1.002f, 0.502f, 0.502f, wire_col);
+                        DrawCube({(float)bx, (float)by + 0.25f, (float)bz + 0.25f}, 1.0f, 0.5f, 0.5f, solid_col);
+                    } else {
+                        DrawCubeWires({(float)bx - 0.25f, (float)by + 0.25f, (float)bz}, 0.502f, 0.502f, 1.002f, wire_col);
+                        DrawCube({(float)bx - 0.25f, (float)by + 0.25f, (float)bz}, 0.5f, 0.5f, 1.0f, solid_col);
+                    }
+                } else {
+                    Vector3 c_pos = { (float)bx, (float)by, (float)bz };
+                    DrawCubeWires(c_pos, 1.002f, 1.002f, 1.002f, wire_col);
+                    DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
+                }
             } else {
                 std::vector<float> d_slice(size_x * size_y * size_z, -1.0f);
                 for (int dx = off_min_x; dx <= off_max_x; dx++) {
