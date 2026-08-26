@@ -30,12 +30,17 @@ public:
     Texture2D spritesheet;
     Texture2D spritesheet_items;             // para iconos de herramientas
 
-    // Drag & drop
+    // Drag & drop seguro
     bool is_dragging = false;
     InventorySlot drag_item;                 // item/bloque siendo arrastrado
     ToolSlot drag_tool;                      // herramienta siendo arrastrada
     bool dragging_tool = false;              // true si arrastramos herramienta
     int drag_source_type = -1;               // 0=hotbar, 1=tool_inv, 2=storage
+    int drag_source_idx = -1;                // indice del slot origen
+
+    // Crafteo & Filtros
+    int craft_category = 0;                  // 0=Todos, 1=Herramientas, 2=Materiales, 3=Disponibles
+    int craft_scroll_offset = 0;             // scroll para panel de crafting
 
     UI(Texture2D sheet, Texture2D items_sheet);
     ~UI();
@@ -58,11 +63,15 @@ public:
     void add_item(uint8_t item_id, int count = 1);
     bool has_item(uint8_t item_id, int count = 1) const;
     bool remove_item(uint8_t item_id, int count = 1);
+    int count_block(uint8_t block_id) const;
+    bool remove_block(uint8_t block_id, int count = 1);
 
     // Crafteo
     bool can_craft(int recipe_index) const;
-    void craft(int recipe_index);
-    int craft_scroll_offset = 0;  // scroll para panel de crafting
+    void craft(int recipe_index, int times = 1);
+
+    // Cancelar arrastre de forma segura
+    void cancel_drag();
 
     // Guardar/cargar inventario
     void save_inventory();

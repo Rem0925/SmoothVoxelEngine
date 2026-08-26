@@ -289,6 +289,7 @@ int main() {
     float day_time = 1.5f; // Start at noon
     bool spectator_mode = false;
     bool show_chunks = false;
+    bool show_debug_info = false;
     float smooth_step_offset = 0.0f;
     float mining_progress = 0.0f;
     Vector3 mining_target = {0, 0, 0};
@@ -325,7 +326,16 @@ int main() {
             if (slot_pos != std::string::npos) {
                 ui.slots[i].id = (uint8_t)get_val("slot_" + std::to_string(i) + "_id", Config::AIR);
                 ui.slots[i].count = (int)get_val("slot_" + std::to_string(i) + "_count", 0);
-                if (Config::BLOCKS.count(ui.slots[i].id)) {
+                if (ui.slots[i].id == 254) {
+                    size_t name_pos = content.find("\"slot_" + std::to_string(i) + "_name\"");
+                    if (name_pos != std::string::npos) {
+                        size_t q1 = content.find("\"", name_pos + 10);
+                        size_t q2 = content.find("\"", q1 + 1);
+                        if (q1 != std::string::npos && q2 != std::string::npos) {
+                            ui.slots[i].name = content.substr(q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+                } else if (Config::BLOCKS.count(ui.slots[i].id)) {
                     ui.slots[i].name = Config::BLOCKS.at(ui.slots[i].id).name;
                 }
             }
@@ -634,6 +644,14 @@ int main() {
             } else if (IsKeyPressed(KEY_SLASH)) {
                 chat.toggle();
                 chat.current_input = "/";
+            } else if (IsKeyDown(KEY_F3) && IsKeyPressed(KEY_G)) {
+                show_chunks = !show_chunks;
+                chat.add_message(show_chunks ? "Limites de chunks visibles" : "Limites de chunks ocultos");
+            } else if (IsKeyPressed(KEY_F9)) {
+                show_chunks = !show_chunks;
+                chat.add_message(show_chunks ? "Limites de chunks visibles" : "Limites de chunks ocultos");
+            } else if (IsKeyPressed(KEY_F3)) {
+                show_debug_info = !show_debug_info;
             }
         }
         
@@ -826,42 +844,100 @@ int main() {
 
         world.draw(camera);
         
-        // Chunk boundaries — individual wireframe per chunk
+        // Minecraft-style Chunk Boundaries (F3+G)
         if (show_chunks) {
             float CS = (float)Config::CHUNK_SIZE;
             float GY = (float)Config::GRID_Y;
+            
+            int p_cx = (int)std::floor(camera.position.x / CS);
+            int p_cz = (int)std::floor(camera.position.z / CS);
             
             rlDisableDepthTest();
             rlDisableBackfaceCulling();
             rlBegin(RL_LINES);
             
-            for (auto& [pos, chunk] : world.chunks) {
-                float x0 = pos.first * CS;
-                float z0 = pos.second * CS;
-                float x1 = x0 + CS;
-                float z1 = z0 + CS;
-                
-                Color col = Fade(YELLOW, 0.55f);
-                rlColor4ub(col.r, col.g, col.b, col.a);
-                
-                // Bottom face (Y=0)
-                rlVertex3f(x0, 0, z0); rlVertex3f(x1, 0, z0);
-                rlVertex3f(x1, 0, z0); rlVertex3f(x1, 0, z1);
-                rlVertex3f(x1, 0, z1); rlVertex3f(x0, 0, z1);
-                rlVertex3f(x0, 0, z1); rlVertex3f(x0, 0, z0);
-                
-                // Top face (Y=GRID_Y)
-                rlVertex3f(x0, GY, z0); rlVertex3f(x1, GY, z0);
-                rlVertex3f(x1, GY, z0); rlVertex3f(x1, GY, z1);
-                rlVertex3f(x1, GY, z1); rlVertex3f(x0, GY, z1);
-                rlVertex3f(x0, GY, z1); rlVertex3f(x0, GY, z0);
-                
-                // Vertical edges
-                rlVertex3f(x0, 0, z0); rlVertex3f(x0, GY, z0);
-                rlVertex3f(x1, 0, z0); rlVertex3f(x1, GY, z0);
-                rlVertex3f(x1, 0, z1); rlVertex3f(x1, GY, z1);
-                rlVertex3f(x0, 0, z1); rlVertex3f(x0, GY, z1);
+            // 1. Chunks vecinos (Radio 1 alrededor del jugador) - Marco tenue azul
+            Color neighbor_col = Fade(BLUE, 0.35f);
+            rlColor4ub(neighbor_col.r, neighbor_col.g, neighbor_col.b, neighbor_col.a);
+            for (int dx = -1; dx <= 1; ++dx) {
+                for (int dz = -1; dz <= 1; ++dz) {
+                    if (dx == 0 && dz == 0) continue; // Saltar chunk actual
+                    float nx0 = (p_cx + dx) * CS;
+                    float nz0 = (p_cz + dz) * CS;
+                    float nx1 = nx0 + CS;
+                    float nz1 = nz0 + CS;
+                    
+                    // Esquinas verticales
+                    rlVertex3f(nx0, 0, nz0); rlVertex3f(nx0, GY, nz0);
+                    rlVertex3f(nx1, 0, nz0); rlVertex3f(nx1, GY, nz0);
+                    rlVertex3f(nx1, 0, nz1); rlVertex3f(nx1, GY, nz1);
+                    rlVertex3f(nx0, 0, nz1); rlVertex3f(nx0, GY, nz1);
+                    
+                    // Borde inferior y superior
+                    rlVertex3f(nx0, 0, nz0); rlVertex3f(nx1, 0, nz0);
+                    rlVertex3f(nx1, 0, nz0); rlVertex3f(nx1, 0, nz1);
+                    rlVertex3f(nx1, 0, nz1); rlVertex3f(nx0, 0, nz1);
+                    rlVertex3f(nx0, 0, nz1); rlVertex3f(nx0, 0, nz0);
+                    
+                    rlVertex3f(nx0, GY, nz0); rlVertex3f(nx1, GY, nz0);
+                    rlVertex3f(nx1, GY, nz0); rlVertex3f(nx1, GY, nz1);
+                    rlVertex3f(nx1, GY, nz1); rlVertex3f(nx0, GY, nz1);
+                    rlVertex3f(nx0, GY, nz1); rlVertex3f(nx0, GY, nz0);
+                }
             }
+            
+            // 2. Chunk Actual del Jugador
+            float x0 = p_cx * CS;
+            float z0 = p_cz * CS;
+            float x1 = x0 + CS;
+            float z1 = z0 + CS;
+            
+            // A. Rejilla vertical por bloque (X=1..15, Z=1..15) en las 4 paredes exteriores (Amarillo)
+            Color wall_grid_col = Color{ 255, 220, 0, 160 };
+            rlColor4ub(wall_grid_col.r, wall_grid_col.g, wall_grid_col.b, wall_grid_col.a);
+            for (int i = 1; i < Config::CHUNK_SIZE; ++i) {
+                float ox = x0 + (float)i;
+                float oz = z0 + (float)i;
+                
+                // Paredes Norte y Sur (a lo largo de X)
+                rlVertex3f(ox, 0, z0); rlVertex3f(ox, GY, z0);
+                rlVertex3f(ox, 0, z1); rlVertex3f(ox, GY, z1);
+                
+                // Paredes Este y Oeste (a lo largo de Z)
+                rlVertex3f(x0, 0, oz); rlVertex3f(x0, GY, oz);
+                rlVertex3f(x1, 0, oz); rlVertex3f(x1, GY, oz);
+            }
+            
+            // B. Líneas horizontales de subdivisiones de Sub-chunk (cada 16 bloques de altura en Y: 0, 16, 32... 128)
+            Color section_col = Color{ 255, 230, 0, 240 };
+            rlColor4ub(section_col.r, section_col.g, section_col.b, section_col.a);
+            for (int y = 0; y <= Config::GRID_Y; y += 16) {
+                float fy = (float)y;
+                rlVertex3f(x0, fy, z0); rlVertex3f(x1, fy, z0);
+                rlVertex3f(x1, fy, z0); rlVertex3f(x1, fy, z1);
+                rlVertex3f(x1, fy, z1); rlVertex3f(x0, fy, z1);
+                rlVertex3f(x0, fy, z1); rlVertex3f(x0, fy, z0);
+            }
+            
+            // C. Rejilla horizontal detallada en el sub-chunk actual del jugador (cada 2 bloques de altura)
+            int p_sub_y = std::clamp((int)std::floor(camera.position.y / 16.0f) * 16, 0, Config::GRID_Y - 16);
+            Color sub_detail_col = Color{ 0, 210, 255, 180 };
+            rlColor4ub(sub_detail_col.r, sub_detail_col.g, sub_detail_col.b, sub_detail_col.a);
+            for (int y = p_sub_y + 2; y < p_sub_y + 16; y += 2) {
+                float fy = (float)y;
+                rlVertex3f(x0, fy, z0); rlVertex3f(x1, fy, z0);
+                rlVertex3f(x1, fy, z0); rlVertex3f(x1, fy, z1);
+                rlVertex3f(x1, fy, z1); rlVertex3f(x0, fy, z1);
+                rlVertex3f(x0, fy, z1); rlVertex3f(x0, fy, z0);
+            }
+            
+            // D. 4 Esquinas principales en Rojo Intenso (desde Y=0 hasta Y=GRID_Y)
+            Color corner_col = Color{ 255, 30, 30, 255 };
+            rlColor4ub(corner_col.r, corner_col.g, corner_col.b, corner_col.a);
+            rlVertex3f(x0, 0, z0); rlVertex3f(x0, GY, z0);
+            rlVertex3f(x1, 0, z0); rlVertex3f(x1, GY, z0);
+            rlVertex3f(x1, 0, z1); rlVertex3f(x1, GY, z1);
+            rlVertex3f(x0, 0, z1); rlVertex3f(x0, GY, z1);
             
             rlEnd();
             rlEnableDepthTest();
@@ -982,20 +1058,79 @@ int main() {
         
         chat.draw();
         
-        DrawFPS(10, 10);
-        const char* spec_txt = spectator_mode ? "  [MODO ESPECTADOR]" : "";
-        DrawText(TextFormat("X: %d  Y: %d  Z: %d%s", cam_x, cam_y, cam_z, spec_txt), 10, 40, 20, BLACK);
-
-        uint8_t look_block = AIR;
-        if (!ui.is_open && !chat.is_open && ray_hit_valid) {
-            look_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
+        // === PANTALLA DE INFORMACIÓN F3 (ESTILO MINECRAFT) ===
+        if (show_debug_info) {
+            int fps = GetFPS();
+            Color fps_color = (fps >= 55) ? Color{80, 250, 100, 255} : ((fps >= 30) ? Color{250, 210, 60, 255} : Color{250, 70, 70, 255});
+            
+            // Dirección cardinal
+            Vector3 look_dir = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+            const char* facing = "Desconocido";
+            if (std::abs(look_dir.x) > std::abs(look_dir.z)) {
+                facing = (look_dir.x > 0) ? "Este (+X)" : "Oeste (-X)";
+            } else {
+                facing = (look_dir.z > 0) ? "Sur (+Z)" : "Norte (-Z)";
+            }
+            
+            int p_cx = (int)std::floor(camera.position.x / (float)Config::CHUNK_SIZE);
+            int p_cz = (int)std::floor(camera.position.z / (float)Config::CHUNK_SIZE);
+            int in_cx = ((cam_x % Config::CHUNK_SIZE) + Config::CHUNK_SIZE) % Config::CHUNK_SIZE;
+            int in_cz = ((cam_z % Config::CHUNK_SIZE) + Config::CHUNK_SIZE) % Config::CHUNK_SIZE;
+            
+            int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
+            const char* biome_name = Biome::get_biome_name_at(camera.position.x, camera.position.z, seed_offset);
+            
+            uint8_t look_block = AIR;
+            std::string block_name = "Aire";
+            if (!ui.is_open && !chat.is_open && ray_hit_valid) {
+                look_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
+                if (look_block != AIR && BLOCKS.count(look_block)) {
+                    block_name = BLOCKS.at(look_block).name;
+                }
+            }
+            
+            // Formateo de hora del día
+            std::string time_str;
+            float norm_time = std::fmod(day_time, 6.28318f);
+            if (norm_time < 0) norm_time += 6.28318f;
+            if (norm_time >= 0.78f && norm_time < 2.35f) time_str = "Dia";
+            else if (norm_time >= 2.35f && norm_time < 3.92f) time_str = "Atardecer";
+            else if (norm_time >= 3.92f && norm_time < 5.49f) time_str = "Noche";
+            else time_str = "Amanecer";
+            
+            std::vector<std::pair<std::string, Color>> lines;
+            lines.push_back({ TextFormat("SmoothVoxelEngine C++ | %d FPS", fps), fps_color });
+            lines.push_back({ TextFormat("XYZ: %.2f / %.2f / %.2f", camera.position.x, camera.position.y, camera.position.z), WHITE });
+            lines.push_back({ TextFormat("Bloque: %d, %d, %d", cam_x, cam_y, cam_z), Color{220, 225, 235, 255} });
+            lines.push_back({ TextFormat("Chunk: %d, %d  [En chunk: %d, %d, %d]", p_cx, p_cz, in_cx, cam_y, in_cz), Color{220, 225, 235, 255} });
+            lines.push_back({ TextFormat("Orientacion: %s", facing), Color{200, 215, 235, 255} });
+            lines.push_back({ TextFormat("Bioma: %s", biome_name), Color{140, 230, 160, 255} });
+            
+            if (look_block != AIR) {
+                lines.push_back({ TextFormat("Mirando a: %s (ID %d en %d, %d, %d)", block_name.c_str(), (int)look_block, (int)target_solid.x, (int)target_solid.y, (int)target_solid.z), Color{255, 220, 100, 255} });
+            } else {
+                lines.push_back({ "Mirando a: Aire", Color{170, 180, 195, 255} });
+            }
+            
+            lines.push_back({ TextFormat("Hora: %.2f (%s)", norm_time, time_str.c_str()), Color{240, 240, 200, 255} });
+            
+            if (spectator_mode) {
+                lines.push_back({ "[ MODO ESPECTADOR ]", Color{100, 210, 255, 255} });
+            }
+            if (show_chunks) {
+                lines.push_back({ "[ LIMITES DE CHUNK ACTIVOS (F3+G) ]", Color{255, 215, 80, 255} });
+            }
+            
+            int cur_y = 10;
+            int font_size = 14;
+            int line_h = 20;
+            for (const auto& [txt, col] : lines) {
+                int tw = MeasureText(txt.c_str(), font_size);
+                DrawRectangle(8, cur_y - 2, tw + 10, line_h, Fade(Color{14, 18, 24, 255}, 0.75f));
+                DrawText(txt.c_str(), 12, cur_y, font_size, col);
+                cur_y += line_h + 2;
+            }
         }
-        std::string block_name = (look_block != AIR && BLOCKS.count(look_block)) ? BLOCKS.at(look_block).name : "Aire";
-        DrawText(TextFormat("Mirando: %s", block_name.c_str()), 10, 70, 20, BLACK);
-        
-        int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
-        const char* biome_name = Biome::get_biome_name_at(camera.position.x, camera.position.z, seed_offset);
-        DrawText(TextFormat("Bioma: %s", biome_name), 10, 95, 20, BLACK);
         
         EndDrawing();
         
@@ -1017,6 +1152,7 @@ int main() {
         for (size_t i=0; i<ui.slots.size(); i++) {
             out << "  \"slot_" << i << "_id\": " << (int)ui.slots[i].id << ",\n";
             out << "  \"slot_" << i << "_count\": " << ui.slots[i].count << ",\n";
+            out << "  \"slot_" << i << "_name\": \"" << ui.slots[i].name << "\",\n";
         }
         // Save tools
         out << "  \"tool_count\": " << ui.tool_inventory.size() << ",\n";
@@ -1030,7 +1166,8 @@ int main() {
         // Save storage
         for (size_t i=0; i<ui.storage.size(); i++) {
             out << "  \"storage_" << i << "_id\": " << (int)ui.storage[i].id << ",\n";
-            out << "  \"storage_" << i << "_count\": " << ui.storage[i].count;
+            out << "  \"storage_" << i << "_count\": " << ui.storage[i].count << ",\n";
+            out << "  \"storage_" << i << "_name\": \"" << ui.storage[i].name << "\"";
             out << (i == ui.storage.size()-1 ? "\n" : ",\n");
         }
         out << "}\n";
