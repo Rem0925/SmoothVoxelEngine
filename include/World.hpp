@@ -19,6 +19,14 @@ struct pair_hash {
 
 extern sqlite3* db;
 
+struct HammerArea {
+    int min_dx, max_dx;
+    int min_dz, max_dz;
+    int max_h;
+};
+
+HammerArea get_hammer_area(int tier, Vector3 hit, int bx, int bz);
+
 class World {
 public:
     std::unordered_map<std::pair<int, int>, std::shared_ptr<Chunk>, pair_hash> chunks;
@@ -38,7 +46,8 @@ public:
     uint8_t get_block(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
     void set_block(int wx, int wy, int wz, uint8_t type);
-    void flatten_terrain(int wx, int wy, int wz, int radius, uint8_t fill_block);
+    int flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, class UI* ui = nullptr);
+    float get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea& area, int tool_tier);
     
     Chunk* get_chunk(int cx, int cz);
 

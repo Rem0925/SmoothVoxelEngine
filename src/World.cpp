@@ -1,4 +1,5 @@
 #include "World.hpp"
+#include "UI.hpp"
 #include <cmath>
 
 sqlite3* db = nullptr;
@@ -431,24 +432,107 @@ void World::set_block(int wx, int wy, int wz, uint8_t type) {
     if (wy > 0) activate(wx, wy - 1, wz);
 }
 
-void World::flatten_terrain(int wx, int wy, int wz, int radius, uint8_t fill_block) {
-    // Aplana el terreno al nivel Y del bloque clickeado
-    // 1) Elimina todo por encima de wy dentro del radio
-    // 2) Rellena wy con fill_block
-    for (int dx = -radius; dx <= radius; dx++) {
-        for (int dz = -radius; dz <= radius; dz++) {
-            // Eliminar bloques por encima del nivel
-            for (int dy = radius; dy >= 1; dy--) {
+HammerArea get_hammer_area(int tier, Vector3 hit, int bx, int bz) {
+    HammerArea area;
+    if (tier == TIER_WOOD || tier == TIER_STONE) {
+        // 1x1
+        area.min_dx = 0; area.max_dx = 0;
+        area.min_dz = 0; area.max_dz = 0;
+        area.max_h = 1;
+    } else if (tier == TIER_IRON || tier == TIER_SILVER || tier == TIER_GOLD) {
+        // 2x2 orientado según cuadrante del cursor
+        int off_x = (hit.x >= (float)bx + 0.5f) ? 0 : -1;
+        int off_z = (hit.z >= (float)bz + 0.5f) ? 0 : -1;
+        area.min_dx = off_x; area.max_dx = off_x + 1;
+        area.min_dz = off_z; area.max_dz = off_z + 1;
+        area.max_h = 2;
+    } else {
+        // 3x3 para diamante
+        area.min_dx = -1; area.max_dx = 1;
+        area.min_dz = -1; area.max_dz = 1;
+        area.max_h = 2;
+    }
+    return area;
+}
+
+float World::get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea& area, int tool_tier) {
+    uint8_t target_b = get_block(wx, wy, wz);
+    float base_hardness = 0.5f;
+    if (target_b != AIR && target_b != WATER && BLOCKS.count(target_b)) {
+        base_hardness = BLOCKS.at(target_b).hardness;
+    }
+    
+    float extra_hardness = 0.0f;
+    for (int dx = area.min_dx; dx <= area.max_dx; dx++) {
+        for (int dz = area.min_dz; dz <= area.max_dz; dz++) {
+            for (int dy = area.max_h; dy >= 1; dy--) {
                 int bx = wx + dx;
                 int by = wy + dy;
                 int bz = wz + dz;
                 if (by < 0 || by >= GRID_Y) continue;
-                set_block(bx, by, bz, AIR);
+                uint8_t b = get_block(bx, by, bz);
+                if (b != AIR && b != WATER && BLOCKS.count(b)) {
+                    const auto& bt = BLOCKS.at(b);
+                    if (bt.require_tier != 255 && bt.require_tier <= tool_tier) {
+                        extra_hardness += bt.hardness * 0.75f;
+                    }
+                }
             }
-            // Rellenar nivel wy
-            set_block(wx + dx, wy, wz + dz, fill_block);
         }
     }
+    return base_hardness + extra_hardness;
+}
+
+int World::flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, UI* ui) {
+    // Aplana el terreno tomando wy como piso plano de referencia.
+    // 1. Desbasta y recolecta las elevaciones por encima de wy hasta area.max_h.
+    // 2. Nivela la pendiente del suelo en wy a una superficie 100% plana con su bloque natural.
+    int broken_count = 0;
+    
+    for (int dx = area.min_dx; dx <= area.max_dx; dx++) {
+        for (int dz = area.min_dz; dz <= area.max_dz; dz++) {
+            // 1. Limpiar elevaciones superiores
+            for (int dy = area.max_h; dy >= 1; dy--) {
+                int bx = wx + dx;
+                int by = wy + dy;
+                int bz = wz + dz;
+                if (by < 0 || by >= GRID_Y) continue;
+                
+                uint8_t b = get_block(bx, by, bz);
+                if (b != AIR && b != WATER && BLOCKS.count(b)) {
+                    const auto& bt = BLOCKS.at(b);
+                    if (bt.require_tier != 255 && bt.require_tier > tool_tier) {
+                        continue;
+                    }
+                    
+                    if (ui && bt.drop_id != 255) {
+                        if (bt.drop_is_item) {
+                            ui->add_item(bt.drop_id);
+                        } else {
+                            ui->add_resource(bt.drop_id);
+                        }
+                    }
+                    set_block(bx, by, bz, AIR);
+                    broken_count++;
+                } else if (b == AIR) {
+                    // Asegurar que cualquier residuo de rampa en alturas superiores quede en aire puro
+                    set_block(bx, by, bz, AIR);
+                }
+            }
+            
+            // 2. Nivelar la base en wy (convirtiendo cualquier rampa/inclinación en plano horizontal perfecto)
+            int bx = wx + dx;
+            int by = wy;
+            int bz = wz + dz;
+            if (by >= 0 && by < GRID_Y) {
+                uint8_t b = get_block(bx, by, bz);
+                if (b != AIR && b != WATER) {
+                    set_block(bx, by, bz, b);
+                }
+            }
+        }
+    }
+    return broken_count;
 }
 
 float World::get_density(int x, int y, int z) const {

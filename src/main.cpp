@@ -512,14 +512,7 @@ int main() {
                     // Iniciar minado al presionar click
                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                         uint8_t target_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
-                        
-                        if (tool && tool->type == TOOL_HAMMER) {
-                            world.flatten_terrain(target_solid.x, target_solid.y, target_solid.z, 2, STONE);
-                            tool->durability_current--;
-                            if (tool->durability_current <= 0) ui.remove_active_tool();
-                            mining_progress = 0.0f;
-                            is_mining = false;
-                        } else if (target_block != AIR && target_block != WATER) {
+                        if (target_block != AIR && target_block != WATER) {
                             mining_progress = 0.0f;
                             mining_target = target_solid;
                             // Guardar coordenadas enteras del bloque para comparar
@@ -546,7 +539,7 @@ int main() {
                             }
                             
                             if (can_break) {
-                                // Paso 2: Calcular velocidad (estilo Minecraft, ajustado para ritmo del juego)
+                                // Paso 2: Calcular velocidad de la herramienta
                                 float tool_speed = 1.0f; // mano
                                 if (tool) {
                                     tool_speed = tool->type == TOOL_PICKAXE ? 2.0f :
@@ -554,7 +547,7 @@ int main() {
                                                  tool->type == TOOL_AXE ? 2.0f :
                                                  tool->type == TOOL_SWORD ? 1.5f :
                                                  tool->type == TOOL_FLAIL ? 0.8f :
-                                                 tool->type == TOOL_HAMMER ? 1.0f : 1.0f;
+                                                 tool->type == TOOL_HAMMER ? 1.2f : 1.0f;
                                     
                                     float tier_mult = tool->tier == TIER_WOOD ? 1.0f :
                                                       tool->tier == TIER_STONE ? 2.0f :
@@ -570,25 +563,38 @@ int main() {
                                     tool_speed *= 1.5f;
                                 }
                                 
-                                // MC: damage_per_tick = speed / hardness / divisor
-                                // ×20 para convertir a damage-per-second
+                                // Dureza: si es martillo, calcular la dureza acumulativa de los bloques a podar
+                                float hardness = bt.hardness;
+                                HammerArea hammer_area;
+                                if (tool && tool->type == TOOL_HAMMER) {
+                                    hammer_area = get_hammer_area((int)tool->tier, hit, (int)mining_block.x, (int)mining_block.z);
+                                    hardness = world.get_hammer_mining_hardness((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier);
+                                }
+                                
                                 float divisor = can_harvest ? 30.0f : 100.0f;
-                                float damage = tool_speed / std::max(bt.hardness, 0.1f) / divisor * 20.0f;
+                                float damage = tool_speed / std::max(hardness, 0.1f) / divisor * 20.0f;
                                 
                                 mining_progress += GetFrameTime() * damage;
                             
                                 if (mining_progress >= 1.0f) {
-                                    if (bt.drop_id != 255) {
-                                        if (bt.drop_is_item) {
-                                            ui.add_item(bt.drop_id);
-                                        } else {
-                                            ui.add_resource(bt.drop_id);
-                                        }
-                                    }
-                                    world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
-                                    if (tool) {
-                                        tool->durability_current--;
+                                    if (tool && tool->type == TOOL_HAMMER) {
+                                        int broken = world.flatten_terrain((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier, &ui);
+                                        int uses = std::max(1, broken);
+                                        tool->durability_current -= uses;
                                         if (tool->durability_current <= 0) ui.remove_active_tool();
+                                    } else {
+                                        if (bt.drop_id != 255) {
+                                            if (bt.drop_is_item) {
+                                                ui.add_item(bt.drop_id);
+                                            } else {
+                                                ui.add_resource(bt.drop_id);
+                                            }
+                                        }
+                                        world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
+                                        if (tool) {
+                                            tool->durability_current--;
+                                            if (tool->durability_current <= 0) ui.remove_active_tool();
+                                        }
                                     }
                                     mining_progress = 0.0f;
                                     is_mining = false;
@@ -973,32 +979,82 @@ int main() {
             int by = std::floor(target_node.y);
             int bz = std::floor(target_node.z);
             
-            float d_slice[27];
-            for(int i=0; i<27; i++) d_slice[i] = -1.0f;
-            for(int dx=-1; dx<=1; dx++){
-                for(int dy=-1; dy<=1; dy++){
-                    for(int dz=-1; dz<=1; dz++){
-                        d_slice[(dy+1)*9 + (dz+1)*3 + (dx+1)] = world.get_density(bx+dx, by+dy, bz+dz);
+            ToolSlot* active_tool = (ui.selected_slot == 0) ? ui.get_active_tool() : nullptr;
+            bool is_hammer = (active_tool && active_tool->type == TOOL_HAMMER);
+            
+            HammerArea h_area;
+            if (is_hammer) {
+                h_area = get_hammer_area((int)active_tool->tier, hit, bx, bz);
+            } else {
+                h_area = {0, 0, 0, 0, 0};
+            }
+            
+            int off_min_x = h_area.min_dx - 1;
+            int off_max_x = h_area.max_dx + 1;
+            int off_min_z = h_area.min_dz - 1;
+            int off_max_z = h_area.max_dz + 1;
+            
+            int size_x = off_max_x - off_min_x + 1;
+            int size_z = off_max_z - off_min_z + 1;
+            int size_y = is_hammer ? (h_area.max_h + 3) : 3;
+            
+            std::vector<float> d_slice(size_x * size_y * size_z, -1.0f);
+            for (int dx = off_min_x; dx <= off_max_x; dx++) {
+                for (int dz = off_min_z; dz <= off_max_z; dz++) {
+                    for (int dy = -1; dy <= size_y - 2; dy++) {
+                        int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                        d_slice[idx] = world.get_density(bx + dx, by + dy, bz + dz);
                     }
                 }
             }
-            if (ui.selected_slot == 0) {
-                d_slice[1*9 + 1*3 + 1] = -1.0f; // Preview mine
+            
+            if (is_hammer) {
+                // Simular el aplanado con martillo:
+                // 1. Vaciar elevaciones por encima de by (dy >= 1) hasta max_h si son rompibles
+                // 2. Nivelar la base en dy = 0 como sólido plano
+                for (int dx = h_area.min_dx; dx <= h_area.max_dx; dx++) {
+                    for (int dz = h_area.min_dz; dz <= h_area.max_dz; dz++) {
+                        for (int dy = 1; dy <= h_area.max_h; dy++) {
+                            if (dy + 1 < size_y) {
+                                uint8_t b = world.get_block(bx + dx, by + dy, bz + dz);
+                                if (b != AIR && b != WATER && BLOCKS.count(b)) {
+                                    const auto& bt = BLOCKS.at(b);
+                                    if (bt.require_tier == 255 || bt.require_tier <= active_tool->tier) {
+                                        int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                                        d_slice[idx] = -1.0f;
+                                    }
+                                } else if (b == AIR) {
+                                    int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                                    d_slice[idx] = -1.0f;
+                                }
+                            }
+                        }
+                        
+                        // En dy = 0, si hay terreno, fijar densidad a 1.0 para previsualizar plano perfecto
+                        uint8_t b_base = world.get_block(bx + dx, by, bz + dz);
+                        if (b_base != AIR && b_base != WATER) {
+                            int idx = (0 + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                            d_slice[idx] = 1.0f;
+                        }
+                    }
+                }
+            } else if (ui.selected_slot == 0) {
+                d_slice[1 * (size_x * size_z) + 1 * size_x + 1] = -1.0f; // Preview mine
             } else {
-                d_slice[1*9 + 1*3 + 1] = 1.0f; // Preview place
+                d_slice[1 * (size_x * size_z) + 1 * size_x + 1] = 1.0f; // Preview place
             }
             
             std::vector<Vector3> g_verts, g_norms;
             std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
-            mc::generate(nullptr, d_slice, 3, 3, 3, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
+            mc::generate(nullptr, d_slice.data(), size_x, size_y, size_z, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
             
             rlPushMatrix();
-            rlTranslatef(bx - 1.0f, by - 1.0f, bz - 1.0f);
+            rlTranslatef(bx + (float)off_min_x, by - 1.0f, bz + (float)off_min_z);
             
             float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
             unsigned char alpha = (unsigned char)(pulse * 255);
-            Color wire_col = (ui.selected_slot == 0) ? Color{255, 25, 25, alpha} : Color{25, 255, 75, alpha};
-            Color solid_col = (ui.selected_slot == 0) ? Color{255, 0, 0, 40} : Color{0, 255, 0, 40};
+            Color wire_col = is_hammer ? Color{255, 180, 40, alpha} : ((ui.selected_slot == 0) ? Color{255, 25, 25, alpha} : Color{25, 255, 75, alpha});
+            Color solid_col = is_hammer ? Color{255, 160, 0, 45} : ((ui.selected_slot == 0) ? Color{255, 0, 0, 40} : Color{0, 255, 0, 40});
 
             rlBegin(RL_LINES);
             rlColor4ub(wire_col.r, wire_col.g, wire_col.b, wire_col.a);
