@@ -39,6 +39,19 @@ namespace Config {
 
     // ===================== BLOCKS =====================
 
+    enum BlockShape : uint8_t {
+        SHAPE_TERRAIN = 0,        // Terreno suave generado con Marching Cubes
+        SHAPE_CUBE = 1,           // Cubo solido ortogonal 6 caras
+        SHAPE_STAIRS = 2,         // Escalera (peldaños en L con colision fluida)
+        SHAPE_FENCE = 3,          // Valla (poste central + travesaños autoconectables)
+        SHAPE_TORCH = 4,          // Antorcha 3D
+        SHAPE_DOOR = 5,           // Puerta de 2 de altura (interactiva)
+        SHAPE_CHEST = 6,          // Cofre (interactivo con almacenamiento)
+        SHAPE_FURNACE = 7,        // Horno de piedra con boca frontal
+        SHAPE_CRAFTING_TABLE = 8, // Mesa de crafteo con tablero
+        SHAPE_GLASS = 9           // Cubo de cristal
+    };
+
     enum BlockID : uint8_t {
         GRASS = 0,
         STONE = 1,
@@ -62,6 +75,17 @@ namespace Config {
         GOLD_ORE = 19,
         DIAMOND_ORE = 20,
         COBBLESTONE = 21,
+        // Bloques de construccion y mobiliario
+        PLANKS_CUBE = 22,
+        STONE_BRICK = 23,
+        STAIRS_WOOD = 24,
+        STAIRS_STONE = 25,
+        FENCE_WOOD = 26,
+        DOOR_WOOD = 27,
+        CHEST = 28,
+        FURNACE = 29,
+        CRAFTING_TABLE = 30,
+        GLASS = 31,
         AIR = 255
     };
 
@@ -99,39 +123,58 @@ namespace Config {
         uint8_t require_tool;   // ToolType minimo para romper (255 = no requiere)
         uint8_t require_tier;   // ToolTier minimo (255 = inrompible)
         float hardness;         // tiempo base para romper
+        BlockShape shape = SHAPE_TERRAIN;
+        // Texturas especificas por cara (si son -1, usan tex_x y tex_y)
+        int tex_top_x = -1, tex_top_y = -1;
+        int tex_bottom_x = -1, tex_bottom_y = -1;
+        int tex_front_x = -1, tex_front_y = -1;
+        int tex_latch_x = -1, tex_latch_y = -1; // Para el pomo/cerrojo del cofre
     };
 
     struct VoxelData {
         float density;
         uint8_t block;
         uint8_t water;
+        uint8_t rotation = 0;
     };
 
     inline const std::unordered_map<uint8_t, BlockType> BLOCKS = {
-        //                            name             tex_x tex_y trans wave  drop     is_item ideal_tool  req_tool  req_tier hard
-        {GRASS,       {"Pasto",              6,  8, false, false, DIRT,     false,  TOOL_SHOVEL, 255,  0,  0.5f}},
-        {STONE,       {"Piedra",             3,  5, false, false, COBBLESTONE,false, TOOL_PICKAXE, 255,  0,  1.5f}},
-        {DIRT,        {"Tierra",             7,  4, false, false, DIRT,     false,  TOOL_SHOVEL, 255,  0,  0.5f}},
-        {TORCH,       {"Antorcha",           2,  6, false, false, TORCH,    false,  255,  255,  0,  0.1f}},
-        {WOOD,        {"Madera Roble",       1,  9, false, false, WOOD,     false,  TOOL_AXE,  255,  0,  2.0f}},
-        {LEAVES,      {"Hojas",              4,  1, false, true,  LEAVES,   false,  255,  255,  0,  0.2f}},
-        {SAND,        {"Arena",              3,  3, false, false, SAND,     false,  TOOL_SHOVEL, 255,  0,  0.5f}},
-        {WATER,       {"Agua",               0,  3, true,  false, WATER,    false,  255,  255,  255, 999.f}},
-        {TALL_GRASS,  {"Pasto Alto",         6,  5, true,  true,  255,      false,  255,  255,  0,  0.1f}},
-        {RED_MUSHROOM,{"Seta Roja",          4,  4, true,  false, RED_MUSHROOM,false, 255, 255,  0,  0.1f}},
-        {BROWN_MUSHROOM,{"Seta Marron",      4,  3, true,  false, BROWN_MUSHROOM,false, 255, 255, 0,  0.1f}},
-        {DEAD_BUSH,   {"Arbusto Seco",       6,  7, true,  true,  DEAD_BUSH,false,  255,  255,  0,  0.1f}},
-        {GRAVEL,      {"Grava",              6,  9, false, false, GRAVEL,   false,  TOOL_SHOVEL, 255,  0,  0.6f}},
-        {RED_CLAY,    {"Arcilla Roja",       3,  0, false, false, RED_CLAY, false,  TOOL_SHOVEL, 255,  0,  0.6f}},
-        {BIRCH_WOOD,  {"Madera Abedul",      0,  1, false, false, BIRCH_WOOD,false, TOOL_AXE,  255,  0,  2.0f}},
-        {CACTUS,      {"Cactus",             8,  8, false, false, CACTUS,   false,  TOOL_AXE,  255,  0,  0.4f}},
-        // Minerales (requieren pico minimo para drop, pero se pueden romper con cualquier cosa mas lento)
-        {COAL_ORE,    {"Mineral de Carbon",  3,  8, false, false, ITEM_COAL,true,   TOOL_PICKAXE, 255,  0,  3.0f}},
-        {IRON_ORE,    {"Mineral de Hierro",  3,  6, false, false, ITEM_IRON_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 0,  3.0f}},
-        {SILVER_ORE,  {"Mineral de Plata",   1,  0, false, false, ITEM_SILVER_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 1,  3.0f}},
-        {GOLD_ORE,    {"Mineral de Oro",     2,  3, false, false, ITEM_GOLD_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 2,  3.0f}},
-        {DIAMOND_ORE, {"Mineral de Diamante",2,  0, false, false, ITEM_DIAMOND_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 3,  3.0f}},
-        {COBBLESTONE, {"Adoquin",            3,  5, false, false, COBBLESTONE,false,  TOOL_PICKAXE, 255,  0,  2.0f}},
+        //                            name             tex_x tex_y trans wave  drop     is_item ideal_tool  req_tool  req_tier hard  shape
+        {GRASS,       {"Pasto",              6,  8, false, false, DIRT,     false,  TOOL_SHOVEL, 255,  0,  0.5f, SHAPE_TERRAIN}},
+        {STONE,       {"Piedra",             3,  5, false, false, COBBLESTONE,false, TOOL_PICKAXE, 255,  0,  1.5f, SHAPE_TERRAIN}},
+        {DIRT,        {"Tierra",             7,  4, false, false, DIRT,     false,  TOOL_SHOVEL, 255,  0,  0.5f, SHAPE_TERRAIN}},
+        {TORCH,       {"Antorcha",           2,  6, false, false, TORCH,    false,  255,  255,  0,  0.1f, SHAPE_TORCH}},
+        {WOOD,        {"Madera Roble",       1,  9, false, false, WOOD,     false,  TOOL_AXE,  255,  0,  2.0f, SHAPE_TERRAIN}},
+        {LEAVES,      {"Hojas",              4,  1, false, true,  LEAVES,   false,  255,  255,  0,  0.2f, SHAPE_TERRAIN}},
+        {SAND,        {"Arena",              3,  3, false, false, SAND,     false,  TOOL_SHOVEL, 255,  0,  0.5f, SHAPE_TERRAIN}},
+        {WATER,       {"Agua",               0,  3, true,  false, WATER,    false,  255,  255,  255, 999.f, SHAPE_TERRAIN}},
+        {TALL_GRASS,  {"Pasto Alto",         6,  5, true,  true,  255,      false,  255,  255,  0,  0.1f, SHAPE_TERRAIN}},
+        {RED_MUSHROOM,{"Seta Roja",          4,  4, true,  false, RED_MUSHROOM,false, 255, 255,  0,  0.1f, SHAPE_TERRAIN}},
+        {BROWN_MUSHROOM,{"Seta Marron",      4,  3, true,  false, BROWN_MUSHROOM,false, 255, 255, 0,  0.1f, SHAPE_TERRAIN}},
+        {DEAD_BUSH,   {"Arbusto Seco",       6,  7, true,  true,  DEAD_BUSH,false,  255,  255,  0,  0.1f, SHAPE_TERRAIN}},
+        {GRAVEL,      {"Grava",              6,  9, false, false, GRAVEL,   false,  TOOL_SHOVEL, 255,  0,  0.6f, SHAPE_TERRAIN}},
+        {RED_CLAY,    {"Arcilla Roja",       3,  0, false, false, RED_CLAY, false,  TOOL_SHOVEL, 255,  0,  0.6f, SHAPE_TERRAIN}},
+        {BIRCH_WOOD,  {"Madera Abedul",      0,  1, false, false, BIRCH_WOOD,false, TOOL_AXE,  255,  0,  2.0f, SHAPE_TERRAIN}},
+        {CACTUS,      {"Cactus",             8,  8, false, false, CACTUS,   false,  TOOL_AXE,  255,  0,  0.4f, SHAPE_TERRAIN}},
+        // Minerales
+        {COAL_ORE,    {"Mineral de Carbon",  3,  8, false, false, ITEM_COAL,true,   TOOL_PICKAXE, 255,  0,  3.0f, SHAPE_TERRAIN}},
+        {IRON_ORE,    {"Mineral de Hierro",  3,  6, false, false, ITEM_IRON_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 0,  3.0f, SHAPE_TERRAIN}},
+        {SILVER_ORE,  {"Mineral de Plata",   1,  0, false, false, ITEM_SILVER_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 1,  3.0f, SHAPE_TERRAIN}},
+        {GOLD_ORE,    {"Mineral de Oro",     2,  3, false, false, ITEM_GOLD_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 2,  3.0f, SHAPE_TERRAIN}},
+        {DIAMOND_ORE, {"Mineral de Diamante",2,  0, false, false, ITEM_DIAMOND_INGOT,true, TOOL_PICKAXE, TOOL_PICKAXE, 3,  3.0f, SHAPE_TERRAIN}},
+        {COBBLESTONE, {"Adoquin",            3,  5, false, false, COBBLESTONE,false,  TOOL_PICKAXE, 255,  0,  2.0f, SHAPE_TERRAIN}},
+        
+        // Bloques de Construccion y Mobiliario
+        {PLANKS_CUBE,    {"Tablas de Madera",   0,  8, false, false, PLANKS_CUBE, false, TOOL_AXE,  255,  0,  1.2f, SHAPE_CUBE}},
+        {STONE_BRICK,    {"Ladrillos de Piedra",4,  7, false, false, STONE_BRICK, false, TOOL_PICKAXE, 255, 0, 1.8f, SHAPE_CUBE}},
+        {STAIRS_WOOD,    {"Escalera de Madera", 0,  8, false, false, STAIRS_WOOD, false, TOOL_AXE,  255,  0,  1.2f, SHAPE_STAIRS}},
+        {STAIRS_STONE,   {"Escalera de Piedra", 4,  7, false, false, STAIRS_STONE,false, TOOL_PICKAXE, 255, 0, 1.8f, SHAPE_STAIRS}},
+        {FENCE_WOOD,     {"Valla de Madera",    0,  8, false, false, FENCE_WOOD,  false, TOOL_AXE,  255,  0,  1.0f, SHAPE_FENCE}},
+        {DOOR_WOOD,      {"Puerta de Madera",   0,  8, false, false, DOOR_WOOD,   false, TOOL_AXE,  255,  0,  1.5f, SHAPE_DOOR, 0, 8, 0, 8, 0, 8}},
+        {CHEST,          {"Cofre",              1,  9, false, false, CHEST,       false, TOOL_AXE,  255,  0,  1.5f, SHAPE_CHEST, -1, -1, -1, -1, -1, -1, 0, 8}},
+        {FURNACE,        {"Horno",              3,  5, false, false, FURNACE,     false, TOOL_PICKAXE, 255, 0, 2.0f, SHAPE_FURNACE, 3, 5, 3, 5, 4, 5}},
+        {CRAFTING_TABLE, {"Mesa de Crafteo",    0,  8, false, false, CRAFTING_TABLE,false,TOOL_AXE, 255,  0,  1.5f, SHAPE_CRAFTING_TABLE, 1, 2, 0, 8, 0, 8}},
+        {GLASS,          {"Vidrio",             5,  6, true,  false, 255,         false, TOOL_PICKAXE, 255, 0, 0.3f, SHAPE_GLASS}},
     };
 
     struct ItemType {
@@ -251,107 +294,138 @@ namespace Config {
         bool result_is_tool;           // true = crea ToolInfo
         ToolType result_tool_type;     // si result_is_tool
         ToolTier result_tool_tier;     // si result_is_tool
-        uint8_t result_item_id;        // si !result_is_tool (ItemID)
+        bool result_is_block;          // true = BlockID, false = ItemID
+        uint8_t result_id;             // BlockID o ItemID
         std::vector<RecipeIngredient> ingredients;
     };
 
     inline const std::vector<CraftingRecipe> RECIPES = {
-        // === Materiales basicos ===
-        // 1 Tronco -> 4 Tablas
-        {"Tablas", 4, false, TOOL_COUNT, TIER_COUNT, ITEM_PLANKS,
+        // === Materiales y Bloques de Construccion ===
+        // 1 Tronco -> 4 Tablas (Item)
+        {"Tablas (Item)", 4, false, TOOL_COUNT, TIER_COUNT, false, ITEM_PLANKS,
+         {{WOOD, 1, false}}},
+        // 1 Tronco -> 4 Tablas de Madera (Bloque solido)
+        {"Tablas de Madera", 4, false, TOOL_COUNT, TIER_COUNT, true, PLANKS_CUBE,
          {{WOOD, 1, false}}},
         // 2 Tablas -> 4 Palitos
-        {"Palitos", 4, false, TOOL_COUNT, TIER_COUNT, ITEM_STICK,
+        {"Palitos", 4, false, TOOL_COUNT, TIER_COUNT, false, ITEM_STICK,
          {{ITEM_PLANKS, 2, true}}},
+        // 4 Adoquin -> 4 Ladrillos de Piedra
+        {"Ladrillos de Piedra", 4, false, TOOL_COUNT, TIER_COUNT, true, STONE_BRICK,
+         {{COBBLESTONE, 4, false}}},
+        // 6 Tablas -> 4 Escaleras de Madera
+        {"Escalera de Madera", 4, false, TOOL_COUNT, TIER_COUNT, true, STAIRS_WOOD,
+         {{ITEM_PLANKS, 6, true}}},
+        // 6 Adoquin -> 4 Escaleras de Piedra
+        {"Escalera de Piedra", 4, false, TOOL_COUNT, TIER_COUNT, true, STAIRS_STONE,
+         {{COBBLESTONE, 6, false}}},
+        // 4 Tablas + 2 Palitos -> 3 Vallas de Madera
+        {"Valla de Madera", 3, false, TOOL_COUNT, TIER_COUNT, true, FENCE_WOOD,
+         {{ITEM_PLANKS, 4, true}, {ITEM_STICK, 2, true}}},
+        // 1 Palo + 1 Carbon -> 4 Antorchas
+        {"Antorcha", 4, false, TOOL_COUNT, TIER_COUNT, true, TORCH,
+         {{ITEM_STICK, 1, true}, {ITEM_COAL, 1, true}}},
+        // 6 Tablas -> 3 Puertas de Madera
+        {"Puerta de Madera", 3, false, TOOL_COUNT, TIER_COUNT, true, DOOR_WOOD,
+         {{ITEM_PLANKS, 6, true}}},
+        // 8 Tablas -> 1 Cofre
+        {"Cofre", 1, false, TOOL_COUNT, TIER_COUNT, true, CHEST,
+         {{ITEM_PLANKS, 8, true}}},
+        // 8 Adoquin -> 1 Horno
+        {"Horno", 1, false, TOOL_COUNT, TIER_COUNT, true, FURNACE,
+         {{COBBLESTONE, 8, false}}},
+        // 4 Tablas -> 1 Mesa de Crafteo
+        {"Mesa de Crafteo", 1, false, TOOL_COUNT, TIER_COUNT, true, CRAFTING_TABLE,
+         {{ITEM_PLANKS, 4, true}}},
 
         // === Herramientas de MADERA ===
         // Pico: 3 Tablas + 2 Palitos
-        {"Pico de Madera", 1, true, TOOL_PICKAXE, TIER_WOOD, 0,
+        {"Pico de Madera", 1, true, TOOL_PICKAXE, TIER_WOOD, false, 0,
          {{ITEM_PLANKS, 3, true}, {ITEM_STICK, 2, true}}},
         // Hacha: 3 Tablas + 2 Palitos
-        {"Hacha de Madera", 1, true, TOOL_AXE, TIER_WOOD, 0,
+        {"Hacha de Madera", 1, true, TOOL_AXE, TIER_WOOD, false, 0,
          {{ITEM_PLANKS, 3, true}, {ITEM_STICK, 2, true}}},
         // Pala: 1 Tabla + 2 Palitos
-        {"Pala de Madera", 1, true, TOOL_SHOVEL, TIER_WOOD, 0,
+        {"Pala de Madera", 1, true, TOOL_SHOVEL, TIER_WOOD, false, 0,
          {{ITEM_PLANKS, 1, true}, {ITEM_STICK, 2, true}}},
         // Martillo: 4 Tablas + 2 Palitos
-        {"Martillo de Madera", 1, true, TOOL_HAMMER, TIER_WOOD, 0,
+        {"Martillo de Madera", 1, true, TOOL_HAMMER, TIER_WOOD, false, 0,
          {{ITEM_PLANKS, 4, true}, {ITEM_STICK, 2, true}}},
         // Mangual: 1 Tabla + 3 Palitos
-        {"Mangual de Madera", 1, true, TOOL_FLAIL, TIER_WOOD, 0,
+        {"Mangual de Madera", 1, true, TOOL_FLAIL, TIER_WOOD, false, 0,
          {{ITEM_PLANKS, 1, true}, {ITEM_STICK, 3, true}}},
         // Espada: 2 Tablas + 1 Palo
-        {"Espada de Madera", 1, true, TOOL_SWORD, TIER_WOOD, 0,
+        {"Espada de Madera", 1, true, TOOL_SWORD, TIER_WOOD, false, 0,
          {{ITEM_PLANKS, 2, true}, {ITEM_STICK, 1, true}}},
 
         // === Herramientas de PIEDRA ===
-        {"Pico de Piedra", 1, true, TOOL_PICKAXE, TIER_STONE, 0,
+        {"Pico de Piedra", 1, true, TOOL_PICKAXE, TIER_STONE, false, 0,
          {{COBBLESTONE, 3, false}, {ITEM_STICK, 2, true}}},
-        {"Hacha de Piedra", 1, true, TOOL_AXE, TIER_STONE, 0,
+        {"Hacha de Piedra", 1, true, TOOL_AXE, TIER_STONE, false, 0,
          {{COBBLESTONE, 3, false}, {ITEM_STICK, 2, true}}},
-        {"Pala de Piedra", 1, true, TOOL_SHOVEL, TIER_STONE, 0,
+        {"Pala de Piedra", 1, true, TOOL_SHOVEL, TIER_STONE, false, 0,
          {{COBBLESTONE, 1, false}, {ITEM_STICK, 2, true}}},
-        {"Martillo de Piedra", 1, true, TOOL_HAMMER, TIER_STONE, 0,
+        {"Martillo de Piedra", 1, true, TOOL_HAMMER, TIER_STONE, false, 0,
          {{COBBLESTONE, 4, false}, {ITEM_STICK, 2, true}}},
-        {"Mangual de Piedra", 1, true, TOOL_FLAIL, TIER_STONE, 0,
+        {"Mangual de Piedra", 1, true, TOOL_FLAIL, TIER_STONE, false, 0,
          {{COBBLESTONE, 1, false}, {ITEM_STICK, 3, true}}},
-        {"Espada de Piedra", 1, true, TOOL_SWORD, TIER_STONE, 0,
+        {"Espada de Piedra", 1, true, TOOL_SWORD, TIER_STONE, false, 0,
          {{COBBLESTONE, 2, false}, {ITEM_STICK, 1, true}}},
 
         // === Herramientas de HIERRO ===
-        {"Pico de Hierro", 1, true, TOOL_PICKAXE, TIER_IRON, 0,
+        {"Pico de Hierro", 1, true, TOOL_PICKAXE, TIER_IRON, false, 0,
          {{ITEM_IRON_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Hacha de Hierro", 1, true, TOOL_AXE, TIER_IRON, 0,
+        {"Hacha de Hierro", 1, true, TOOL_AXE, TIER_IRON, false, 0,
          {{ITEM_IRON_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Pala de Hierro", 1, true, TOOL_SHOVEL, TIER_IRON, 0,
+        {"Pala de Hierro", 1, true, TOOL_SHOVEL, TIER_IRON, false, 0,
          {{ITEM_IRON_INGOT, 2, true}, {ITEM_STICK, 2, true}}},
-        {"Martillo de Hierro", 1, true, TOOL_HAMMER, TIER_IRON, 0,
+        {"Martillo de Hierro", 1, true, TOOL_HAMMER, TIER_IRON, false, 0,
          {{ITEM_IRON_INGOT, 4, true}, {ITEM_STICK, 2, true}}},
-        {"Mangual de Hierro", 1, true, TOOL_FLAIL, TIER_IRON, 0,
+        {"Mangual de Hierro", 1, true, TOOL_FLAIL, TIER_IRON, false, 0,
          {{ITEM_IRON_INGOT, 2, true}, {ITEM_STICK, 3, true}}},
-        {"Espada de Hierro", 1, true, TOOL_SWORD, TIER_IRON, 0,
+        {"Espada de Hierro", 1, true, TOOL_SWORD, TIER_IRON, false, 0,
          {{ITEM_IRON_INGOT, 2, true}, {ITEM_STICK, 1, true}}},
 
         // === Herramientas de PLATA ===
-        {"Pico de Plata", 1, true, TOOL_PICKAXE, TIER_SILVER, 0,
+        {"Pico de Plata", 1, true, TOOL_PICKAXE, TIER_SILVER, false, 0,
          {{ITEM_SILVER_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Hacha de Plata", 1, true, TOOL_AXE, TIER_SILVER, 0,
+        {"Hacha de Plata", 1, true, TOOL_AXE, TIER_SILVER, false, 0,
          {{ITEM_SILVER_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Pala de Plata", 1, true, TOOL_SHOVEL, TIER_SILVER, 0,
+        {"Pala de Plata", 1, true, TOOL_SHOVEL, TIER_SILVER, false, 0,
          {{ITEM_SILVER_INGOT, 2, true}, {ITEM_STICK, 2, true}}},
-        {"Martillo de Plata", 1, true, TOOL_HAMMER, TIER_SILVER, 0,
+        {"Martillo de Plata", 1, true, TOOL_HAMMER, TIER_SILVER, false, 0,
          {{ITEM_SILVER_INGOT, 4, true}, {ITEM_STICK, 2, true}}},
-        {"Mangual de Plata", 1, true, TOOL_FLAIL, TIER_SILVER, 0,
+        {"Mangual de Plata", 1, true, TOOL_FLAIL, TIER_SILVER, false, 0,
          {{ITEM_SILVER_INGOT, 2, true}, {ITEM_STICK, 3, true}}},
-        {"Espada de Plata", 1, true, TOOL_SWORD, TIER_SILVER, 0,
+        {"Espada de Plata", 1, true, TOOL_SWORD, TIER_SILVER, false, 0,
          {{ITEM_SILVER_INGOT, 2, true}, {ITEM_STICK, 1, true}}},
 
         // === Herramientas de ORO ===
-        {"Pico de Oro", 1, true, TOOL_PICKAXE, TIER_GOLD, 0,
+        {"Pico de Oro", 1, true, TOOL_PICKAXE, TIER_GOLD, false, 0,
          {{ITEM_GOLD_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Hacha de Oro", 1, true, TOOL_AXE, TIER_GOLD, 0,
+        {"Hacha de Oro", 1, true, TOOL_AXE, TIER_GOLD, false, 0,
          {{ITEM_GOLD_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Pala de Oro", 1, true, TOOL_SHOVEL, TIER_GOLD, 0,
+        {"Pala de Oro", 1, true, TOOL_SHOVEL, TIER_GOLD, false, 0,
          {{ITEM_GOLD_INGOT, 2, true}, {ITEM_STICK, 2, true}}},
-        {"Martillo de Oro", 1, true, TOOL_HAMMER, TIER_GOLD, 0,
+        {"Martillo de Oro", 1, true, TOOL_HAMMER, TIER_GOLD, false, 0,
          {{ITEM_GOLD_INGOT, 4, true}, {ITEM_STICK, 2, true}}},
-        {"Mangual de Oro", 1, true, TOOL_FLAIL, TIER_GOLD, 0,
+        {"Mangual de Oro", 1, true, TOOL_FLAIL, TIER_GOLD, false, 0,
          {{ITEM_GOLD_INGOT, 2, true}, {ITEM_STICK, 3, true}}},
-        {"Espada de Oro", 1, true, TOOL_SWORD, TIER_GOLD, 0,
+        {"Espada de Oro", 1, true, TOOL_SWORD, TIER_GOLD, false, 0,
          {{ITEM_GOLD_INGOT, 2, true}, {ITEM_STICK, 1, true}}},
 
         // === Herramientas de DIAMANTE ===
-        {"Pico de Diamante", 1, true, TOOL_PICKAXE, TIER_DIAMOND, 0,
+        {"Pico de Diamante", 1, true, TOOL_PICKAXE, TIER_DIAMOND, false, 0,
          {{ITEM_DIAMOND_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Hacha de Diamante", 1, true, TOOL_AXE, TIER_DIAMOND, 0,
+        {"Hacha de Diamante", 1, true, TOOL_AXE, TIER_DIAMOND, false, 0,
          {{ITEM_DIAMOND_INGOT, 3, true}, {ITEM_STICK, 2, true}}},
-        {"Pala de Diamante", 1, true, TOOL_SHOVEL, TIER_DIAMOND, 0,
+        {"Pala de Diamante", 1, true, TOOL_SHOVEL, TIER_DIAMOND, false, 0,
          {{ITEM_DIAMOND_INGOT, 2, true}, {ITEM_STICK, 2, true}}},
-        {"Martillo de Diamante", 1, true, TOOL_HAMMER, TIER_DIAMOND, 0,
+        {"Martillo de Diamante", 1, true, TOOL_HAMMER, TIER_DIAMOND, false, 0,
          {{ITEM_DIAMOND_INGOT, 4, true}, {ITEM_STICK, 2, true}}},
-        {"Mangual de Diamante", 1, true, TOOL_FLAIL, TIER_DIAMOND, 0,
+        {"Mangual de Diamante", 1, true, TOOL_FLAIL, TIER_DIAMOND, false, 0,
          {{ITEM_DIAMOND_INGOT, 2, true}, {ITEM_STICK, 3, true}}},
-        {"Espada de Diamante", 1, true, TOOL_SWORD, TIER_DIAMOND, 0,
+        {"Espada de Diamante", 1, true, TOOL_SWORD, TIER_DIAMOND, false, 0,
          {{ITEM_DIAMOND_INGOT, 2, true}, {ITEM_STICK, 1, true}}},
     };
 }

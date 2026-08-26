@@ -28,16 +28,22 @@ public:
     std::vector<Config::VoxelData> voxels;
 
     Mesh solid_mesh = { 0 };
+    Mesh build_mesh = { 0 }; // For construction blocks, stairs, fences, props
     Mesh water_mesh = { 0 };
     Mesh plants_mesh = { 0 }; // For tall grass
 
     Mesh next_solid_mesh = { 0 };
+    Mesh next_build_mesh = { 0 };
     Mesh next_water_mesh = { 0 };
     Mesh next_plants_mesh = { 0 };
 
     std::vector<Vector3> s_vertices, s_normals;
     std::vector<Vector2> s_uvs, s_uvs2;
     std::vector<Color> s_colors;
+
+    std::vector<Vector3> b_vertices, b_normals;
+    std::vector<Vector2> b_uvs;
+    std::vector<Color> b_colors;
 
     std::vector<Vector3> w_vertices, w_normals;
     std::vector<Vector2> w_uvs, w_uvs2;
@@ -76,7 +82,7 @@ public:
         return voxels[get_idx(x, y, z)].water;
     }
 
-    void set_block(int x, int y, int z, uint8_t type);
+    void set_block(int x, int y, int z, uint8_t type, uint8_t rotation = 0);
     void set_water_node(int x, int y, int z, uint8_t level);
     void rebuild_mesh(bool water_only = false);
     void save_to_disk();
@@ -87,6 +93,7 @@ private:
     struct PendingEdit {
         int x, y, z;
         uint8_t type;
+        uint8_t rotation;
     };
     std::vector<PendingEdit> pending_edits;
 
@@ -96,6 +103,7 @@ private:
     void generate_thread();
     void rebuild_thread();
     void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1);
+    void build_construction_mesh(const Config::VoxelData* voxels_ptr);
     void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1);
     void pack_meshes(int mask);
     void upload_meshes();

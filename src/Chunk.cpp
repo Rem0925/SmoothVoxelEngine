@@ -37,6 +37,7 @@ Chunk::~Chunk() {
         m = { 0 };
     };
     free_if_packed(solid_mesh);
+    free_if_packed(build_mesh);
     free_if_packed(water_mesh);
     free_if_packed(plants_mesh);
 }
@@ -491,6 +492,7 @@ void Chunk::generate_thread() {
             for (const auto& e : pending_edits) {
                 int i = get_idx(e.x, e.y, e.z);
                 voxels[i].block = e.type;
+                voxels[i].rotation = e.rotation;
                 voxels[i].density = (e.type == Config::AIR || e.type == Config::WATER) ? -1.0f : 1.0f;
                 voxels[i].water = (e.type == Config::WATER) ? 8 : 0;
             }
@@ -710,7 +712,299 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
         p_colors = std::move(lp_colors);
     }
 
+    build_construction_mesh(voxels_ptr);
     build_water_mesh(voxels_ptr, lod);
+}
+
+void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
+    std::vector<Vector3> lb_vertices, lb_normals;
+    std::vector<Vector2> lb_uvs;
+    std::vector<Color> lb_colors;
+
+    lb_vertices.reserve(512);
+    lb_normals.reserve(512);
+    lb_uvs.reserve(512);
+    lb_colors.reserve(512);
+
+    float tw = 1.0f / 9.0f;
+    float th = 1.0f / 10.0f;
+
+    auto get_face_uv = [&](int tx, int ty) -> std::array<Vector2, 4> {
+        float u0 = (float)tx * tw;
+        float v0 = (10.0f - 1.0f - (float)ty) * th;
+        float u1 = u0 + tw;
+        float v1 = v0 + th;
+        return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
+    };
+
+    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 norm, Color col, int tx, int ty) {
+        auto uvs = get_face_uv(tx, ty);
+        // Triangle 1: v0, v1, v2
+        lb_vertices.push_back(v0);
+        lb_vertices.push_back(v1);
+        lb_vertices.push_back(v2);
+        lb_normals.push_back(norm);
+        lb_normals.push_back(norm);
+        lb_normals.push_back(norm);
+        lb_uvs.push_back(uvs[0]);
+        lb_uvs.push_back(uvs[1]);
+        lb_uvs.push_back(uvs[2]);
+        lb_colors.push_back(col);
+        lb_colors.push_back(col);
+        lb_colors.push_back(col);
+
+        // Triangle 2: v0, v2, v3
+        lb_vertices.push_back(v0);
+        lb_vertices.push_back(v2);
+        lb_vertices.push_back(v3);
+        lb_normals.push_back(norm);
+        lb_normals.push_back(norm);
+        lb_normals.push_back(norm);
+        lb_uvs.push_back(uvs[0]);
+        lb_uvs.push_back(uvs[2]);
+        lb_uvs.push_back(uvs[3]);
+        lb_colors.push_back(col);
+        lb_colors.push_back(col);
+        lb_colors.push_back(col);
+    };
+
+    auto add_box = [&](float x0, float y0, float z0, float x1, float y1, float z1,
+                       int top_tx, int top_ty,
+                       int bot_tx, int bot_ty,
+                       int front_tx, int front_ty,
+                       int back_tx, int back_ty,
+                       int left_tx, int left_ty,
+                       int right_tx, int right_ty,
+                       bool cull_top = false, bool cull_bot = false,
+                       bool cull_front = false, bool cull_back = false,
+                       bool cull_left = false, bool cull_right = false) {
+        if (!cull_top) {
+            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, {0, 1, 0}, {255, 255, 255, 255}, top_tx, top_ty);
+        }
+        if (!cull_bot) {
+            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, {0, -1, 0}, {140, 140, 140, 255}, bot_tx, bot_ty);
+        }
+        if (!cull_front) {
+            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, {0, 0, 1}, {210, 210, 210, 255}, front_tx, front_ty);
+        }
+        if (!cull_back) {
+            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, {0, 0, -1}, {210, 210, 210, 255}, back_tx, back_ty);
+        }
+        if (!cull_right) {
+            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {1, 0, 0}, {180, 180, 180, 255}, right_tx, right_ty);
+        }
+        if (!cull_left) {
+            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, {-1, 0, 0}, {180, 180, 180, 255}, left_tx, left_ty);
+        }
+    };
+
+    auto is_opaque_cube = [&](int x, int y, int z) -> bool {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
+        int idx = get_idx(x, y, z);
+        uint8_t b = voxels_ptr[idx].block;
+        if (b == Config::AIR || b == Config::WATER) return false;
+        if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
+        const auto& nb_t = Config::BLOCKS.at(b);
+        return (nb_t.shape == Config::SHAPE_CUBE && !nb_t.transparent);
+    };
+
+    for (int lz = 0; lz < Config::CHUNK_SIZE; ++lz) {
+        for (int ly = 0; ly < Config::GRID_Y; ++ly) {
+            for (int lx = 0; lx < Config::CHUNK_SIZE; ++lx) {
+                int idx = get_idx(lx, ly, lz);
+                uint8_t b = voxels_ptr[idx].block;
+                if (b == Config::AIR || b == Config::WATER) continue;
+                if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) continue;
+                const auto& bt = Config::BLOCKS.at(b);
+                if (bt.shape == Config::SHAPE_TERRAIN) continue;
+
+                float gx = (float)(cx * Config::CHUNK_SIZE + lx) - 0.5f;
+                float gy = (float)ly - 0.5f;
+                float gz = (float)(cz * Config::CHUNK_SIZE + lz) - 0.5f;
+
+                int def_tx = bt.tex_x, def_ty = bt.tex_y;
+                int top_tx = bt.tex_top_x >= 0 ? bt.tex_top_x : def_tx, top_ty = bt.tex_top_y >= 0 ? bt.tex_top_y : def_ty;
+                int bot_tx = bt.tex_bottom_x >= 0 ? bt.tex_bottom_x : def_tx, bot_ty = bt.tex_bottom_y >= 0 ? bt.tex_bottom_y : def_ty;
+                int front_tx = bt.tex_front_x >= 0 ? bt.tex_front_x : def_tx, front_ty = bt.tex_front_y >= 0 ? bt.tex_front_y : def_ty;
+
+                uint8_t rot = voxels_ptr[idx].rotation;
+
+                switch (bt.shape) {
+                    case Config::SHAPE_CUBE:
+                    case Config::SHAPE_GLASS:
+                    case Config::SHAPE_CRAFTING_TABLE: {
+                        bool cull_top = is_opaque_cube(lx, ly + 1, lz);
+                        bool cull_bot = is_opaque_cube(lx, ly - 1, lz);
+                        bool cull_right = is_opaque_cube(lx + 1, ly, lz);
+                        bool cull_left = is_opaque_cube(lx - 1, ly, lz);
+                        bool cull_front = is_opaque_cube(lx, ly, lz + 1);
+                        bool cull_back = is_opaque_cube(lx, ly, lz - 1);
+                        add_box(gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                                top_tx, top_ty, bot_tx, bot_ty,
+                                front_tx, front_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                cull_top, cull_bot, cull_front, cull_back, cull_left, cull_right);
+                        break;
+                    }
+                    case Config::SHAPE_FURNACE: {
+                        bool cull_top = is_opaque_cube(lx, ly + 1, lz);
+                        bool cull_bot = is_opaque_cube(lx, ly - 1, lz);
+                        bool cull_right = is_opaque_cube(lx + 1, ly, lz);
+                        bool cull_left = is_opaque_cube(lx - 1, ly, lz);
+                        bool cull_front = is_opaque_cube(lx, ly, lz + 1);
+                        bool cull_back = is_opaque_cube(lx, ly, lz - 1);
+
+                        int f_front_x = def_tx, f_front_y = def_ty;
+                        int f_back_x = def_tx, f_back_y = def_ty;
+                        int f_left_x = def_tx, f_left_y = def_ty;
+                        int f_right_x = def_tx, f_right_y = def_ty;
+
+                        if (rot == 0) { // Front on +Z
+                            f_front_x = front_tx; f_front_y = front_ty;
+                        } else if (rot == 1) { // Front on -X
+                            f_left_x = front_tx; f_left_y = front_ty;
+                        } else if (rot == 2) { // Front on -Z
+                            f_back_x = front_tx; f_back_y = front_ty;
+                        } else if (rot == 3) { // Front on +X
+                            f_right_x = front_tx; f_right_y = front_ty;
+                        }
+
+                        add_box(gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                                top_tx, top_ty, bot_tx, bot_ty,
+                                f_front_x, f_front_y, f_back_x, f_back_y,
+                                f_left_x, f_left_y, f_right_x, f_right_y,
+                                cull_top, cull_bot, cull_front, cull_back, cull_left, cull_right);
+                        break;
+                    }
+                    case Config::SHAPE_CHEST: {
+                        // Cuerpo
+                        add_box(gx + 0.06f, gy, gz + 0.06f, gx + 0.94f, gy + 0.88f, gz + 0.94f,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty);
+                        int latch_tx = bt.tex_latch_x >= 0 ? bt.tex_latch_x : 2;
+                        int latch_ty = bt.tex_latch_y >= 0 ? bt.tex_latch_y : 3;
+                        // Cerrojo orientado
+                        if (rot == 0) { // South (+Z)
+                            add_box(gx + 0.44f, gy + 0.42f, gz + 0.94f, gx + 0.56f, gy + 0.62f, gz + 0.99f,
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                        } else if (rot == 1) { // West (-X)
+                            add_box(gx + 0.01f, gy + 0.42f, gz + 0.44f, gx + 0.06f, gy + 0.62f, gz + 0.56f,
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                        } else if (rot == 2) { // North (-Z)
+                            add_box(gx + 0.44f, gy + 0.42f, gz + 0.01f, gx + 0.56f, gy + 0.62f, gz + 0.06f,
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                        } else if (rot == 3) { // East (+X)
+                            add_box(gx + 0.94f, gy + 0.42f, gz + 0.44f, gx + 0.99f, gy + 0.62f, gz + 0.56f,
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                        }
+                        break;
+                    }
+                    case Config::SHAPE_STAIRS: {
+                        // Base (inferior completa)
+                        add_box(gx, gy, gz, gx + 1.0f, gy + 0.5f, gz + 1.0f,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty);
+                        // Peldaño superior segun direccion opuesta al jugador
+                        if (rot == 0) { // Step on North (-Z)
+                            add_box(gx, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 0.5f,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty);
+                        } else if (rot == 1) { // Step on East (+X)
+                            add_box(gx + 0.5f, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty);
+                        } else if (rot == 2) { // Step on South (+Z)
+                            add_box(gx, gy + 0.5f, gz + 0.5f, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty);
+                        } else if (rot == 3) { // Step on West (-X)
+                            add_box(gx, gy + 0.5f, gz, gx + 0.5f, gy + 1.0f, gz + 1.0f,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty);
+                        }
+                        break;
+                    }
+                    case Config::SHAPE_DOOR: {
+                        if (rot == 0 || rot == 2) {
+                            add_box(gx, gy, gz + 0.44f, gx + 1.0f, gy + 2.0f, gz + 0.56f,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty);
+                        } else {
+                            add_box(gx + 0.44f, gy, gz, gx + 0.56f, gy + 2.0f, gz + 1.0f,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    def_tx, def_ty, def_tx, def_ty);
+                        }
+                        break;
+                    }
+                    case Config::SHAPE_FENCE: {
+                        // Poste central
+                        add_box(gx + 0.375f, gy, gz + 0.375f, gx + 0.625f, gy + 1.0f, gz + 0.625f,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty);
+                        
+                        auto is_fence_or_solid = [&](int x, int y, int z) {
+                            if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
+                            uint8_t nb_b = voxels_ptr[get_idx(x, y, z)].block;
+                            if (nb_b == Config::AIR || nb_b == Config::WATER) return false;
+                            if (Config::BLOCKS.find(nb_b) == Config::BLOCKS.end()) return false;
+                            const auto& st = Config::BLOCKS.at(nb_b);
+                            return st.shape == Config::SHAPE_FENCE || st.shape == Config::SHAPE_CUBE;
+                        };
+
+                        if (is_fence_or_solid(lx + 1, ly, lz)) {
+                            add_box(gx + 0.625f, gy + 0.2f, gz + 0.44f, gx + 1.0f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(gx + 0.625f, gy + 0.65f, gz + 0.44f, gx + 1.0f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        }
+                        if (is_fence_or_solid(lx - 1, ly, lz)) {
+                            add_box(gx, gy + 0.2f, gz + 0.44f, gx + 0.375f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(gx, gy + 0.65f, gz + 0.44f, gx + 0.375f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        }
+                        if (is_fence_or_solid(lx, ly, lz + 1)) {
+                            add_box(gx + 0.44f, gy + 0.2f, gz + 0.625f, gx + 0.56f, gy + 0.38f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(gx + 0.44f, gy + 0.65f, gz + 0.625f, gx + 0.56f, gy + 0.83f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        }
+                        if (is_fence_or_solid(lx, ly, lz - 1)) {
+                            add_box(gx + 0.44f, gy + 0.2f, gz, gx + 0.56f, gy + 0.38f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(gx + 0.44f, gy + 0.65f, gz, gx + 0.56f, gy + 0.83f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        }
+                        break;
+                    }
+                    case Config::SHAPE_TORCH: {
+                        // Palo
+                        add_box(gx + 0.44f, gy, gz + 0.44f, gx + 0.56f, gy + 0.65f, gz + 0.56f,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty);
+                        // Cabeza con fuego
+                        add_box(gx + 0.40f, gy + 0.55f, gz + 0.40f, gx + 0.60f, gy + 0.75f, gz + 0.60f,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mesh_mutex);
+        b_vertices = std::move(lb_vertices);
+        b_normals = std::move(lb_normals);
+        b_uvs = std::move(lb_uvs);
+        b_colors = std::move(lb_colors);
+    }
 }
 
 void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
@@ -961,6 +1255,42 @@ void Chunk::pack_meshes(int mask) {
             std::vector<Color>().swap(s_colors);
         }
 
+        free_arrays(next_build_mesh);
+        next_build_mesh = {0};
+
+        if (!b_vertices.empty()) {
+            next_build_mesh.vertexCount = b_vertices.size();
+            next_build_mesh.triangleCount = b_vertices.size() / 3;
+
+            next_build_mesh.vertices = (float*)MemAlloc(b_vertices.size() * 3 * sizeof(float));
+            next_build_mesh.normals = (float*)MemAlloc(b_normals.size() * 3 * sizeof(float));
+            next_build_mesh.texcoords = (float*)MemAlloc(b_uvs.size() * 2 * sizeof(float));
+            next_build_mesh.colors = (unsigned char*)MemAlloc(b_colors.size() * 4 * sizeof(unsigned char));
+
+            for (size_t i = 0; i < b_vertices.size(); i++) {
+                next_build_mesh.vertices[i*3] = b_vertices[i].x;
+                next_build_mesh.vertices[i*3+1] = b_vertices[i].y;
+                next_build_mesh.vertices[i*3+2] = b_vertices[i].z;
+
+                next_build_mesh.normals[i*3] = b_normals[i].x;
+                next_build_mesh.normals[i*3+1] = b_normals[i].y;
+                next_build_mesh.normals[i*3+2] = b_normals[i].z;
+
+                next_build_mesh.texcoords[i*2] = b_uvs[i].x;
+                next_build_mesh.texcoords[i*2+1] = b_uvs[i].y;
+
+                next_build_mesh.colors[i*4] = b_colors[i].r;
+                next_build_mesh.colors[i*4+1] = b_colors[i].g;
+                next_build_mesh.colors[i*4+2] = b_colors[i].b;
+                next_build_mesh.colors[i*4+3] = b_colors[i].a;
+            }
+
+            std::vector<Vector3>().swap(b_vertices);
+            std::vector<Vector3>().swap(b_normals);
+            std::vector<Vector2>().swap(b_uvs);
+            std::vector<Color>().swap(b_colors);
+        }
+
         free_arrays(next_plants_mesh);
         next_plants_mesh = {0};
 
@@ -1072,6 +1402,7 @@ void Chunk::upload_meshes() {
 
     if ((mask & 2) != 0) {
         upload_and_swap(solid_mesh, next_solid_mesh);
+        upload_and_swap(build_mesh, next_build_mesh);
         upload_and_swap(plants_mesh, next_plants_mesh);
     }
     if ((mask & 1) != 0) {
@@ -1099,6 +1430,10 @@ void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera
     if (solid_mesh.vboId) {
         DrawMesh(solid_mesh, mat_solid, MatrixIdentity());
     }
+
+    if (build_mesh.vboId) {
+        DrawMesh(build_mesh, mat_solid, MatrixIdentity());
+    }
     
     if (plants_mesh.vboId) {
         float cx_center = cx * CHUNK_SIZE + CHUNK_SIZE / 2.0f;
@@ -1121,22 +1456,35 @@ void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
 }
 
 
-void Chunk::set_block(int x, int y, int z, uint8_t type) {
+void Chunk::set_block(int x, int y, int z, uint8_t type, uint8_t rotation) {
     if (x < 0 || x > CHUNK_SIZE || y < 0 || y >= GRID_Y || z < 0 || z > CHUNK_SIZE) return;
     
     std::lock_guard<std::mutex> lock(chunk_mutex);
     if (generating) {
-        pending_edits.push_back({x, y, z, type});
+        pending_edits.push_back({x, y, z, type, rotation});
         needs_save = true;
         return;
     }
     int i = get_idx(x, y, z);
     voxels[i].block = type;
+    voxels[i].rotation = rotation;
     
     if (type == AIR || type == Config::WATER) {
-        voxels[i].density = -1.0f;
+        if (voxels[i].density > 0.0f) {
+            voxels[i].density = -1.0f;
+        }
     } else {
-        voxels[i].density = 1.0f;
+        bool is_terrain = true;
+        if (Config::BLOCKS.find(type) != Config::BLOCKS.end()) {
+            is_terrain = (Config::BLOCKS.at(type).shape == Config::SHAPE_TERRAIN);
+        }
+        if (is_terrain) {
+            voxels[i].density = 1.0f;
+        } else {
+            if (voxels[i].density > 0.0f) {
+                voxels[i].density = -1.0f;
+            }
+        }
     }
     
     voxels[i].water = (type == Config::WATER) ? 8 : 0;

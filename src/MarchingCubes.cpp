@@ -435,12 +435,21 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     
                     unsigned char col_val = (unsigned char)(255.0f * intensity);
 
+                    auto is_valid_terrain_block = [&](uint8_t blk) -> bool {
+                        if (blk == 255 || blk == 7 || blk == Config::TALL_GRASS) return false;
+                        if (Config::BLOCKS.find(blk) != Config::BLOCKS.end()) {
+                            return Config::BLOCKS.at(blk).shape == Config::SHAPE_TERRAIN;
+                        }
+                        return false;
+                    };
+
                     auto get_v_block = [&](Vector3 v) -> uint8_t {
                         int ix_f = std::floor(v.x); int iy_f = std::floor(v.y); int iz_f = std::floor(v.z);
                         int ix_c = std::ceil(v.x);  int iy_c = std::ceil(v.y);  int iz_c = std::ceil(v.z);
                         uint8_t b = get_raw_block(ix_f, iy_f, iz_f);
-                        if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = get_raw_block(ix_c, iy_c, iz_c);
-                        if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = default_block;
+                        if (!is_valid_terrain_block(b)) b = get_raw_block(ix_c, iy_c, iz_c);
+                        if (!is_valid_terrain_block(b)) b = get_raw_block(ix_f, iy_f - 1, iz_f);
+                        if (!is_valid_terrain_block(b)) b = default_block;
                         return b;
                     };
 

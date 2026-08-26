@@ -442,36 +442,27 @@ void UI::cycle_tool(int direction) {
 }
 
 void UI::cycle_block(int direction) {
-    std::vector<int> block_slots;
-    for (int i = 1; i < 10; i++) {
-        if (slots[i].count > 0) block_slots.push_back(i);
-    }
-    if (block_slots.empty()) return;
+    // Ciclar a través de todos los slots 1 al 9 (incluyendo casillas vacías)
+    int s = selected_slot;
+    if (s < 1 || s > 9) s = 1;
     
-    int current_idx = 0;
-    for (int j = 0; j < (int)block_slots.size(); j++) {
-        if (block_slots[j] == selected_slot) {
-            current_idx = j;
-            break;
-        }
-    }
+    int idx = s - 1; // 0..8
+    idx = (idx + direction) % 9;
+    if (idx < 0) idx += 9;
     
-    current_idx = (current_idx + direction) % (int)block_slots.size();
-    if (current_idx < 0) current_idx += (int)block_slots.size();
-    
-    selected_slot = block_slots[current_idx];
+    selected_slot = idx + 1;
 }
 
 // ===================== BLOQUES / ITEMS =====================
 
-void UI::add_resource(uint8_t block_type) {
+void UI::add_resource(uint8_t block_type, int count) {
     if (BLOCKS.find(block_type) == BLOCKS.end()) return;
     std::string bname = BLOCKS.at(block_type).name;
     
     // 1. Slot existente en hotbar
     for (int i = 1; i < 10; i++) {
         if (slots[i].id == block_type && slots[i].count > 0) {
-            slots[i].count++;
+            slots[i].count += count;
             return;
         }
     }
@@ -480,14 +471,14 @@ void UI::add_resource(uint8_t block_type) {
         if (slots[i].count <= 0) {
             slots[i].id = block_type;
             slots[i].name = bname;
-            slots[i].count = 1;
+            slots[i].count = count;
             return;
         }
     }
     // 3. Slot existente en storage
     for (size_t i = 0; i < storage.size(); i++) {
         if (storage[i].id == block_type && storage[i].count > 0) {
-            storage[i].count++;
+            storage[i].count += count;
             return;
         }
     }
@@ -496,7 +487,7 @@ void UI::add_resource(uint8_t block_type) {
         if (storage[i].count <= 0) {
             storage[i].id = block_type;
             storage[i].name = bname;
-            storage[i].count = 1;
+            storage[i].count = count;
             return;
         }
     }
@@ -667,8 +658,10 @@ void UI::craft(int recipe_index, int times) {
         // Agregar resultado
         if (r.result_is_tool) {
             add_tool(r.result_tool_type, r.result_tool_tier);
+        } else if (r.result_is_block) {
+            add_resource(r.result_id, r.result_count);
         } else {
-            add_item(r.result_item_id, r.result_count);
+            add_item(r.result_id, r.result_count);
         }
     }
 }
@@ -755,9 +748,6 @@ void UI::draw_hotbar() {
             DrawRectangleLines(x - 1, y - 1, slot_size + 2, slot_size + 2, Color{255, 230, 80, 180});
         }
         
-        int key_num = (i < 9) ? (i + 1) : 0;
-        DrawText(TextFormat("%d", key_num), x + 4, y + 3, 10, is_sel ? Color{255, 230, 80, 255} : Color{160, 175, 190, 255});
-        
         if (i == 0) {
             ToolSlot* tool = get_active_tool();
             if (tool) {
@@ -783,22 +773,15 @@ void UI::draw_hotbar() {
             DrawText(TextFormat("%d", slots[i].count), x + 29, y + 34, 14, BLACK);
             DrawText(TextFormat("%d", slots[i].count), x + 28, y + 33, 14, WHITE);
         }
+
+        // Dibujar el número de tecla SIEMPRE al frente (con sombra para legibilidad)
+        int key_num = (i < 9) ? (i + 1) : 0;
+        DrawText(TextFormat("%d", key_num), x + 5, y + 4, 10, BLACK);
+        DrawText(TextFormat("%d", key_num), x + 4, y + 3, 10, is_sel ? Color{255, 230, 80, 255} : Color{220, 230, 245, 255});
     }
 }
 
 void UI::draw_tool_hud() {
-    ToolSlot* tool = get_active_tool();
-    if (!tool) return;
-    
-    const ToolInfo* info = nullptr;
-    for (auto& t : TOOLS) {
-        if (t.type == tool->type && t.tier == tool->tier) {
-            info = &t;
-            break;
-        }
-    }
-    if (!info) return;
-    
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
     int slot_size = 50;
@@ -807,27 +790,99 @@ void UI::draw_tool_hud() {
     int hotbar_x = (sw - total_width) / 2;
     int hotbar_y = sh - slot_size - 18;
     
+    // Posicion fija con margen holgado sobre el hotbar
     int hud_x = hotbar_x;
-    int hud_y = hotbar_y - 48;
-    
-    DrawRectangleRounded({ (float)hud_x - 6, (float)hud_y - 4, 195.0f, 42.0f }, 0.25f, 4, Fade(Color{16, 20, 26, 255}, 0.85f));
-    DrawRectangleRoundedLines({ (float)hud_x - 6, (float)hud_y - 4, 195.0f, 42.0f }, 0.25f, 4, Fade(Color{80, 100, 130, 255}, 0.5f));
-    
-    draw_tool_icon(tool->type, tool->tier, hud_x, hud_y + 1, 32);
-    DrawText(info->name.c_str(), hud_x + 38, hud_y + 3, 13, WHITE);
-    
-    float pct = (float)tool->durability_current / (float)tool->durability_max;
-    int bar_w = 90;
-    int bar_h = 5;
-    int bar_x = hud_x + 38;
-    int bar_y = hud_y + 22;
-    
-    DrawRectangle(bar_x, bar_y, bar_w, bar_h, Fade(BLACK, 0.8f));
-    Color dur_col = pct > 0.5f ? Color{50, 220, 80, 255} : (pct > 0.25f ? Color{240, 190, 40, 255} : Color{235, 50, 50, 255});
-    DrawRectangle(bar_x, bar_y, (int)(bar_w * pct), bar_h, dur_col);
-    DrawRectangleLines(bar_x, bar_y, bar_w, bar_h, Fade(BLACK, 0.6f));
-    
-    DrawText(TextFormat("%d/%d", tool->durability_current, tool->durability_max), bar_x + bar_w + 6, bar_y - 2, 10, Color{200, 210, 225, 255});
+    int hud_y = hotbar_y - 56;
+    int hud_w = 210;
+    int hud_h = 42;
+
+    // === SLOT 0: HERRAMIENTAS ===
+    if (selected_slot == 0) {
+        ToolSlot* tool = get_active_tool();
+        if (tool) {
+            const ToolInfo* info = nullptr;
+            for (auto& t : TOOLS) {
+                if (t.type == tool->type && t.tier == tool->tier) {
+                    info = &t;
+                    break;
+                }
+            }
+            if (info) {
+                DrawRectangleRounded({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{16, 20, 26, 255}, 0.85f));
+                DrawRectangleRoundedLines({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{80, 100, 130, 255}, 0.5f));
+                
+                draw_tool_icon(tool->type, tool->tier, hud_x, hud_y + 1, 32);
+                DrawText(info->name.c_str(), hud_x + 38, hud_y + 3, 13, WHITE);
+                
+                float pct = (float)tool->durability_current / (float)tool->durability_max;
+                int bar_w = 90;
+                int bar_h = 5;
+                int bar_x = hud_x + 38;
+                int bar_y = hud_y + 22;
+                
+                DrawRectangle(bar_x, bar_y, bar_w, bar_h, Fade(BLACK, 0.8f));
+                Color dur_col = pct > 0.5f ? Color{50, 220, 80, 255} : (pct > 0.25f ? Color{240, 190, 40, 255} : Color{235, 50, 50, 255});
+                DrawRectangle(bar_x, bar_y, (int)(bar_w * pct), bar_h, dur_col);
+                DrawRectangleLines(bar_x, bar_y, bar_w, bar_h, Fade(BLACK, 0.6f));
+                
+                DrawText(TextFormat("%d/%d", tool->durability_current, tool->durability_max), bar_x + bar_w + 6, bar_y - 2, 10, Color{200, 210, 225, 255});
+            }
+        } else {
+            DrawRectangleRounded({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{16, 20, 26, 255}, 0.85f));
+            DrawRectangleRoundedLines({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{80, 100, 130, 255}, 0.4f));
+            DrawText("Mano (Sin herramienta)", hud_x + 12, hud_y + 12, 12, Color{180, 195, 210, 255});
+        }
+    }
+    // === SLOTS 1-9: BLOQUES O ITEMS ===
+    else {
+        auto& slot = slots[selected_slot];
+        if (slot.count > 0 && slot.id != Config::AIR) {
+            if (slot.id == 254) {
+                // Item de spritesheet_items
+                uint8_t item_id = 255;
+                for (auto& [iid, itype] : ITEMS) {
+                    if (itype.name == slot.name) {
+                        item_id = iid;
+                        break;
+                    }
+                }
+                if (item_id != 255 && ITEMS.count(item_id)) {
+                    auto& itm = ITEMS.at(item_id);
+                    DrawRectangleRounded({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{16, 20, 26, 255}, 0.85f));
+                    DrawRectangleRoundedLines({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{80, 100, 130, 255}, 0.5f));
+                    
+                    draw_item_icon(item_id, hud_x, hud_y + 1, 32);
+                    DrawText(itm.name.c_str(), hud_x + 38, hud_y + 3, 13, WHITE);
+                    DrawText(TextFormat("Cantidad: %d | Objeto", slot.count), hud_x + 38, hud_y + 22, 10, Color{255, 215, 80, 255});
+                }
+            } else if (Config::BLOCKS.count(slot.id)) {
+                // Bloque de construccion o terreno
+                auto& blk = Config::BLOCKS.at(slot.id);
+                DrawRectangleRounded({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{16, 20, 26, 255}, 0.85f));
+                DrawRectangleRoundedLines({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{80, 100, 130, 255}, 0.5f));
+                
+                draw_block_icon(slot.id, hud_x, hud_y + 1, 32);
+                DrawText(blk.name.c_str(), hud_x + 38, hud_y + 3, 13, WHITE);
+                
+                std::string cat = "Construcción";
+                if (blk.shape == Config::SHAPE_FURNACE) cat = "Horno";
+                else if (blk.shape == Config::SHAPE_CHEST) cat = "Cofre";
+                else if (blk.shape == Config::SHAPE_CRAFTING_TABLE) cat = "Mesa Crafteo";
+                else if (blk.shape == Config::SHAPE_DOOR) cat = "Puerta";
+                else if (blk.shape == Config::SHAPE_TORCH) cat = "Antorcha";
+                else if (blk.shape == Config::SHAPE_STAIRS) cat = "Escalera";
+                else if (blk.shape == Config::SHAPE_FENCE) cat = "Valla";
+                else if (blk.shape == Config::SHAPE_GLASS) cat = "Cristal";
+                else if (blk.shape == Config::SHAPE_TERRAIN) cat = "Terreno";
+                
+                DrawText(TextFormat("x%d | %s", slot.count, cat.c_str()), hud_x + 38, hud_y + 22, 10, Color{130, 230, 160, 255});
+            }
+        } else {
+            DrawRectangleRounded({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{16, 20, 26, 255}, 0.85f));
+            DrawRectangleRoundedLines({ (float)hud_x - 6, (float)hud_y - 4, (float)hud_w, (float)hud_h }, 0.25f, 4, Fade(Color{80, 100, 130, 255}, 0.3f));
+            DrawText("Mano vacía", hud_x + 12, hud_y + 12, 12, Color{160, 175, 190, 255});
+        }
+    }
 }
 
 void UI::draw_inventory_panel() {
@@ -1095,8 +1150,13 @@ void UI::draw_inventory_panel() {
                 if (t.type == rec.result_tool_type && t.tier == rec.result_tool_tier) { tinfo = &t; break; }
             }
             if (tinfo) draw_tool_icon(tinfo->type, tinfo->tier, icon_box_x + 1, icon_box_y + 1, 32);
+        } else if (rec.result_is_block) {
+            draw_block_icon(rec.result_id, icon_box_x + 1, icon_box_y + 1, 32);
+            if (rec.result_count > 1) {
+                DrawText(TextFormat("x%d", rec.result_count), icon_box_x + 18, icon_box_y + 22, 10, Color{ 255, 230, 100, 255 });
+            }
         } else {
-            draw_item_icon(rec.result_item_id, icon_box_x + 1, icon_box_y + 1, 32);
+            draw_item_icon(rec.result_id, icon_box_x + 1, icon_box_y + 1, 32);
             if (rec.result_count > 1) {
                 DrawText(TextFormat("x%d", rec.result_count), icon_box_x + 18, icon_box_y + 22, 10, Color{ 255, 230, 100, 255 });
             }

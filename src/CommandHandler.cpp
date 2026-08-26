@@ -54,14 +54,37 @@ namespace CommandHandler {
                     chat.add_message("ID de item invalido (0-7)");
                 }
             }
-            // /give <block_id> — dar bloque (compatibilidad anterior)
+            // /give all [cantidad] — dar todos los bloques nuevos de construccion
+            else if (arg.find("all") == 0) {
+                int count = 64;
+                sscanf(arg.c_str(), "all %d", &count);
+                uint8_t new_blocks[] = {
+                    Config::PLANKS_CUBE,
+                    Config::STONE_BRICK,
+                    Config::STAIRS_WOOD,
+                    Config::STAIRS_STONE,
+                    Config::FENCE_WOOD,
+                    Config::TORCH,
+                    Config::DOOR_WOOD,
+                    Config::CHEST,
+                    Config::FURNACE,
+                    Config::CRAFTING_TABLE,
+                    Config::GLASS
+                };
+                for (uint8_t b : new_blocks) {
+                    ui.add_resource(b, count);
+                }
+                chat.add_message("Bloques nuevos anadidos x" + std::to_string(count));
+            }
+            // /give <block_id> [cantidad] — dar bloque
             else {
-                int block_id;
-                if (sscanf(arg.c_str(), "%d", &block_id) == 1) {
-                    ui.add_resource((uint8_t)block_id);
-                    chat.add_message("Bloque " + std::to_string(block_id) + " anadido");
+                int block_id = 0, count = 1;
+                int n = sscanf(arg.c_str(), "%d %d", &block_id, &count);
+                if (n >= 1) {
+                    ui.add_resource((uint8_t)block_id, count);
+                    chat.add_message("Bloque " + std::to_string(block_id) + " anadido x" + std::to_string(count));
                 } else {
-                    chat.add_message("Uso: /give <id> | /give item <id> [cant] | /give tool <tipo> <tier>");
+                    chat.add_message("Uso: /give <id> [cant] | /give all [cant] | /give item <id> [cant] | /give tool <tipo> <tier>");
                 }
             }
         }

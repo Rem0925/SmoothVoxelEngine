@@ -29,7 +29,7 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
     
     for (auto& pair : world.chunks) {
         Chunk* c = pair.second.get();
-        if (!c->is_ready || c->solid_mesh.vertexCount == 0) continue;
+        if (!c->is_ready) continue;
         
         float cx_center = c->cx * Config::CHUNK_SIZE + Config::CHUNK_SIZE / 2.0f;
         float cz_center = c->cz * Config::CHUNK_SIZE + Config::CHUNK_SIZE / 2.0f;
@@ -45,9 +45,18 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
         };
         if (!GetRayCollisionBox(ray, box).hit) continue;
 
-        RayCollision mesh_hit = GetRayCollisionMesh(ray, c->solid_mesh, MatrixIdentity());
-        if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
-            closest_hit = mesh_hit;
+        if (c->solid_mesh.vertexCount > 0) {
+            RayCollision mesh_hit = GetRayCollisionMesh(ray, c->solid_mesh, MatrixIdentity());
+            if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
+                closest_hit = mesh_hit;
+            }
+        }
+
+        if (c->build_mesh.vertexCount > 0) {
+            RayCollision build_hit = GetRayCollisionMesh(ray, c->build_mesh, MatrixIdentity());
+            if (build_hit.hit && build_hit.distance < closest_hit.distance) {
+                closest_hit = build_hit;
+            }
         }
     }
     
@@ -73,10 +82,12 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
                     
                     if (ny >= 0 && ny < Config::GRID_Y) {
                         float den = world.get_density(nx, ny, nz);
+                        uint8_t blk = world.get_block(nx, ny, nz);
                         Vector3 node_pos = { (float)nx, (float)ny, (float)nz };
                         float dist = Vector3Distance(out_hit, node_pos);
                         
-                        if (den >= Config::ISO_SURFACE) {
+                        bool is_node_solid = (den >= Config::ISO_SURFACE) || (blk != Config::AIR && blk != Config::WATER);
+                        if (is_node_solid) {
                             if (dist < best_dist_solid) {
                                 best_dist_solid = dist;
                                 best_solid = node_pos;
@@ -382,6 +393,31 @@ int main() {
         }
     }
 
+    // Entregar 64 unidades de cada bloque nuevo para pruebas (hotbar y storage)
+    uint8_t starter_blocks[] = {
+        Config::PLANKS_CUBE,
+        Config::STONE_BRICK,
+        Config::STAIRS_WOOD,
+        Config::STAIRS_STONE,
+        Config::FENCE_WOOD,
+        Config::TORCH,
+        Config::DOOR_WOOD,
+        Config::CHEST,
+        Config::FURNACE,
+        Config::CRAFTING_TABLE,
+        Config::GLASS
+    };
+    for (uint8_t b : starter_blocks) {
+        if (ui.count_block(b) < 64) {
+            ui.add_resource(b, 64);
+        }
+    }
+    if (!ui.has_item(Config::ITEM_COAL, 10)) ui.add_item(Config::ITEM_COAL, 64);
+    if (ui.count_block(Config::IRON_ORE) < 10) ui.add_resource(Config::IRON_ORE, 64);
+    if (ui.count_block(Config::GOLD_ORE) < 10) ui.add_resource(Config::GOLD_ORE, 64);
+    if (ui.count_block(Config::SILVER_ORE) < 10) ui.add_resource(Config::SILVER_ORE, 64);
+    if (ui.count_block(Config::SAND) < 10) ui.add_resource(Config::SAND, 64);
+
     while (!WindowShouldClose()) {
         bool ray_hit_valid = false;
         Vector3 hit = {0}, target_solid = {0}, target_empty = {0};
@@ -401,7 +437,14 @@ int main() {
         }
         
 
-        
+        // Auto-guardado periódico cada 5 segundos
+        static float autosave_timer = 0.0f;
+        autosave_timer += GetFrameTime();
+        if (autosave_timer >= 5.0f) {
+            autosave_timer = 0.0f;
+            world.save_all();
+        }
+
         if (!ui.is_open && !chat.is_open) {
             Vector3 old_pos = camera.position;
             UpdateCamera(&camera, spectator_mode ? CAMERA_FREE : CAMERA_FIRST_PERSON);
@@ -626,17 +669,89 @@ int main() {
                         is_mining = false;
                     }
                 }
-                // === SLOTS 1-9: COLOCAR BLOQUES ===
+                // === SLOTS 1-9: COLOCAR BLOQUES O INTERACTUAR ===
                 else if (ui.selected_slot != 0) {
                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                         if (ui.slots[ui.selected_slot].count > 0 && ui.slots[ui.selected_slot].id != 254) {
-                            world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id);
+                            uint8_t rot = 0;
+                            if (std::abs(forward.z) >= std::abs(forward.x)) {
+                                rot = (forward.z > 0.0f) ? 2 : 0; // Si el player mira al Sur (+Z), el bloque mira al Norte (2) hacia el player. Si mira al Norte (-Z), el bloque mira al Sur (0).
+                            } else {
+                                rot = (forward.x > 0.0f) ? 1 : 3; // Si el player mira al Este (+X), el bloque mira al Oeste (1) hacia el player. Si mira al Oeste (-X), el bloque mira al Este (3).
+                            }
+                            world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id, rot);
                             ui.slots[ui.selected_slot].count--;
                             if (ui.slots[ui.selected_slot].count <= 0) {
                                 ui.slots[ui.selected_slot].id = AIR;
                                 ui.slots[ui.selected_slot].name = "";
                             }
                         }
+                    }
+                }
+
+                // Interaccion con objetos funcionales (Cofre, Horno, Mesa de Crafteo, Puerta, etc.) con Click Derecho
+                if (IsMouseButtonPressed(MOUSE_RIGHT_BUTTON)) {
+                    int bx = (int)target_solid.x;
+                    int by = (int)target_solid.y;
+                    int bz = (int)target_solid.z;
+                    uint8_t look_b = world.get_block(bx, by, bz);
+                    if (look_b == Config::AIR) {
+                        bx = std::floor(hit.x);
+                        by = std::floor(hit.y);
+                        bz = std::floor(hit.z);
+                        look_b = world.get_block(bx, by, bz);
+                    }
+
+                    if (look_b == Config::CHEST) {
+                        chat.add_message("[Cofre] Almacenamiento abierto (pulsa E para salir)");
+                        if (!ui.is_open) ui.toggle_inventory();
+                    } else if (look_b == Config::CRAFTING_TABLE) {
+                        chat.add_message("[Mesa de Crafteo] Menu de creacion abierto");
+                        if (!ui.is_open) ui.toggle_inventory();
+                        ui.craft_category = 0;
+                    } else if (look_b == Config::FURNACE) {
+                        if (ui.has_item(Config::ITEM_COAL, 1)) {
+                            if (ui.count_block(Config::IRON_ORE) > 0) {
+                                ui.remove_block(Config::IRON_ORE, 1);
+                                ui.remove_item(Config::ITEM_COAL, 1);
+                                ui.add_item(Config::ITEM_IRON_INGOT, 1);
+                                chat.add_message("[Horno] Fundido: 1x Mineral de Hierro -> 1x Lingote de Hierro");
+                            } else if (ui.count_block(Config::GOLD_ORE) > 0) {
+                                ui.remove_block(Config::GOLD_ORE, 1);
+                                ui.remove_item(Config::ITEM_COAL, 1);
+                                ui.add_item(Config::ITEM_GOLD_INGOT, 1);
+                                chat.add_message("[Horno] Fundido: 1x Mineral de Oro -> 1x Lingote de Oro");
+                            } else if (ui.count_block(Config::SILVER_ORE) > 0) {
+                                ui.remove_block(Config::SILVER_ORE, 1);
+                                ui.remove_item(Config::ITEM_COAL, 1);
+                                ui.add_item(Config::ITEM_SILVER_INGOT, 1);
+                                chat.add_message("[Horno] Fundido: 1x Mineral de Plata -> 1x Lingote de Plata");
+                            } else if (ui.count_block(Config::SAND) > 0) {
+                                ui.remove_block(Config::SAND, 1);
+                                ui.remove_item(Config::ITEM_COAL, 1);
+                                ui.add_resource(Config::GLASS, 1);
+                                chat.add_message("[Horno] Fundido: 1x Arena -> 1x Cristal");
+                            } else if (ui.count_block(Config::COBBLESTONE) > 0) {
+                                ui.remove_block(Config::COBBLESTONE, 1);
+                                ui.remove_item(Config::ITEM_COAL, 1);
+                                ui.add_resource(Config::STONE, 1);
+                                chat.add_message("[Horno] Cocinado: 1x Adoquin -> 1x Piedra Lisa");
+                            } else {
+                                chat.add_message("[Horno] No tienes minerales, arena ni adoquin para fundir.");
+                            }
+                        } else {
+                            chat.add_message("[Horno] Requiere Carbon como combustible en el inventario.");
+                        }
+                    } else if (look_b == Config::DOOR_WOOD) {
+                        chat.add_message("[Puerta] *Click* (Abriendo / Cerrando puerta de madera)");
+                    } else if (look_b == Config::TORCH) {
+                        chat.add_message("[Antorcha] Iluminando el entorno con calidez");
+                    } else if (look_b == Config::FENCE_WOOD) {
+                        chat.add_message("[Valla de Madera] Bloque de contencion");
+                    } else if (look_b == Config::STAIRS_WOOD || look_b == Config::STAIRS_STONE) {
+                        chat.add_message("[Escalera] Peldanos para subir niveles sin saltar");
+                    } else if (look_b != Config::AIR && look_b != Config::WATER && Config::BLOCKS.count(look_b)) {
+                        chat.add_message("[" + Config::BLOCKS.at(look_b).name + "] Bloque de construccion");
                     }
                 }
             } else {
@@ -993,94 +1108,107 @@ int main() {
             int off_max_x = h_area.max_dx + 1;
             int off_min_z = h_area.min_dz - 1;
             int off_max_z = h_area.max_dz + 1;
-            
             int size_x = off_max_x - off_min_x + 1;
             int size_z = off_max_z - off_min_z + 1;
             int size_y = is_hammer ? (h_area.max_h + 3) : 3;
             
-            std::vector<float> d_slice(size_x * size_y * size_z, -1.0f);
-            for (int dx = off_min_x; dx <= off_max_x; dx++) {
-                for (int dz = off_min_z; dz <= off_max_z; dz++) {
-                    for (int dy = -1; dy <= size_y - 2; dy++) {
-                        int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
-                        d_slice[idx] = world.get_density(bx + dx, by + dy, bz + dz);
+            uint8_t held_b = (ui.selected_slot != 0) ? ui.slots[ui.selected_slot].id : Config::AIR;
+            bool is_construction_held = (ui.selected_slot != 0 && Config::BLOCKS.find(held_b) != Config::BLOCKS.end() && Config::BLOCKS.at(held_b).shape != Config::SHAPE_TERRAIN);
+
+            if (is_construction_held) {
+                float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
+                unsigned char alpha = (unsigned char)(pulse * 255);
+                Color wire_col = Color{25, 255, 75, alpha};
+                Color solid_col = Color{0, 255, 0, 40};
+                
+                Vector3 c_pos = { (float)bx, (float)by, (float)bz };
+                DrawCubeWires(c_pos, 1.0f, 1.0f, 1.0f, wire_col);
+                DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
+            } else {
+                std::vector<float> d_slice(size_x * size_y * size_z, -1.0f);
+                for (int dx = off_min_x; dx <= off_max_x; dx++) {
+                    for (int dz = off_min_z; dz <= off_max_z; dz++) {
+                        for (int dy = -1; dy <= size_y - 2; dy++) {
+                            int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                            d_slice[idx] = world.get_density(bx + dx, by + dy, bz + dz);
+                        }
                     }
                 }
-            }
-            
-            if (is_hammer) {
-                // Simular el aplanado con martillo:
-                // 1. Vaciar elevaciones por encima de by (dy >= 1) hasta max_h si son rompibles
-                // 2. Nivelar la base en dy = 0 como sólido plano
-                for (int dx = h_area.min_dx; dx <= h_area.max_dx; dx++) {
-                    for (int dz = h_area.min_dz; dz <= h_area.max_dz; dz++) {
-                        for (int dy = 1; dy <= h_area.max_h; dy++) {
-                            if (dy + 1 < size_y) {
-                                uint8_t b = world.get_block(bx + dx, by + dy, bz + dz);
-                                if (b != AIR && b != WATER && BLOCKS.count(b)) {
-                                    const auto& bt = BLOCKS.at(b);
-                                    if (bt.require_tier == 255 || bt.require_tier <= active_tool->tier) {
+                
+                if (is_hammer) {
+                    // Simular el aplanado con martillo:
+                    // 1. Vaciar elevaciones por encima de by (dy >= 1) hasta max_h si son rompibles
+                    // 2. Nivelar la base en dy = 0 como sólido plano
+                    for (int dx = h_area.min_dx; dx <= h_area.max_dx; dx++) {
+                        for (int dz = h_area.min_dz; dz <= h_area.max_dz; dz++) {
+                            for (int dy = 1; dy <= h_area.max_h; dy++) {
+                                if (dy + 1 < size_y) {
+                                    uint8_t b = world.get_block(bx + dx, by + dy, bz + dz);
+                                    if (b != AIR && b != WATER && BLOCKS.count(b)) {
+                                        const auto& bt = BLOCKS.at(b);
+                                        if (bt.require_tier == 255 || bt.require_tier <= active_tool->tier) {
+                                            int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                                            d_slice[idx] = -1.0f;
+                                        }
+                                    } else if (b == AIR) {
                                         int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
                                         d_slice[idx] = -1.0f;
                                     }
-                                } else if (b == AIR) {
-                                    int idx = (dy + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
-                                    d_slice[idx] = -1.0f;
                                 }
                             }
-                        }
-                        
-                        // En dy = 0, si hay terreno, fijar densidad a 1.0 para previsualizar plano perfecto
-                        uint8_t b_base = world.get_block(bx + dx, by, bz + dz);
-                        if (b_base != AIR && b_base != WATER) {
-                            int idx = (0 + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
-                            d_slice[idx] = 1.0f;
+                            
+                            // En dy = 0, si hay terreno, fijar densidad a 1.0 para previsualizar plano perfecto
+                            uint8_t b_base = world.get_block(bx + dx, by, bz + dz);
+                            if (b_base != AIR && b_base != WATER) {
+                                int idx = (0 + 1) * (size_x * size_z) + (dz - off_min_z) * size_x + (dx - off_min_x);
+                                d_slice[idx] = 1.0f;
+                            }
                         }
                     }
+                } else if (ui.selected_slot == 0) {
+                    d_slice[1 * (size_x * size_z) + 1 * size_x + 1] = -1.0f; // Preview mine
+                } else {
+                    d_slice[1 * (size_x * size_z) + 1 * size_x + 1] = 1.0f; // Preview place
                 }
-            } else if (ui.selected_slot == 0) {
-                d_slice[1 * (size_x * size_z) + 1 * size_x + 1] = -1.0f; // Preview mine
-            } else {
-                d_slice[1 * (size_x * size_z) + 1 * size_x + 1] = 1.0f; // Preview place
-            }
-            
-            std::vector<Vector3> g_verts, g_norms;
-            std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
-            mc::generate(nullptr, d_slice.data(), size_x, size_y, size_z, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
-            
-            rlPushMatrix();
-            rlTranslatef(bx + (float)off_min_x, by - 1.0f, bz + (float)off_min_z);
-            
-            float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
-            unsigned char alpha = (unsigned char)(pulse * 255);
-            Color wire_col = is_hammer ? Color{255, 180, 40, alpha} : ((ui.selected_slot == 0) ? Color{255, 25, 25, alpha} : Color{25, 255, 75, alpha});
-            Color solid_col = is_hammer ? Color{255, 160, 0, 45} : ((ui.selected_slot == 0) ? Color{255, 0, 0, 40} : Color{0, 255, 0, 40});
+                
+                std::vector<Vector3> g_verts, g_norms;
+                std::vector<Vector2> g_uvs, g_uvs2; std::vector<Color> g_cols;
+                mc::generate(nullptr, d_slice.data(), size_x, size_y, size_z, 0.0f, Config::AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
+                
+                rlPushMatrix();
+                rlTranslatef(bx + (float)off_min_x, by - 1.0f, bz + (float)off_min_z);
+                
+                float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
+                unsigned char alpha = (unsigned char)(pulse * 255);
+                Color wire_col = is_hammer ? Color{255, 180, 40, alpha} : ((ui.selected_slot == 0) ? Color{255, 25, 25, alpha} : Color{25, 255, 75, alpha});
+                Color solid_col = is_hammer ? Color{255, 160, 0, 45} : ((ui.selected_slot == 0) ? Color{255, 0, 0, 40} : Color{0, 255, 0, 40});
 
-            rlBegin(RL_LINES);
-            rlColor4ub(wire_col.r, wire_col.g, wire_col.b, wire_col.a);
-            for (size_t i = 0; i < g_verts.size(); i += 3) {
-                rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
-                rlVertex3f(g_verts[i+1].x, g_verts[i+1].y, g_verts[i+1].z);
+                rlBegin(RL_LINES);
+                rlColor4ub(wire_col.r, wire_col.g, wire_col.b, wire_col.a);
+                for (size_t i = 0; i < g_verts.size(); i += 3) {
+                    rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+                    rlVertex3f(g_verts[i+1].x, g_verts[i+1].y, g_verts[i+1].z);
+                    
+                    rlVertex3f(g_verts[i+1].x, g_verts[i+1].y, g_verts[i+1].z);
+                    rlVertex3f(g_verts[i+2].x, g_verts[i+2].y, g_verts[i+2].z);
+                    
+                    rlVertex3f(g_verts[i+2].x, g_verts[i+2].y, g_verts[i+2].z);
+                    rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+                }
+                rlEnd();
                 
-                rlVertex3f(g_verts[i+1].x, g_verts[i+1].y, g_verts[i+1].z);
-                rlVertex3f(g_verts[i+2].x, g_verts[i+2].y, g_verts[i+2].z);
+                rlSetTexture(spritesheet.id);
+                rlBegin(RL_TRIANGLES);
+                rlColor4ub(solid_col.r, solid_col.g, solid_col.b, solid_col.a);
+                for (size_t i = 0; i < g_verts.size(); ++i) {
+                    rlTexCoord2f(g_uvs[i].x, g_uvs[i].y);
+                    rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+                }
+                rlEnd();
+                rlSetTexture(0);
                 
-                rlVertex3f(g_verts[i+2].x, g_verts[i+2].y, g_verts[i+2].z);
-                rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
+                rlPopMatrix();
             }
-            rlEnd();
-            
-            rlSetTexture(spritesheet.id);
-            rlBegin(RL_TRIANGLES);
-            rlColor4ub(solid_col.r, solid_col.g, solid_col.b, solid_col.a);
-            for (size_t i = 0; i < g_verts.size(); ++i) {
-                rlTexCoord2f(g_uvs[i].x, g_uvs[i].y);
-                rlVertex3f(g_verts[i].x, g_verts[i].y, g_verts[i].z);
-            }
-            rlEnd();
-            rlSetTexture(0);
-            
-            rlPopMatrix();
             
             // 1. Flush the X-Ray batch NOW while depth test is still OFF
             rlDrawRenderBatchActive();

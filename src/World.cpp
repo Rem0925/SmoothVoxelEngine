@@ -374,7 +374,7 @@ void World::draw(Camera3D camera) {
 
 void World::save_all() {
     for (auto& pair : chunks) {
-        if (pair.second->is_dirty) {
+        if (pair.second->needs_save || pair.second->is_dirty) {
             pair.second->save_to_disk();
         }
     }
@@ -401,7 +401,7 @@ uint8_t World::get_block(int wx, int wy, int wz) {
     return AIR;
 }
 
-void World::set_block(int wx, int wy, int wz, uint8_t type) {
+void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     if (wy < 0 || wy >= GRID_Y) return;
     
     int cx = std::floor((float)wx / CHUNK_SIZE);
@@ -412,7 +412,7 @@ void World::set_block(int wx, int wy, int wz, uint8_t type) {
     
     auto update_chunk = [&](int c_x, int c_z, int l_x, int l_z) {
         Chunk* c = get_chunk(c_x, c_z);
-        if (c) c->set_block(l_x, wy, l_z, type);
+        if (c) c->set_block(l_x, wy, l_z, type, rotation);
     };
     
     // 1. Chunk principal

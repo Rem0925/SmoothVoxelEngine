@@ -59,7 +59,7 @@ public:
     void cycle_block(int direction);    // rueda del mouse en slots 1-9
 
     // Bloques/Items
-    void add_resource(uint8_t block_type);
+    void add_resource(uint8_t block_type, int count = 1);
     void add_item(uint8_t item_id, int count = 1);
     bool has_item(uint8_t item_id, int count = 1) const;
     bool remove_item(uint8_t item_id, int count = 1);
