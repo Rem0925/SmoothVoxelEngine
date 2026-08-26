@@ -80,17 +80,16 @@ void Chunk::generate_thread() {
                 if (sqlite3_step(stmt) == SQLITE_ROW) {
                     const void* blob = sqlite3_column_blob(stmt, 0);
                     int bytes = sqlite3_column_bytes(stmt, 0);
-                    if (bytes == total_blocks * (sizeof(float) + sizeof(uint8_t))) {
-                        if (bytes == total_blocks * sizeof(Config::VoxelData)) {
-                            memcpy(voxels.data(), blob, bytes);
-                        } else {
-                            const float* old_d = (const float*)blob;
-                            const uint8_t* old_b = (const uint8_t*)((const char*)blob + total_blocks * sizeof(float));
-                            for(int i=0; i<total_blocks; i++) {
-                                voxels[i].density = old_d[i];
-                                voxels[i].block = old_b[i];
-                                voxels[i].water = 0;
-                            }
+                    if (bytes == total_blocks * sizeof(Config::VoxelData)) {
+                        memcpy(voxels.data(), blob, bytes);
+                        loaded = true;
+                    } else if (bytes == total_blocks * (sizeof(float) + sizeof(uint8_t))) {
+                        const float* old_d = (const float*)blob;
+                        const uint8_t* old_b = (const uint8_t*)((const char*)blob + total_blocks * sizeof(float));
+                        for (int i = 0; i < total_blocks; i++) {
+                            voxels[i].density = old_d[i];
+                            voxels[i].block = old_b[i];
+                            voxels[i].water = 0;
                         }
                         loaded = true;
                     }

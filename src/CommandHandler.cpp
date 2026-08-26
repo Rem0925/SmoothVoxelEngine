@@ -19,9 +19,10 @@ namespace CommandHandler {
         else if (cmd.find("/tp ") == 0) {
             float tx, ty, tz;
             if (sscanf(cmd.c_str(), "/tp %f %f %f", &tx, &ty, &tz) == 3) {
+                Vector3 forward = { camera.target.x - camera.position.x, camera.target.y - camera.position.y, camera.target.z - camera.position.z };
                 camera.position = {tx, ty, tz};
-                camera.target = {tx, ty, tz + 1.0f};
-                chat.add_message("Teletransportado a " + std::to_string(tx) + ", " + std::to_string(ty) + ", " + std::to_string(tz));
+                camera.target = {tx + forward.x, ty + forward.y, tz + forward.z};
+                chat.add_message("Teletransportado a " + std::to_string((int)tx) + ", " + std::to_string((int)ty) + ", " + std::to_string((int)tz));
             } else {
                 chat.add_message("Uso: /tp <x> <y> <z>");
             }

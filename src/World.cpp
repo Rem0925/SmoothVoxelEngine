@@ -401,6 +401,8 @@ uint8_t World::get_block(int wx, int wy, int wz) {
 }
 
 void World::set_block(int wx, int wy, int wz, uint8_t type) {
+    if (wy < 0 || wy >= GRID_Y) return;
+    
     int cx = std::floor((float)wx / CHUNK_SIZE);
     int cz = std::floor((float)wz / CHUNK_SIZE);
     
@@ -412,74 +414,39 @@ void World::set_block(int wx, int wy, int wz, uint8_t type) {
         if (c) c->set_block(l_x, wy, l_z, type);
     };
     
+    // 1. Chunk principal
     update_chunk(cx, cz, lx, lz);
     
-    // Bordes izquierdos
+    // 2. Sincronizar vóxeles de frontera compartidos con chunks adyacentes
     if (lx == 0) update_chunk(cx - 1, cz, CHUNK_SIZE, lz);
     if (lz == 0) update_chunk(cx, cz - 1, lx, CHUNK_SIZE);
     if (lx == 0 && lz == 0) update_chunk(cx - 1, cz - 1, CHUNK_SIZE, CHUNK_SIZE);
-    // Bordes derechos
-    if (lx == CHUNK_SIZE - 1) update_chunk(cx + 1, cz, 0, lz);
-    if (lz == CHUNK_SIZE - 1) update_chunk(cx, cz + 1, lx, 0);
-    if (lx == CHUNK_SIZE - 1 && lz == CHUNK_SIZE - 1) update_chunk(cx + 1, cz + 1, 0, 0);
 
     activate(wx, wy, wz);
     activate(wx + 1, wy, wz);
     activate(wx - 1, wy, wz);
     activate(wx, wy, wz + 1);
     activate(wx, wy, wz - 1);
-    activate(wx, wy + 1, wz);
-    activate(wx, wy - 1, wz);
+    if (wy + 1 < GRID_Y) activate(wx, wy + 1, wz);
+    if (wy > 0) activate(wx, wy - 1, wz);
 }
 
 void World::flatten_terrain(int wx, int wy, int wz, int radius, uint8_t fill_block) {
     // Aplana el terreno al nivel Y del bloque clickeado
     // 1) Elimina todo por encima de wy dentro del radio
-    // 2) Rellena wy y debajo con fill_block
+    // 2) Rellena wy con fill_block
     for (int dx = -radius; dx <= radius; dx++) {
         for (int dz = -radius; dz <= radius; dz++) {
-            // Eliminar por encima del nivel
+            // Eliminar bloques por encima del nivel
             for (int dy = radius; dy >= 1; dy--) {
                 int bx = wx + dx;
                 int by = wy + dy;
                 int bz = wz + dz;
                 if (by < 0 || by >= GRID_Y) continue;
-                int cx = std::floor((float)bx / CHUNK_SIZE);
-                int cz = std::floor((float)bz / CHUNK_SIZE);
-                int lx = bx - cx * CHUNK_SIZE;
-                int lz = bz - cz * CHUNK_SIZE;
-                Chunk* c = get_chunk(cx, cz);
-                if (c && lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
-                    int idx = c->get_idx(lx, by, lz);
-                    c->voxels[idx].density = -1.0f;
-                    c->voxels[idx].block = AIR;
-                }
+                set_block(bx, by, bz, AIR);
             }
             // Rellenar nivel wy
-            {
-                int bx = wx + dx;
-                int bz = wz + dz;
-                int cx = std::floor((float)bx / CHUNK_SIZE);
-                int cz = std::floor((float)bz / CHUNK_SIZE);
-                int lx = bx - cx * CHUNK_SIZE;
-                int lz = bz - cz * CHUNK_SIZE;
-                Chunk* c = get_chunk(cx, cz);
-                if (c && lx >= 0 && lx < CHUNK_SIZE && lz >= 0 && lz < CHUNK_SIZE) {
-                    int idx = c->get_idx(lx, wy, lz);
-                    c->voxels[idx].density = 1.0f;
-                    c->voxels[idx].block = fill_block;
-                }
-            }
-        }
-    }
-
-    // Marcar chunks afectados
-    for (int dx = -radius - 2; dx <= radius + 2; dx++) {
-        for (int dz = -radius - 2; dz <= radius + 2; dz++) {
-            int cx = std::floor((float)(wx + dx) / CHUNK_SIZE);
-            int cz = std::floor((float)(wz + dz) / CHUNK_SIZE);
-            Chunk* c = get_chunk(cx, cz);
-            if (c) c->is_dirty = true;
+            set_block(wx + dx, wy, wz + dz, fill_block);
         }
     }
 }

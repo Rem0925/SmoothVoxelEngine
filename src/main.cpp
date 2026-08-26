@@ -270,7 +270,7 @@ int main() {
     std::string save_dir = "worlds/" + world_name;
     std::filesystem::create_directories(save_dir);
     
-    if (sqlite3_open((save_dir + "/chunks.db").c_str(), &db) == SQLITE_OK) {
+    if (sqlite3_open_v2((save_dir + "/chunks.db").c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr) == SQLITE_OK) {
         sqlite3_exec(db, "PRAGMA journal_mode=WAL;", 0, 0, 0);
         sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", 0, 0, 0);
         const char* sql = "CREATE TABLE IF NOT EXISTS chunks (cx INTEGER, cz INTEGER, chunk_data BLOB, PRIMARY KEY(cx, cz))";
