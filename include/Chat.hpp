@@ -13,6 +13,8 @@ public:
     bool is_open = false;
     std::string current_input = "";
     std::vector<ChatMessage> history;
+    std::vector<std::string> input_history;  // historial de comandos escritos
+    int history_index = -1;                  // indice actual en input_history (-1 = nada)
 
     void update();
     void draw();

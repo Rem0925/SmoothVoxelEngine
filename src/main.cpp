@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
+#include <climits>
 #include <sqlite3.h>
 #include "DatabaseIO.hpp"
 
@@ -186,6 +187,9 @@ int main() {
     Texture2D spritesheet = LoadTexture("assets/textures/spritesheet_tiles.png");
     SetTextureFilter(spritesheet, TEXTURE_FILTER_POINT);
     
+    Texture2D spritesheet_items = LoadTexture("assets/textures/spritesheet_items.png");
+    SetTextureFilter(spritesheet_items, TEXTURE_FILTER_POINT);
+    
     Texture2D tex_sun = LoadTexture("assets/textures/sun.png");
     SetTextureFilter(tex_sun, TEXTURE_FILTER_POINT);
     
@@ -259,7 +263,7 @@ int main() {
     mat_water.maps[MATERIAL_MAP_EMISSION].texture = noiseTex;
 
     World world(mat_solid, mat_plants, mat_water);
-    UI ui(spritesheet);
+    UI ui(spritesheet, spritesheet_items);
     Chat chat;
     
     std::string world_name = "world1";
@@ -284,7 +288,12 @@ int main() {
     bool is_grounded = false;
     float day_time = 1.5f; // Start at noon
     bool spectator_mode = false;
+    bool show_chunks = false;
     float smooth_step_offset = 0.0f;
+    float mining_progress = 0.0f;
+    Vector3 mining_target = {0, 0, 0};
+    Vector3 mining_block = {0, 0, 0}; // coordenadas enteras del bloque siendo minado
+    bool is_mining = false;
 
     std::ifstream file(save_dir + "/player.json");
     if (file.is_open()) {
@@ -318,6 +327,46 @@ int main() {
                 ui.slots[i].count = (int)get_val("slot_" + std::to_string(i) + "_count", 0);
                 if (Config::BLOCKS.count(ui.slots[i].id)) {
                     ui.slots[i].name = Config::BLOCKS.at(ui.slots[i].id).name;
+                }
+            }
+        }
+        
+        // Load tools
+        int num_tools = (int)get_val("tool_count", 0);
+        for (int t = 0; t < num_tools && t < 18; t++) {
+            int ttype = (int)get_val("tool_" + std::to_string(t) + "_type", 0);
+            int ttier = (int)get_val("tool_" + std::to_string(t) + "_tier", 0);
+            int tdur = (int)get_val("tool_" + std::to_string(t) + "_dur", 100);
+            if (ttype >= 0 && ttype < (int)Config::TOOL_COUNT && ttier >= 0 && ttier < (int)Config::TIER_COUNT) {
+                Config::ToolType type = (Config::ToolType)ttype;
+                Config::ToolTier tier = (Config::ToolTier)ttier;
+                int max_dur = 100;
+                for (auto& ti : Config::TOOLS) {
+                    if (ti.type == type && ti.tier == tier) { max_dur = ti.durability; break; }
+                }
+                ui.tool_inventory.push_back({type, tier, tdur, max_dur, false});
+            }
+        }
+        ui.selected_tool_idx = (int)get_val("selected_tool", 0);
+        
+        // Load storage
+        for (size_t i = 0; i < ui.storage.size(); i++) {
+            size_t st_pos = content.find("\"storage_" + std::to_string(i) + "_id\"");
+            if (st_pos != std::string::npos) {
+                ui.storage[i].id = (uint8_t)get_val("storage_" + std::to_string(i) + "_id", Config::AIR);
+                ui.storage[i].count = (int)get_val("storage_" + std::to_string(i) + "_count", 0);
+                if (ui.storage[i].id == 254) {
+                    // Item: name is stored separately
+                    size_t name_pos = content.find("\"storage_" + std::to_string(i) + "_name\"");
+                    if (name_pos != std::string::npos) {
+                        size_t q1 = content.find("\"", name_pos + 10);
+                        size_t q2 = content.find("\"", q1 + 1);
+                        if (q1 != std::string::npos && q2 != std::string::npos) {
+                            ui.storage[i].name = content.substr(q1 + 1, q2 - q1 - 1);
+                        }
+                    }
+                } else if (Config::BLOCKS.count(ui.storage[i].id)) {
+                    ui.storage[i].name = Config::BLOCKS.at(ui.storage[i].id).name;
                 }
             }
         }
@@ -446,19 +495,136 @@ int main() {
             Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
             ray_hit_valid = VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty);
             if (ray_hit_valid) {
-                if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && ui.selected_slot == 0) {
-                    uint8_t broken_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
-                    if (broken_block != AIR && broken_block != WATER) {
-                        ui.add_resource(broken_block);
+                // === SLOT 0: HERRAMIENTAS ===
+                if (ui.selected_slot == 0) {
+                    ToolSlot* tool = ui.get_active_tool();
+                    
+                    // Iniciar minado al presionar click
+                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                        uint8_t target_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
+                        
+                        if (tool && tool->type == TOOL_HAMMER) {
+                            world.flatten_terrain(target_solid.x, target_solid.y, target_solid.z, 2, STONE);
+                            tool->durability_current--;
+                            if (tool->durability_current <= 0) ui.remove_active_tool();
+                            mining_progress = 0.0f;
+                            is_mining = false;
+                        } else if (target_block != AIR && target_block != WATER) {
+                            mining_progress = 0.0f;
+                            mining_target = target_solid;
+                            // Guardar coordenadas enteras del bloque para comparar
+                            mining_block.x = (float)(int)target_solid.x;
+                            mining_block.y = (float)(int)target_solid.y;
+                            mining_block.z = (float)(int)target_solid.z;
+                            is_mining = true;
+                        }
                     }
-                    world.set_block(target_solid.x, target_solid.y, target_solid.z, AIR);
-                } 
-                else if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && ui.selected_slot != 0) {
-                    if (ui.slots[ui.selected_slot].count > 0) {
-                        world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id);
-                        ui.slots[ui.selected_slot].count--;
+                    
+                    // Acumular progreso mientras se mantiene el click
+                    if (is_mining && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
+                        uint8_t target_block = world.get_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z);
+                        if (target_block != AIR && target_block != WATER) {
+                            const BlockType& bt = BLOCKS.at(target_block);
+                            
+                            // Paso 1: Verificar si se puede romper
+                            bool can_break = (bt.require_tier != 255);
+                            bool can_harvest = true;
+                            if (can_break && bt.require_tool != 255) {
+                                if (!tool || (int)tool->type != (int)bt.require_tool || (int)tool->tier < (int)bt.require_tier) {
+                                    can_harvest = false;
+                                }
+                            }
+                            
+                            if (can_break) {
+                                // Paso 2: Calcular velocidad (estilo Minecraft, ajustado para ritmo del juego)
+                                float tool_speed = 1.0f; // mano
+                                if (tool) {
+                                    tool_speed = tool->type == TOOL_PICKAXE ? 2.0f :
+                                                 tool->type == TOOL_SHOVEL ? 2.0f :
+                                                 tool->type == TOOL_AXE ? 2.0f :
+                                                 tool->type == TOOL_SWORD ? 1.5f :
+                                                 tool->type == TOOL_FLAIL ? 0.8f :
+                                                 tool->type == TOOL_HAMMER ? 1.0f : 1.0f;
+                                    
+                                    float tier_mult = tool->tier == TIER_WOOD ? 1.0f :
+                                                      tool->tier == TIER_STONE ? 2.0f :
+                                                      tool->tier == TIER_IRON ? 3.0f :
+                                                      tool->tier == TIER_SILVER ? 4.0f :
+                                                      tool->tier == TIER_GOLD ? 6.0f :
+                                                      tool->tier == TIER_DIAMOND ? 5.0f : 1.0f;
+                                    tool_speed *= tier_mult;
+                                }
+                                
+                                // Bonus si tiene la herramienta ideal
+                                if (tool && bt.ideal_tool != 255 && (int)tool->type == (int)bt.ideal_tool) {
+                                    tool_speed *= 1.5f;
+                                }
+                                
+                                // MC: damage_per_tick = speed / hardness / divisor
+                                // ×20 para convertir a damage-per-second
+                                float divisor = can_harvest ? 30.0f : 100.0f;
+                                float damage = tool_speed / std::max(bt.hardness, 0.1f) / divisor * 20.0f;
+                                
+                                mining_progress += GetFrameTime() * damage;
+                            
+                                if (mining_progress >= 1.0f) {
+                                    if (bt.drop_id != 255) {
+                                        if (bt.drop_is_item) {
+                                            ui.add_item(bt.drop_id);
+                                        } else {
+                                            ui.add_resource(bt.drop_id);
+                                        }
+                                    }
+                                    world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
+                                    if (tool) {
+                                        tool->durability_current--;
+                                        if (tool->durability_current <= 0) ui.remove_active_tool();
+                                    }
+                                    mining_progress = 0.0f;
+                                    is_mining = false;
+                                }
+                            } else {
+                                mining_progress = 0.0f;
+                                is_mining = false;
+                            }
+                        } else {
+                            mining_progress = 0.0f;
+                            is_mining = false;
+                        }
+                    }
+                    
+                    // Cancelar minado si apunta a otro bloque (comparar coordenadas enteras)
+                    if (is_mining) {
+                        int bx = (int)target_solid.x;
+                        int by = (int)target_solid.y;
+                        int bz = (int)target_solid.z;
+                        if (bx != (int)mining_block.x || by != (int)mining_block.y || bz != (int)mining_block.z) {
+                            mining_progress = 0.0f;
+                            is_mining = false;
+                        }
+                    }
+                    
+                    // Reset al soltar click
+                    if (IsMouseButtonReleased(MOUSE_LEFT_BUTTON)) {
+                        mining_progress = 0.0f;
+                        is_mining = false;
                     }
                 }
+                // === SLOTS 1-9: COLOCAR BLOQUES ===
+                else if (ui.selected_slot != 0) {
+                    if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                        if (ui.slots[ui.selected_slot].count > 0 && ui.slots[ui.selected_slot].id != 254) {
+                            world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id);
+                            ui.slots[ui.selected_slot].count--;
+                            if (ui.slots[ui.selected_slot].count <= 0) {
+                                ui.slots[ui.selected_slot].id = AIR;
+                                ui.slots[ui.selected_slot].name = "";
+                            }
+                        }
+                    }
+                }
+            } else {
+                // Raycast no impacta: NO resetear minado, solo pausar acumulacion
             }
         }
         
@@ -474,7 +640,7 @@ int main() {
         chat.update();
         if (!chat.is_open) ui.update();
         
-        CommandHandler::process(chat, day_time, camera, spectator_mode, player_vel_y, ui);
+        CommandHandler::process(chat, day_time, camera, spectator_mode, player_vel_y, ui, show_chunks);
         world.update(camera.position);
 
         float shaderTime = GetTime();
@@ -659,6 +825,49 @@ int main() {
         rlEnableDepthMask();
 
         world.draw(camera);
+        
+        // Chunk boundaries — individual wireframe per chunk
+        if (show_chunks) {
+            float CS = (float)Config::CHUNK_SIZE;
+            float GY = (float)Config::GRID_Y;
+            
+            rlDisableDepthTest();
+            rlDisableBackfaceCulling();
+            rlBegin(RL_LINES);
+            
+            for (auto& [pos, chunk] : world.chunks) {
+                float x0 = pos.first * CS;
+                float z0 = pos.second * CS;
+                float x1 = x0 + CS;
+                float z1 = z0 + CS;
+                
+                Color col = Fade(YELLOW, 0.55f);
+                rlColor4ub(col.r, col.g, col.b, col.a);
+                
+                // Bottom face (Y=0)
+                rlVertex3f(x0, 0, z0); rlVertex3f(x1, 0, z0);
+                rlVertex3f(x1, 0, z0); rlVertex3f(x1, 0, z1);
+                rlVertex3f(x1, 0, z1); rlVertex3f(x0, 0, z1);
+                rlVertex3f(x0, 0, z1); rlVertex3f(x0, 0, z0);
+                
+                // Top face (Y=GRID_Y)
+                rlVertex3f(x0, GY, z0); rlVertex3f(x1, GY, z0);
+                rlVertex3f(x1, GY, z0); rlVertex3f(x1, GY, z1);
+                rlVertex3f(x1, GY, z1); rlVertex3f(x0, GY, z1);
+                rlVertex3f(x0, GY, z1); rlVertex3f(x0, GY, z0);
+                
+                // Vertical edges
+                rlVertex3f(x0, 0, z0); rlVertex3f(x0, GY, z0);
+                rlVertex3f(x1, 0, z0); rlVertex3f(x1, GY, z0);
+                rlVertex3f(x1, 0, z1); rlVertex3f(x1, GY, z1);
+                rlVertex3f(x0, 0, z1); rlVertex3f(x0, GY, z1);
+            }
+            
+            rlEnd();
+            rlEnableDepthTest();
+            rlEnableBackfaceCulling();
+        }
+        
         EndMode3D(); // Flush and close standard 3D pass
         
         bool is_valid_tool = false;
@@ -760,6 +969,17 @@ int main() {
         }
 
         ui.draw();
+        
+        // Barra de progreso de minado
+        if (is_mining && mining_progress > 0.0f && mining_progress < 1.0f) {
+            int cx = GetScreenWidth() / 2;
+            int cy = GetScreenHeight() / 2;
+            int bar_w = 60;
+            int bar_h = 5;
+            DrawRectangle(cx - bar_w/2, cy + 25, bar_w, bar_h, Fade(BLACK, 0.6f));
+            DrawRectangle(cx - bar_w/2, cy + 25, (int)(bar_w * mining_progress), bar_h, WHITE);
+        }
+        
         chat.draw();
         
         DrawFPS(10, 10);
@@ -796,7 +1016,22 @@ int main() {
         out << "  \"day_time\": " << day_time << ",\n";
         for (size_t i=0; i<ui.slots.size(); i++) {
             out << "  \"slot_" << i << "_id\": " << (int)ui.slots[i].id << ",\n";
-            out << "  \"slot_" << i << "_count\": " << (int)ui.slots[i].count << (i == ui.slots.size()-1 ? "\n" : ",\n");
+            out << "  \"slot_" << i << "_count\": " << ui.slots[i].count << ",\n";
+        }
+        // Save tools
+        out << "  \"tool_count\": " << ui.tool_inventory.size() << ",\n";
+        for (size_t t=0; t<ui.tool_inventory.size(); t++) {
+            out << "  \"tool_" << t << "_type\": " << (int)ui.tool_inventory[t].type << ",\n";
+            out << "  \"tool_" << t << "_tier\": " << (int)ui.tool_inventory[t].tier << ",\n";
+            out << "  \"tool_" << t << "_dur\": " << ui.tool_inventory[t].durability_current;
+            out << (t == ui.tool_inventory.size()-1 ? "\n" : ",\n");
+        }
+        out << "  \"selected_tool\": " << ui.selected_tool_idx << ",\n";
+        // Save storage
+        for (size_t i=0; i<ui.storage.size(); i++) {
+            out << "  \"storage_" << i << "_id\": " << (int)ui.storage[i].id << ",\n";
+            out << "  \"storage_" << i << "_count\": " << ui.storage[i].count;
+            out << (i == ui.storage.size()-1 ? "\n" : ",\n");
         }
         out << "}\n";
         out.close();
@@ -817,6 +1052,7 @@ int main() {
     }
 
     UnloadTexture(spritesheet);
+    UnloadTexture(spritesheet_items);
     UnloadTexture(tex_sun);
     UnloadTexture(tex_moon);
     UnloadTexture(tex_clouds);

@@ -281,6 +281,49 @@ void Chunk::generate_thread() {
             }
         }
         
+        // Generacion de minerales (vetas subterraneas)
+        // Orden: primero los profundos, luego los superficiales (carbon al final)
+        {
+            int seed_offset = (int)((int64_t)Config::WORLD_SEED * 7919);
+            for (int lx = 0; lx <= CHUNK_SIZE; ++lx) {
+                for (int lz = 0; lz <= CHUNK_SIZE; ++lz) {
+                    for (int y = 1; y < GRID_Y - 1; ++y) {
+                        int i = get_idx(lx, y, lz);
+                        if (voxels[i].block != STONE) continue;
+
+                        int wx = cx * CHUNK_SIZE + lx;
+                        int wz = cz * CHUNK_SIZE + lz;
+
+                        // Diamante: prof 110+, el mas raro primero
+                        if (y >= 110) {
+                            float n = (float)pnoise3(wx * 0.04f + seed_offset + 2000, y * 0.04f, wz * 0.04f + seed_offset + 2000, 3, 0.5f);
+                            if (n > 0.78f) { voxels[i].block = DIAMOND_ORE; continue; }
+                        }
+                        // Oro: prof 80-110
+                        if (y >= 80 && y < 110) {
+                            float n = (float)pnoise3(wx * 0.05f + seed_offset + 1500, y * 0.05f, wz * 0.05f + seed_offset + 1500, 3, 0.5f);
+                            if (n > 0.73f) { voxels[i].block = GOLD_ORE; continue; }
+                        }
+                        // Plata: prof 60-90
+                        if (y >= 60 && y < 90) {
+                            float n = (float)pnoise3(wx * 0.06f + seed_offset + 1000, y * 0.06f, wz * 0.06f + seed_offset + 1000, 3, 0.5f);
+                            if (n > 0.70f) { voxels[i].block = SILVER_ORE; continue; }
+                        }
+                        // Hierro: prof 40-80
+                        if (y >= 40 && y < 80) {
+                            float n = (float)pnoise3(wx * 0.07f + seed_offset + 500, y * 0.07f, wz * 0.07f + seed_offset + 500, 3, 0.5f);
+                            if (n > 0.65f) { voxels[i].block = IRON_ORE; continue; }
+                        }
+                        // Carbon: prof 0-60, comun pero al final para no comerse otros
+                        if (y < 60) {
+                            float n = (float)pnoise3(wx * 0.09f + seed_offset, y * 0.09f, wz * 0.09f + seed_offset, 3, 0.5f);
+                            if (n > 0.72f) { voxels[i].block = COAL_ORE; continue; }
+                        }
+                    }
+                }
+            }
+        }
+
         // Arboles (Roble y Abedul)
         for (int lx = 3; lx < CHUNK_SIZE - 3; ++lx) {
             for (int lz = 3; lz < CHUNK_SIZE - 3; ++lz) {

@@ -23,8 +23,31 @@ void Chat::update() {
         current_input.pop_back();
     }
 
+    // Historial con flechas arriba/abajo
+    if (IsKeyPressed(KEY_UP)) {
+        if (!input_history.empty()) {
+            if (history_index < (int)input_history.size() - 1) {
+                history_index++;
+                current_input = input_history[input_history.size() - 1 - history_index];
+            }
+        }
+    }
+    if (IsKeyPressed(KEY_DOWN)) {
+        if (history_index > 0) {
+            history_index--;
+            current_input = input_history[input_history.size() - 1 - history_index];
+        } else if (history_index == 0) {
+            history_index = -1;
+            current_input = "";
+        }
+    }
+
     if (IsKeyPressed(KEY_ENTER)) {
         if (!current_input.empty()) {
+            // Guardar en historial
+            input_history.push_back(current_input);
+            history_index = -1;
+            
             if (current_input[0] == '/') {
                 pending_command = current_input;
             } else {

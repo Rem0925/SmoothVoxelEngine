@@ -38,6 +38,7 @@ public:
     uint8_t get_block(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
     void set_block(int wx, int wy, int wz, uint8_t type);
+    void flatten_terrain(int wx, int wy, int wz, int radius, uint8_t fill_block);
     
     Chunk* get_chunk(int cx, int cz);
 
