@@ -3,6 +3,7 @@
 // Input vertex attributes
 in vec3 vertexPosition;
 in vec2 vertexTexCoord;
+in vec3 vertexNormal;
 in vec2 vertexTexCoord2;
 in vec4 vertexColor;
 
@@ -19,6 +20,7 @@ out vec4 fragColor;
 out vec3 fragPosition;
 out float viewDist; // Para la niebla
 out vec2 outFoliageFlags; // x: primario es follaje (pasto/hojas), y: secundario es follaje
+out float fragAO;
 
 void main()
 {
@@ -43,6 +45,7 @@ void main()
     fragTexCoord2 = realTexCoord2;
     fragColor = vertexColor;
     outFoliageFlags = vec2(foliage_pri ? 1.0 : 0.0, foliage_sec ? 1.0 : 0.0);
+    fragAO = vertexNormal.x;
     
     // Apply wind sway if needed
     vec3 animatedPos = vertexPosition;

@@ -6,6 +6,8 @@ in vec2 fragTexCoord2;
 in vec4 fragColor;
 in vec3 fragPosition;
 in float viewDist;
+in vec2 outFoliageFlags;
+in float fragAO;
 
 // Uniforms
 uniform sampler2D texture0;
@@ -16,8 +18,6 @@ uniform float fogEnd;
 uniform vec3 sunDir;
 uniform vec3 cameraPos;
 
-in vec2 outFoliageFlags;
-
 // Color de salida
 out vec4 finalColor;
 
@@ -25,10 +25,6 @@ out vec4 finalColor;
 float hash(vec2 p) {
     vec2 p2 = fract(p * vec2(0.3183099, 0.3678794));
     p2 += dot(p2, p2.yx + 19.19);
-    
-    // En lugar de devolver un valor de 0.0 a 1.0, lo comprimimos (ej. 0.2 a 0.8).
-    // Esto hace que la diferencia de altura entre los puntos aleatorios sea menor,
-    // resultando en líneas rectas mucho más suaves y sin dientes de sierra agresivos.
     return mix(0.2, 0.8, fract((p2.x + p2.y) * p2.x));
 }
 
@@ -69,7 +65,7 @@ void main()
     // 5. EL SECRETO PARA ELIMINAR ISLAS Y HUECOS:
     float noiseOffset = (noise - 0.5) * 0.6; 
     
-    // 6. Corte duro para separación nítida y asignación exacta de tinte
+    // 6. Corte duro para separación nítida y asignación exacta de tinte (sin halos)
     vec4 blendedTex;
     vec3 blockColor;
     if (baseWeight + noiseOffset > 0.5) {
@@ -80,7 +76,7 @@ void main()
         blockColor = (outFoliageFlags.y > 0.5) ? fragColor.rgb : vec3(1.0);
     }
 
-    // --- ILUMINACIÓN FLAT SHADING ---
+    // --- ILUMINACIÓN FLAT SHADING CON AO ---
     // Reconstruimos la normal del polígono a partir de sus derivadas en pantalla
     vec3 dpdx = dFdx(fragPosition);
     vec3 dpdy = dFdy(fragPosition);
@@ -95,8 +91,9 @@ void main()
     vec3 lightDir = normalize(vec3(0.6, 0.8, -0.4));
     float diff = max(dot(surfNormal, lightDir), 0.0);
     
-    // Sombras más suaves estilo voxel (0.75 a 1.0) para que coincida con el cielo
-    float lighting = 0.75 + 0.25 * diff;
+    // Oclusión ambiental continua
+    float ao = (fragAO > 0.01) ? fragAO : 1.0;
+    float lighting = (0.75 + 0.25 * diff) * ao;
 
     // Apply vertex color, lighting, and diffuse
     vec4 colorNoAlpha = vec4(blockColor * lighting, 1.0);

@@ -1,6 +1,7 @@
 #include "MarchingCubes.hpp"
 #include "Config.hpp"
 #include "Biome.hpp"
+#include <raymath.h>
 #include <cmath>
 #include <algorithm>
 
@@ -413,10 +414,6 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     float len = std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z);
                     if (len > 0.0f) { n.x /= len; n.y /= len; n.z /= len; }
 
-                    normals.push_back(n);
-                    normals.push_back(n);
-                    normals.push_back(n);
-                    
                     // 1. Leer el grid PURO para evitar que el aire se disfrace de pasto
                     auto get_raw_block = [&](int bx, int by, int bz) -> uint8_t {
                         if (!voxels) return default_block;
@@ -427,13 +424,65 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         return voxels[by * slice + bz * size_x + bx].block;
                     };
                     
-                    // Lighting calculation sin Ambient Occlusion (el usuario lo pidio)
+                    // Muestreo trilineal continuo de densidad para AO suave
+                    auto sample_smooth_density = [&](float sx, float sy, float sz) -> float {
+                        int ix = std::clamp((int)std::floor(sx), 0, size_x - 2);
+                        int iy = std::clamp((int)std::floor(sy), 0, size_y - 2);
+                        int iz = std::clamp((int)std::floor(sz), 0, size_z - 2);
+                        float fx = sx - (float)ix;
+                        float fy = sy - (float)iy;
+                        float fz = sz - (float)iz;
+
+                        float d000 = get_val(ix,   iy,   iz);
+                        float d100 = get_val(ix+1, iy,   iz);
+                        float d010 = get_val(ix,   iy+1, iz);
+                        float d110 = get_val(ix+1, iy+1, iz);
+                        float d001 = get_val(ix,   iy,   iz+1);
+                        float d101 = get_val(ix+1, iy,   iz+1);
+                        float d011 = get_val(ix,   iy+1, iz+1);
+                        float d111 = get_val(ix+1, iy+1, iz+1);
+
+                        float c00 = d000 * (1.0f - fx) + d100 * fx;
+                        float c10 = d010 * (1.0f - fx) + d110 * fx;
+                        float c01 = d001 * (1.0f - fx) + d101 * fx;
+                        float c11 = d011 * (1.0f - fx) + d111 * fx;
+                        float c0  = c00  * (1.0f - fz) + c01  * fz;
+                        float c1  = c10  * (1.0f - fz) + c11  * fz;
+                        return c0 * (1.0f - fy) + c1 * fy;
+                    };
+
+                    // Oclusión Ambiental suave por vértice (gradiente continuo)
+                    auto calc_vertex_ao = [&](Vector3 v_pt, Vector3 n_vec) -> float {
+                        Vector3 tangent = (std::abs(n_vec.y) < 0.9f) ? Vector3Normalize(Vector3CrossProduct(n_vec, {0, 1, 0})) : Vector3Normalize(Vector3CrossProduct(n_vec, {1, 0, 0}));
+                        Vector3 bitangent = Vector3CrossProduct(n_vec, tangent);
+
+                        float r = 0.75f;
+                        float h = 0.35f;
+                        Vector3 p1 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(tangent, r)));
+                        Vector3 p2 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(tangent, -r)));
+                        Vector3 p3 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(bitangent, r)));
+                        Vector3 p4 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(bitangent, -r)));
+
+                        float occ = 0.0f;
+                        float d1 = sample_smooth_density(p1.x, p1.y, p1.z);
+                        float d2 = sample_smooth_density(p2.x, p2.y, p2.z);
+                        float d3 = sample_smooth_density(p3.x, p3.y, p3.z);
+                        float d4 = sample_smooth_density(p4.x, p4.y, p4.z);
+
+                        if (d1 >= isovalue) occ += std::clamp((d1 - isovalue) * 2.0f, 0.1f, 1.0f);
+                        if (d2 >= isovalue) occ += std::clamp((d2 - isovalue) * 2.0f, 0.1f, 1.0f);
+                        if (d3 >= isovalue) occ += std::clamp((d3 - isovalue) * 2.0f, 0.1f, 1.0f);
+                        if (d4 >= isovalue) occ += std::clamp((d4 - isovalue) * 2.0f, 0.1f, 1.0f);
+
+                        return std::clamp(1.0f - (occ / 4.0f) * 0.25f, 0.75f, 1.0f);
+                    };
+
+                    float ao1 = calc_vertex_ao(v1, n);
+                    float ao2 = calc_vertex_ao(v2, n);
+                    float ao3 = calc_vertex_ao(v3, n);
+
                     float dot_val = std::abs(n.x * light_dir.x + n.y * light_dir.y + n.z * light_dir.z);
-                    float intensity = dot_val * 0.3f + 0.7f;
-                    if (intensity < 0.7f) intensity = 0.7f;
-                    if (intensity > 1.0f) intensity = 1.0f;
-                    
-                    unsigned char col_val = (unsigned char)(255.0f * intensity);
+                    float base_lighting = dot_val * 0.15f + 0.85f;
 
                     auto is_valid_terrain_block = [&](uint8_t blk) -> bool {
                         if (blk == 255 || blk == 7 || blk == Config::TALL_GRASS) return false;
@@ -462,25 +511,7 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     if (b2 != b1) b_secondary = b2;
                     else if (b3 != b1) b_secondary = b3;
 
-                    auto get_vertex_col = [&](Vector3 v, uint8_t b) -> Color {
-                        unsigned char r = col_val;
-                        unsigned char g = col_val;
-                        unsigned char b_col = col_val;
-                        
-                        if ((b == Config::GRASS || b == Config::LEAVES) && grass_tint_cache && foliage_tint_cache) {
-                            int cx = std::clamp((int)std::floor(v.x), 0, size_x - 1);
-                            int cz = std::clamp((int)std::floor(v.z), 0, size_z - 1);
-                            int cache_idx = cz * size_x + cx;
-                            Color tint = (b == Config::GRASS) ? grass_tint_cache[cache_idx] : foliage_tint_cache[cache_idx];
-                            r = (unsigned char)((col_val * tint.r) / 255);
-                            g = (unsigned char)((col_val * tint.g) / 255);
-                            b_col = (unsigned char)((col_val * tint.b) / 255);
-                        }
-                        
-                        return Color{ r, g, b_col, 255 };
-                    };
-
-                    // 1. Evitar que las antorchas se mezclen con el suelo, de resto todo se mezcla (incluidas las hojas)
+                    // 1. Evitar que las antorchas se mezclen con el suelo
                     auto is_terrain = [](uint8_t b) {
                         return b != Config::TORCH;
                     };
@@ -488,15 +519,14 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {
                         b_secondary = b_primary;
                     } else if (b_primary > b_secondary) {
-                        // 2. ORDENAR por ID para evitar que en los bordes de chunk se invierta la mezcla
                         std::swap(b_primary, b_secondary);
                     }
 
                     bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES);
                     bool sec_is_foliage = (b_secondary == Config::GRASS || b_secondary == Config::LEAVES);
-
                     float foliage_pri_offset = pri_is_foliage ? 10.0f : 0.0f;
                     float foliage_sec_offset = sec_is_foliage ? 10.0f : 0.0f;
+
                     auto sample_bilinear_tint = [&](float px, float pz, const Color* cache) -> Color {
                         float cx = std::clamp(px, 0.0f, (float)(size_x - 1));
                         float cz = std::clamp(pz, 0.0f, (float)(size_z - 1));
@@ -504,46 +534,54 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         int z0 = (int)cz;
                         int x1 = std::min(x0 + 1, size_x - 1);
                         int z1 = std::min(z0 + 1, size_z - 1);
-                        float tx = cx - x0;
-                        float tz = cz - z0;
+                        float tx = cx - (float)x0;
+                        float tz = cz - (float)z0;
 
                         Color c00 = cache[z0 * size_x + x0];
                         Color c10 = cache[z0 * size_x + x1];
                         Color c01 = cache[z1 * size_x + x0];
                         Color c11 = cache[z1 * size_x + x1];
 
-                        float r0 = c00.r * (1.0f - tx) + c10.r * tx;
-                        float r1 = c01.r * (1.0f - tx) + c10.r * tx;
-                        float r = r0 * (1.0f - tz) + (c01.r * (1.0f - tx) + c11.r * tx) * tz;
+                        float r0 = (float)c00.r * (1.0f - tx) + (float)c10.r * tx;
+                        float r1 = (float)c01.r * (1.0f - tx) + (float)c11.r * tx;
+                        float r  = r0 * (1.0f - tz) + r1 * tz;
 
-                        float g0 = c00.g * (1.0f - tx) + c10.g * tx;
-                        float g = g0 * (1.0f - tz) + (c01.g * (1.0f - tx) + c11.g * tx) * tz;
+                        float g0 = (float)c00.g * (1.0f - tx) + (float)c10.g * tx;
+                        float g1 = (float)c01.g * (1.0f - tx) + (float)c11.g * tx;
+                        float g  = g0 * (1.0f - tz) + g1 * tz;
 
-                        float b0 = c00.b * (1.0f - tx) + c10.b * tx;
-                        float b_val = b0 * (1.0f - tz) + (c01.b * (1.0f - tx) + c11.b * tx) * tz;
+                        float b0 = (float)c00.b * (1.0f - tx) + (float)c10.b * tx;
+                        float b1 = (float)c01.b * (1.0f - tx) + (float)c11.b * tx;
+                        float b_val = b0 * (1.0f - tz) + b1 * tz;
 
                         return Color{ (unsigned char)r, (unsigned char)g, (unsigned char)b_val, 255 };
                     };
 
-                    // Color de tinte para el triángulo con interpolación bilineal suave
-                    Color tri_tint = {255, 255, 255, 255};
-                    if (grass_tint_cache && foliage_tint_cache) {
+                    // Color de tinte uniforme por triángulo para evitar cualquier halo o gradiente a blanco en los bordes
+                    Color tri_tint = { 255, 255, 255, 255 };
+                    if ((pri_is_foliage || sec_is_foliage) && grass_tint_cache && foliage_tint_cache) {
                         float tri_x = (v1.x + v2.x + v3.x) / 3.0f;
                         float tri_z = (v1.z + v2.z + v3.z) / 3.0f;
                         const Color* target_cache = (b_primary == Config::LEAVES || b_secondary == Config::LEAVES) ? foliage_tint_cache : grass_tint_cache;
                         tri_tint = sample_bilinear_tint(tri_x, tri_z, target_cache);
                     }
 
-                    Color tri_color = Color{
-                        (unsigned char)((col_val * tri_tint.r) / 255),
-                        (unsigned char)((col_val * tri_tint.g) / 255),
-                        (unsigned char)((col_val * tri_tint.b) / 255),
-                        255
-                    };
+                    Color col1 = tri_tint;
+                    Color col2 = tri_tint;
+                    Color col3 = tri_tint;
 
-                    colors.push_back(tri_color);
-                    colors.push_back(tri_color);
-                    colors.push_back(tri_color);
+                    col1.a = (b1 == b_primary) ? 255 : 0;
+                    col2.a = (b2 == b_primary) ? 255 : 0;
+                    col3.a = (b3 == b_primary) ? 255 : 0;
+
+                    // El orden de vertices es v3, v2, v1
+                    normals.push_back({ ao3, 0.0f, 0.0f });
+                    normals.push_back({ ao2, 0.0f, 0.0f });
+                    normals.push_back({ ao1, 0.0f, 0.0f });
+
+                    colors.push_back(col3);
+                    colors.push_back(col2);
+                    colors.push_back(col1);
 
                     Config::BlockType b_info_pri = Config::BLOCKS.at(Config::GRASS);
                     if (Config::BLOCKS.find(b_primary) != Config::BLOCKS.end()) {

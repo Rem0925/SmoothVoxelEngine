@@ -99,7 +99,12 @@ El sistema de colisiones del jugador resuelve el contacto directo con la isosupe
 
 ---
 
-### 8. Shaders y Efectos (`assets/shaders/`)
+### 8. Shaders, Oclusión Ambiental e Iluminación (`MarchingCubes.cpp`, `Chunk.cpp`, `assets/shaders/`)
+*   **Pipeline Desacoplado de Tinte y AO:**
+    *   **Tinte Biómico (`vertexColor` / `fragColor`):** Se mantiene uniforme por triángulo para pasto y follaje, preservando el corte geométrico nítido sin halos ni desvanecimientos a blanco en los bordes con tierra/piedra/madera (`outFoliageFlags`).
+    *   **Oclusión Ambiental Continua (`vertexNormal.x` -> `fragAO`):** Se transmite de forma independiente como un canal escalar continuo por vértice, interpolado suavemente por la GPU e integrado en la iluminación difusa (`lighting = (0.75 + 0.25 * diff) * ao`) sin alterar la crominancia de las texturas.
+    *   **Marching Cubes:** Muestreo continuo trilineal de densidad en 4 puntos ortogonales al vértice.
+    *   **Bloques Cúbicos (`add_box`):** Smooth lighting clásico por esquina evaluando los bloques sólidos vecinos.
 *   **`terrain_solid.fs`:** Flat-shading calculado por derivadas en GPU (`dFdx/dFdy`), proyección triplanar y niebla atmosférica (Fog).
 *   **`terrain.fs`:** Viento ondulante para plantas y hojas.
 *   **`water.fs`:** Animación paramétrica con textura de ruido Perlin y espuma costera en bordes de contacto.

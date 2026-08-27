@@ -737,38 +737,62 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
         return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
     };
 
-    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, Vector3 norm, Color col, int tx, int ty) {
+    auto is_opaque_cube = [&](int x, int y, int z) -> bool {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
+        int idx = get_idx(x, y, z);
+        uint8_t b = voxels_ptr[idx].block;
+        if (b == Config::AIR || b == Config::WATER) return false;
+        if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
+        const auto& nb_t = Config::BLOCKS.at(b);
+        return (nb_t.shape == Config::SHAPE_CUBE && !nb_t.transparent);
+    };
+
+    auto is_solid_block = [&](int x, int y, int z) -> bool {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
+        int idx = get_idx(x, y, z);
+        uint8_t b = voxels_ptr[idx].block;
+        return (b != Config::AIR && b != Config::WATER);
+    };
+
+    auto calc_ao = [&](bool s1, bool s2, bool c) -> float {
+        int level = (s1 && s2) ? 0 : 3 - (s1 + s2 + c);
+        return 0.65f + 0.116f * (float)level;
+    };
+
+    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, int tx, int ty) {
         auto uvs = get_face_uv(tx, ty);
+        Color white = { 255, 255, 255, 255 };
         // Triangle 1: v0, v1, v2
         lb_vertices.push_back(v0);
         lb_vertices.push_back(v1);
         lb_vertices.push_back(v2);
-        lb_normals.push_back(norm);
-        lb_normals.push_back(norm);
-        lb_normals.push_back(norm);
+        lb_normals.push_back({ ao0, 0.0f, 0.0f });
+        lb_normals.push_back({ ao1, 0.0f, 0.0f });
+        lb_normals.push_back({ ao2, 0.0f, 0.0f });
         lb_uvs.push_back(uvs[0]);
         lb_uvs.push_back(uvs[1]);
         lb_uvs.push_back(uvs[2]);
-        lb_colors.push_back(col);
-        lb_colors.push_back(col);
-        lb_colors.push_back(col);
+        lb_colors.push_back(white);
+        lb_colors.push_back(white);
+        lb_colors.push_back(white);
 
         // Triangle 2: v0, v2, v3
         lb_vertices.push_back(v0);
         lb_vertices.push_back(v2);
         lb_vertices.push_back(v3);
-        lb_normals.push_back(norm);
-        lb_normals.push_back(norm);
-        lb_normals.push_back(norm);
+        lb_normals.push_back({ ao0, 0.0f, 0.0f });
+        lb_normals.push_back({ ao2, 0.0f, 0.0f });
+        lb_normals.push_back({ ao3, 0.0f, 0.0f });
         lb_uvs.push_back(uvs[0]);
         lb_uvs.push_back(uvs[2]);
         lb_uvs.push_back(uvs[3]);
-        lb_colors.push_back(col);
-        lb_colors.push_back(col);
-        lb_colors.push_back(col);
+        lb_colors.push_back(white);
+        lb_colors.push_back(white);
+        lb_colors.push_back(white);
     };
 
-    auto add_box = [&](float x0, float y0, float z0, float x1, float y1, float z1,
+    auto add_box = [&](int lx, int ly, int lz,
+                       float x0, float y0, float z0, float x1, float y1, float z1,
                        int top_tx, int top_ty,
                        int bot_tx, int bot_ty,
                        int front_tx, int front_ty,
@@ -779,33 +803,47 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                        bool cull_front = false, bool cull_back = false,
                        bool cull_left = false, bool cull_right = false) {
         if (!cull_top) {
-            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, {0, 1, 0}, {255, 255, 255, 255}, top_tx, top_ty);
+            float ao0 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
+            float ao1 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
+            float ao3 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, ao0, ao1, ao2, ao3, top_tx, top_ty);
         }
         if (!cull_bot) {
-            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, {0, -1, 0}, {140, 140, 140, 255}, bot_tx, bot_ty);
+            float ao0 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao2 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao3 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, ao0, ao1, ao2, ao3, bot_tx, bot_ty);
         }
         if (!cull_front) {
-            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, {0, 0, 1}, {210, 210, 210, 255}, front_tx, front_ty);
+            float ao0 = calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            float ao1 = calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao2 = calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            float ao3 = calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
+            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, ao0, ao1, ao2, ao3, front_tx, front_ty);
         }
         if (!cull_back) {
-            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, {0, 0, -1}, {210, 210, 210, 255}, back_tx, back_ty);
+            float ao0 = calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao1 = calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao2 = calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            float ao3 = calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
+            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, back_tx, back_ty);
         }
         if (!cull_right) {
-            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, {1, 0, 0}, {180, 180, 180, 255}, right_tx, right_ty);
+            float ao0 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao3 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, right_tx, right_ty);
         }
         if (!cull_left) {
-            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, {-1, 0, 0}, {180, 180, 180, 255}, left_tx, left_ty);
+            float ao0 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao1 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            float ao2 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
+            float ao3 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, left_tx, left_ty);
         }
-    };
-
-    auto is_opaque_cube = [&](int x, int y, int z) -> bool {
-        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
-        int idx = get_idx(x, y, z);
-        uint8_t b = voxels_ptr[idx].block;
-        if (b == Config::AIR || b == Config::WATER) return false;
-        if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
-        const auto& nb_t = Config::BLOCKS.at(b);
-        return (nb_t.shape == Config::SHAPE_CUBE && !nb_t.transparent);
     };
 
     for (int lz = 0; lz < Config::CHUNK_SIZE; ++lz) {
@@ -839,7 +877,8 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                         bool cull_left = is_opaque_cube(lx - 1, ly, lz);
                         bool cull_front = is_opaque_cube(lx, ly, lz + 1);
                         bool cull_back = is_opaque_cube(lx, ly, lz - 1);
-                        add_box(gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                        add_box(lx, ly, lz,
+                                gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
                                 top_tx, top_ty, bot_tx, bot_ty,
                                 front_tx, front_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
@@ -869,7 +908,8 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                             f_right_x = front_tx; f_right_y = front_ty;
                         }
 
-                        add_box(gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                        add_box(lx, ly, lz,
+                                gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
                                 top_tx, top_ty, bot_tx, bot_ty,
                                 f_front_x, f_front_y, f_back_x, f_back_y,
                                 f_left_x, f_left_y, f_right_x, f_right_y,
@@ -878,7 +918,8 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                     }
                     case Config::SHAPE_CHEST: {
                         // Cuerpo
-                        add_box(gx + 0.06f, gy, gz + 0.06f, gx + 0.94f, gy + 0.88f, gz + 0.94f,
+                        add_box(lx, ly, lz,
+                                gx + 0.06f, gy, gz + 0.06f, gx + 0.94f, gy + 0.88f, gz + 0.94f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty);
@@ -886,44 +927,53 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                         int latch_ty = bt.tex_latch_y >= 0 ? bt.tex_latch_y : 3;
                         // Cerrojo orientado
                         if (rot == 0) { // South (+Z)
-                            add_box(gx + 0.44f, gy + 0.42f, gz + 0.94f, gx + 0.56f, gy + 0.62f, gz + 0.99f,
+                            add_box(lx, ly, lz,
+                                    gx + 0.44f, gy + 0.42f, gz + 0.94f, gx + 0.56f, gy + 0.62f, gz + 0.99f,
                                     latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
                         } else if (rot == 1) { // West (-X)
-                            add_box(gx + 0.01f, gy + 0.42f, gz + 0.44f, gx + 0.06f, gy + 0.62f, gz + 0.56f,
+                            add_box(lx, ly, lz,
+                                    gx + 0.01f, gy + 0.42f, gz + 0.44f, gx + 0.06f, gy + 0.62f, gz + 0.56f,
                                     latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
                         } else if (rot == 2) { // North (-Z)
-                            add_box(gx + 0.44f, gy + 0.42f, gz + 0.01f, gx + 0.56f, gy + 0.62f, gz + 0.06f,
+                            add_box(lx, ly, lz,
+                                    gx + 0.44f, gy + 0.42f, gz + 0.01f, gx + 0.56f, gy + 0.62f, gz + 0.06f,
                                     latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
                         } else if (rot == 3) { // East (+X)
-                            add_box(gx + 0.94f, gy + 0.42f, gz + 0.44f, gx + 0.99f, gy + 0.62f, gz + 0.56f,
+                            add_box(lx, ly, lz,
+                                    gx + 0.94f, gy + 0.42f, gz + 0.44f, gx + 0.99f, gy + 0.62f, gz + 0.56f,
                                     latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
                         }
                         break;
                     }
                     case Config::SHAPE_STAIRS: {
                         // Base (inferior completa)
-                        add_box(gx, gy, gz, gx + 1.0f, gy + 0.5f, gz + 1.0f,
+                        add_box(lx, ly, lz,
+                                gx, gy, gz, gx + 1.0f, gy + 0.5f, gz + 1.0f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty);
                         // Peldaño superior segun direccion opuesta al jugador
                         if (rot == 0) { // Step on North (-Z)
-                            add_box(gx, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 0.5f,
+                            add_box(lx, ly, lz,
+                                    gx, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 0.5f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty);
                         } else if (rot == 1) { // Step on East (+X)
-                            add_box(gx + 0.5f, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                            add_box(lx, ly, lz,
+                                    gx + 0.5f, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty);
                         } else if (rot == 2) { // Step on South (+Z)
-                            add_box(gx, gy + 0.5f, gz + 0.5f, gx + 1.0f, gy + 1.0f, gz + 1.0f,
+                            add_box(lx, ly, lz,
+                                    gx, gy + 0.5f, gz + 0.5f, gx + 1.0f, gy + 1.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty);
                         } else if (rot == 3) { // Step on West (-X)
-                            add_box(gx, gy + 0.5f, gz, gx + 0.5f, gy + 1.0f, gz + 1.0f,
+                            add_box(lx, ly, lz,
+                                    gx, gy + 0.5f, gz, gx + 0.5f, gy + 1.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty);
@@ -932,12 +982,14 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                     }
                     case Config::SHAPE_DOOR: {
                         if (rot == 0 || rot == 2) {
-                            add_box(gx, gy, gz + 0.44f, gx + 1.0f, gy + 2.0f, gz + 0.56f,
+                            add_box(lx, ly, lz,
+                                    gx, gy, gz + 0.44f, gx + 1.0f, gy + 2.0f, gz + 0.56f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty);
                         } else {
-                            add_box(gx + 0.44f, gy, gz, gx + 0.56f, gy + 2.0f, gz + 1.0f,
+                            add_box(lx, ly, lz,
+                                    gx + 0.44f, gy, gz, gx + 0.56f, gy + 2.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty);
@@ -946,7 +998,8 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                     }
                     case Config::SHAPE_FENCE: {
                         // Poste central
-                        add_box(gx + 0.375f, gy, gz + 0.375f, gx + 0.625f, gy + 1.0f, gz + 0.625f,
+                        add_box(lx, ly, lz,
+                                gx + 0.375f, gy, gz + 0.375f, gx + 0.625f, gy + 1.0f, gz + 0.625f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty);
@@ -961,31 +1014,33 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
                         };
 
                         if (is_fence_or_solid(lx + 1, ly, lz)) {
-                            add_box(gx + 0.625f, gy + 0.2f, gz + 0.44f, gx + 1.0f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(gx + 0.625f, gy + 0.65f, gz + 0.44f, gx + 1.0f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.625f, gy + 0.2f, gz + 0.44f, gx + 1.0f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.625f, gy + 0.65f, gz + 0.44f, gx + 1.0f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                         }
                         if (is_fence_or_solid(lx - 1, ly, lz)) {
-                            add_box(gx, gy + 0.2f, gz + 0.44f, gx + 0.375f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(gx, gy + 0.65f, gz + 0.44f, gx + 0.375f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx, gy + 0.2f, gz + 0.44f, gx + 0.375f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx, gy + 0.65f, gz + 0.44f, gx + 0.375f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                         }
                         if (is_fence_or_solid(lx, ly, lz + 1)) {
-                            add_box(gx + 0.44f, gy + 0.2f, gz + 0.625f, gx + 0.56f, gy + 0.38f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(gx + 0.44f, gy + 0.65f, gz + 0.625f, gx + 0.56f, gy + 0.83f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz + 0.625f, gx + 0.56f, gy + 0.38f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz + 0.625f, gx + 0.56f, gy + 0.83f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                         }
                         if (is_fence_or_solid(lx, ly, lz - 1)) {
-                            add_box(gx + 0.44f, gy + 0.2f, gz, gx + 0.56f, gy + 0.38f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(gx + 0.44f, gy + 0.65f, gz, gx + 0.56f, gy + 0.83f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz, gx + 0.56f, gy + 0.38f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz, gx + 0.56f, gy + 0.83f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                         }
                         break;
                     }
                     case Config::SHAPE_TORCH: {
                         // Palo
-                        add_box(gx + 0.44f, gy, gz + 0.44f, gx + 0.56f, gy + 0.65f, gz + 0.56f,
+                        add_box(lx, ly, lz,
+                                gx + 0.44f, gy, gz + 0.44f, gx + 0.56f, gy + 0.65f, gz + 0.56f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty);
                         // Cabeza con fuego
-                        add_box(gx + 0.40f, gy + 0.55f, gz + 0.40f, gx + 0.60f, gy + 0.75f, gz + 0.60f,
+                        add_box(lx, ly, lz,
+                                gx + 0.40f, gy + 0.55f, gz + 0.40f, gx + 0.60f, gy + 0.75f, gz + 0.60f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty);
