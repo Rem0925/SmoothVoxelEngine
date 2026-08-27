@@ -1,0 +1,21 @@
+{
+  "name": "Pico de Piedra",
+  "result": {
+    "type": "tool",
+    "tool_type": "pickaxe",
+    "tool_tier": "stone",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "block",
+      "id": 21,
+      "count": 3
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

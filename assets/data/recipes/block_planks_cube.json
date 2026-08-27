@@ -1,0 +1,15 @@
+{
+  "name": "Tablas de Madera",
+  "result": {
+    "type": "block",
+    "id": 22,
+    "count": 4
+  },
+  "ingredients": [
+    {
+      "type": "block",
+      "id": 4,
+      "count": 1
+    }
+  ]
+}

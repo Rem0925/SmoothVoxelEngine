@@ -1,0 +1,23 @@
+{
+  "id": 17,
+  "name": "Mineral de Hierro",
+  "shape": "terrain",
+  "hardness": 3.0,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "pickaxe",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 17,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      3,
+      6
+    ]
+  }
+}

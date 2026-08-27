@@ -1,0 +1,11 @@
+{
+  "type": "flail",
+  "tier": "stone",
+  "name": "Mangual de Piedra",
+  "durability": 160,
+  "mining_speed": 1.5,
+  "texture": [
+    4,
+    6
+  ]
+}

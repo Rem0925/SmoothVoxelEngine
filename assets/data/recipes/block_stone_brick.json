@@ -1,0 +1,15 @@
+{
+  "name": "Ladrillos de Piedra",
+  "result": {
+    "type": "block",
+    "id": 23,
+    "count": 4
+  },
+  "ingredients": [
+    {
+      "type": "block",
+      "id": 21,
+      "count": 4
+    }
+  ]
+}

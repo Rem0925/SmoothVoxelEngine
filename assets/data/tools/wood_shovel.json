@@ -1,0 +1,11 @@
+{
+  "type": "shovel",
+  "tier": "wood",
+  "name": "Pala de Madera",
+  "durability": 100,
+  "mining_speed": 2.0,
+  "texture": [
+    2,
+    7
+  ]
+}

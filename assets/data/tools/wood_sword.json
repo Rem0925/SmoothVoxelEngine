@@ -1,0 +1,11 @@
+{
+  "type": "sword",
+  "tier": "wood",
+  "name": "Espada de Madera",
+  "durability": 90,
+  "mining_speed": 1.0,
+  "texture": [
+    5,
+    7
+  ]
+}

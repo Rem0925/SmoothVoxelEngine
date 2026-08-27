@@ -1,0 +1,21 @@
+{
+  "name": "Pala de Plata",
+  "result": {
+    "type": "tool",
+    "tool_type": "shovel",
+    "tool_tier": "silver",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 5,
+      "count": 2
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": 20,
+  "name": "Mineral de Diamante",
+  "shape": "terrain",
+  "hardness": 3.0,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "pickaxe",
+    "required_tier": 3
+  },
+  "drop": {
+    "id": 20,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      2,
+      0
+    ]
+  }
+}

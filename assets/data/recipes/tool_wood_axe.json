@@ -1,0 +1,21 @@
+{
+  "name": "Hacha de Madera",
+  "result": {
+    "type": "tool",
+    "tool_type": "axe",
+    "tool_tier": "wood",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 3
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": 7,
+  "name": "Agua",
+  "shape": "terrain",
+  "hardness": 999.0,
+  "transparent": true,
+  "is_waving": false,
+  "tool": {
+    "ideal": "none",
+    "required_tool": "none",
+    "required_tier": 255
+  },
+  "drop": {
+    "id": 7,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      0,
+      3
+    ]
+  }
+}

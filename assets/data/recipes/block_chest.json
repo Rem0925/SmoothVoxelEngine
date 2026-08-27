@@ -1,0 +1,15 @@
+{
+  "name": "Cofre",
+  "result": {
+    "type": "block",
+    "id": 28,
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 8
+    }
+  ]
+}

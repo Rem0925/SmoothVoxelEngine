@@ -1,0 +1,21 @@
+{
+  "name": "Martillo de Piedra",
+  "result": {
+    "type": "tool",
+    "tool_type": "hammer",
+    "tool_tier": "stone",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "block",
+      "id": 21,
+      "count": 4
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

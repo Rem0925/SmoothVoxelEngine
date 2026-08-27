@@ -1,0 +1,23 @@
+{
+  "id": 11,
+  "name": "Arbusto Seco",
+  "shape": "terrain",
+  "hardness": 0.1,
+  "transparent": true,
+  "is_waving": true,
+  "tool": {
+    "ideal": "none",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 11,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      6,
+      7
+    ]
+  }
+}

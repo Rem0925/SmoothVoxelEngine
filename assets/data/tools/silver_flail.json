@@ -1,0 +1,11 @@
+{
+  "type": "flail",
+  "tier": "silver",
+  "name": "Mangual de Plata",
+  "durability": 200,
+  "mining_speed": 2.5,
+  "texture": [
+    4,
+    4
+  ]
+}

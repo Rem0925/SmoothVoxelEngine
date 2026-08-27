@@ -1,0 +1,11 @@
+{
+  "type": "shovel",
+  "tier": "iron",
+  "name": "Pala de Hierro",
+  "durability": 300,
+  "mining_speed": 4.0,
+  "texture": [
+    2,
+    5
+  ]
+}

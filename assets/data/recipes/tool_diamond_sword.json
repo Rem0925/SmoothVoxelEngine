@@ -1,0 +1,21 @@
+{
+  "name": "Espada de Diamante",
+  "result": {
+    "type": "tool",
+    "tool_type": "sword",
+    "tool_tier": "diamond",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 7,
+      "count": 2
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 1
+    }
+  ]
+}

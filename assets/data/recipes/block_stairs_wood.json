@@ -1,0 +1,15 @@
+{
+  "name": "Escalera de Madera",
+  "result": {
+    "type": "block",
+    "id": 24,
+    "count": 4
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 6
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "id": 19,
+  "name": "Mineral de Oro",
+  "shape": "terrain",
+  "hardness": 3.0,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "pickaxe",
+    "required_tier": 2
+  },
+  "drop": {
+    "id": 19,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      2,
+      3
+    ]
+  }
+}

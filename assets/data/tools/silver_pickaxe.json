@@ -1,0 +1,11 @@
+{
+  "type": "pickaxe",
+  "tier": "silver",
+  "name": "Pico de Plata",
+  "durability": 250,
+  "mining_speed": 2.5,
+  "texture": [
+    0,
+    4
+  ]
+}

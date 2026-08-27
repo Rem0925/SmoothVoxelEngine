@@ -1,0 +1,23 @@
+{
+  "id": 22,
+  "name": "Tablas de Madera",
+  "shape": "cube",
+  "hardness": 1.2,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 22,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      0,
+      8
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "id": 18,
+  "name": "Mineral de Plata",
+  "shape": "terrain",
+  "hardness": 3.0,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "pickaxe",
+    "required_tier": 1
+  },
+  "drop": {
+    "id": 18,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      1,
+      0
+    ]
+  }
+}

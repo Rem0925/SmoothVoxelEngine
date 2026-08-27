@@ -1,0 +1,23 @@
+{
+  "id": 23,
+  "name": "Ladrillos de Piedra",
+  "shape": "cube",
+  "hardness": 1.8,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 23,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      4,
+      7
+    ]
+  }
+}

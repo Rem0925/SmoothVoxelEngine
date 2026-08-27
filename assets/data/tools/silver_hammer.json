@@ -1,0 +1,11 @@
+{
+  "type": "hammer",
+  "tier": "silver",
+  "name": "Martillo de Plata",
+  "durability": 375,
+  "mining_speed": 2.5,
+  "texture": [
+    3,
+    4
+  ]
+}

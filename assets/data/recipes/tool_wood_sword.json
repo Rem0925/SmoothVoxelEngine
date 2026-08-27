@@ -1,0 +1,21 @@
+{
+  "name": "Espada de Madera",
+  "result": {
+    "type": "tool",
+    "tool_type": "sword",
+    "tool_tier": "wood",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 2
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "Espada de Oro",
+  "result": {
+    "type": "tool",
+    "tool_type": "sword",
+    "tool_tier": "gold",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 6,
+      "count": 2
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 1
+    }
+  ]
+}

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <algorithm>
 #include "Config.hpp"
+#include "BlockRegistry.hpp"
 #include "MarchingCubes.hpp"
 #include "Biome.hpp"
 #include "World.hpp"
@@ -817,6 +818,9 @@ int main() {
     waterShader.locs[SHADER_LOC_MAP_EMISSION] = GetShaderLocation(waterShader, "noiseTex");
     mat_water.maps[MATERIAL_MAP_EMISSION].texture = noiseTex;
 
+    // Cargar todos los bloques, items y herramientas desde JSONs
+    BlockRegistry::load_all("assets/data");
+
     World world(mat_solid, mat_plants, mat_water);
     UI ui(spritesheet, spritesheet_items);
     Chat chat;
@@ -966,7 +970,32 @@ int main() {
 
         if (!ui.is_open && !chat.is_open) {
             Vector3 old_pos = camera.position;
-            UpdateCamera(&camera, spectator_mode ? CAMERA_FREE : CAMERA_FIRST_PERSON);
+            float dt_cam = GetFrameTime();
+            Vector2 mouse_delta = GetMouseDelta();
+            float mouse_sensitivity = 0.15f; // Sensibilidad cómoda y fluida
+            Vector3 rotation = { mouse_delta.x * mouse_sensitivity, mouse_delta.y * mouse_sensitivity, 0.0f };
+
+            if (spectator_mode) {
+                float spec_speed = (IsKeyDown(KEY_LEFT_SHIFT) ? 40.0f : 15.0f) * dt_cam;
+                Vector3 movement = { 0.0f, 0.0f, 0.0f };
+                if (IsKeyDown(KEY_W)) movement.x += spec_speed;
+                if (IsKeyDown(KEY_S)) movement.x -= spec_speed;
+                if (IsKeyDown(KEY_D)) movement.y += spec_speed;
+                if (IsKeyDown(KEY_A)) movement.y -= spec_speed;
+                if (IsKeyDown(KEY_SPACE)) movement.z += spec_speed;
+                if (IsKeyDown(KEY_LEFT_CONTROL)) movement.z -= spec_speed;
+                UpdateCameraPro(&camera, movement, rotation, 0.0f);
+            } else {
+                bool is_sprinting = IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_LEFT_SHIFT);
+                float walk_speed = (is_sprinting ? 8.5f : 4.5f) * dt_cam;
+                Vector3 movement = { 0.0f, 0.0f, 0.0f };
+                if (IsKeyDown(KEY_W)) movement.x += walk_speed;
+                if (IsKeyDown(KEY_S)) movement.x -= walk_speed;
+                if (IsKeyDown(KEY_D)) movement.y += walk_speed;
+                if (IsKeyDown(KEY_A)) movement.y -= walk_speed;
+                UpdateCameraPro(&camera, movement, rotation, 0.0f);
+            }
+
             Vector3 post_update_pos = camera.position;
             
             if (!spectator_mode) {

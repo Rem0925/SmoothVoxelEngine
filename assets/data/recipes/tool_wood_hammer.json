@@ -1,0 +1,21 @@
+{
+  "name": "Martillo de Madera",
+  "result": {
+    "type": "tool",
+    "tool_type": "hammer",
+    "tool_tier": "wood",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 4
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "type": "axe",
+  "tier": "silver",
+  "name": "Hacha de Plata",
+  "durability": 250,
+  "mining_speed": 3.75,
+  "texture": [
+    1,
+    4
+  ]
+}

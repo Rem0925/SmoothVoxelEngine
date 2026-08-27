@@ -1,0 +1,39 @@
+{
+  "id": 30,
+  "name": "Mesa de Crafteo",
+  "shape": "crafting_table",
+  "hardness": 1.5,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 30,
+    "is_item": false
+  },
+  "icon": [
+    1,
+    2
+  ],
+  "textures": {
+    "default": [
+      0,
+      8
+    ],
+    "top": [
+      1,
+      2
+    ],
+    "bottom": [
+      0,
+      8
+    ],
+    "front": [
+      0,
+      8
+    ]
+  }
+}

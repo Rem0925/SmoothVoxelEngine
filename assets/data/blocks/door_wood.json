@@ -1,0 +1,39 @@
+{
+  "id": 27,
+  "name": "Puerta de Madera",
+  "shape": "door",
+  "hardness": 1.5,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 27,
+    "is_item": false
+  },
+  "icon": [
+    1,
+    8
+  ],
+  "textures": {
+    "default": [
+      0,
+      8
+    ],
+    "top": [
+      0,
+      8
+    ],
+    "bottom": [
+      0,
+      8
+    ],
+    "front": [
+      0,
+      8
+    ]
+  }
+}

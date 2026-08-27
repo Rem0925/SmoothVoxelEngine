@@ -1,0 +1,21 @@
+{
+  "name": "Pico de Diamante",
+  "result": {
+    "type": "tool",
+    "tool_type": "pickaxe",
+    "tool_tier": "diamond",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 7,
+      "count": 3
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

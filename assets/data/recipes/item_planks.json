@@ -1,0 +1,15 @@
+{
+  "name": "Tablas (Item)",
+  "result": {
+    "type": "item",
+    "id": 2,
+    "count": 4
+  },
+  "ingredients": [
+    {
+      "type": "block",
+      "id": 4,
+      "count": 1
+    }
+  ]
+}

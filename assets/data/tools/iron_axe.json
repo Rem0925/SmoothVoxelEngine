@@ -1,0 +1,11 @@
+{
+  "type": "axe",
+  "tier": "iron",
+  "name": "Hacha de Hierro",
+  "durability": 300,
+  "mining_speed": 3.0,
+  "texture": [
+    1,
+    5
+  ]
+}

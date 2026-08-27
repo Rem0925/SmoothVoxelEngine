@@ -1,0 +1,23 @@
+{
+  "id": 16,
+  "name": "Mineral de Carbon",
+  "shape": "terrain",
+  "hardness": 3.0,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 1,
+    "is_item": true
+  },
+  "textures": {
+    "default": [
+      3,
+      8
+    ]
+  }
+}

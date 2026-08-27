@@ -1,0 +1,71 @@
+{
+  "id": 28,
+  "name": "Cofre",
+  "shape": "chest",
+  "hardness": 1.5,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 28,
+    "is_item": false
+  },
+  "icon": [
+    1,
+    9
+  ],
+  "textures": {
+    "default": [
+      1,
+      9
+    ],
+    "latch": [
+      0,
+      8
+    ]
+  },
+  "elements": [
+    {
+      "name": "cuerpo",
+      "from": [
+        0.06,
+        0.0,
+        0.06
+      ],
+      "to": [
+        0.94,
+        0.88,
+        0.94
+      ],
+      "textures": {
+        "all": [
+          1,
+          9
+        ]
+      }
+    },
+    {
+      "name": "cerrojo",
+      "from": [
+        0.44,
+        0.42,
+        0.94
+      ],
+      "to": [
+        0.56,
+        0.62,
+        0.99
+      ],
+      "textures": {
+        "all": [
+          0,
+          8
+        ]
+      }
+    }
+  ]
+}

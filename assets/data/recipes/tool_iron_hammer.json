@@ -1,0 +1,21 @@
+{
+  "name": "Martillo de Hierro",
+  "result": {
+    "type": "tool",
+    "tool_type": "hammer",
+    "tool_tier": "iron",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 4,
+      "count": 4
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

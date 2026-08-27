@@ -1,0 +1,11 @@
+{
+  "type": "hammer",
+  "tier": "iron",
+  "name": "Martillo de Hierro",
+  "durability": 450,
+  "mining_speed": 2.0,
+  "texture": [
+    3,
+    5
+  ]
+}

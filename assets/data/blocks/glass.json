@@ -1,0 +1,23 @@
+{
+  "id": 31,
+  "name": "Vidrio",
+  "shape": "glass",
+  "hardness": 0.3,
+  "transparent": true,
+  "is_waving": false,
+  "tool": {
+    "ideal": "pickaxe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 255,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      5,
+      6
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "type": "flail",
+  "tier": "diamond",
+  "name": "Mangual de Diamante",
+  "durability": 1200,
+  "mining_speed": 3.0,
+  "texture": [
+    4,
+    2
+  ]
+}

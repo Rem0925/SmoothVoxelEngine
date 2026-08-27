@@ -1,0 +1,21 @@
+{
+  "name": "Pico de Plata",
+  "result": {
+    "type": "tool",
+    "tool_type": "pickaxe",
+    "tool_tier": "silver",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 5,
+      "count": 3
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

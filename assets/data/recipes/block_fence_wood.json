@@ -1,0 +1,20 @@
+{
+  "name": "Valla de Madera",
+  "result": {
+    "type": "block",
+    "id": 26,
+    "count": 3
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 4
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

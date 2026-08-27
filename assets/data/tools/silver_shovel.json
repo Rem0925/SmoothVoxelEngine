@@ -1,0 +1,11 @@
+{
+  "type": "shovel",
+  "tier": "silver",
+  "name": "Pala de Plata",
+  "durability": 250,
+  "mining_speed": 5.0,
+  "texture": [
+    2,
+    4
+  ]
+}

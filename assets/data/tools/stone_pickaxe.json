@@ -1,0 +1,11 @@
+{
+  "type": "pickaxe",
+  "tier": "stone",
+  "name": "Pico de Piedra",
+  "durability": 200,
+  "mining_speed": 1.5,
+  "texture": [
+    0,
+    6
+  ]
+}

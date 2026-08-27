@@ -1,0 +1,15 @@
+{
+  "name": "Horno",
+  "result": {
+    "type": "block",
+    "id": 29,
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "block",
+      "id": 21,
+      "count": 8
+    }
+  ]
+}

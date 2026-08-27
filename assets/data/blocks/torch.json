@@ -1,0 +1,44 @@
+{
+  "id": 3,
+  "name": "Antorcha",
+  "shape": "torch",
+  "hardness": 0.1,
+  "transparent": true,
+  "is_waving": false,
+  "tool": {
+    "ideal": "none",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 3,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      2,
+      6
+    ]
+  },
+  "elements": [
+    {
+      "name": "stick",
+      "from": [
+        -0.08,
+        -0.35,
+        -0.08
+      ],
+      "to": [
+        0.08,
+        0.35,
+        0.08
+      ],
+      "textures": {
+        "all": [
+          2,
+          6
+        ]
+      }
+    }
+  ]
+}

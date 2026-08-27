@@ -1,0 +1,11 @@
+{
+  "type": "hammer",
+  "tier": "gold",
+  "name": "Martillo de Oro",
+  "durability": 75,
+  "mining_speed": 3.5,
+  "texture": [
+    3,
+    3
+  ]
+}

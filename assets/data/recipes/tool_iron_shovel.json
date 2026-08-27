@@ -1,0 +1,21 @@
+{
+  "name": "Pala de Hierro",
+  "result": {
+    "type": "tool",
+    "tool_type": "shovel",
+    "tool_tier": "iron",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 4,
+      "count": 2
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

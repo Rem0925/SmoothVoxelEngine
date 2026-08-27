@@ -1,0 +1,11 @@
+{
+  "type": "pickaxe",
+  "tier": "gold",
+  "name": "Pico de Oro",
+  "durability": 50,
+  "mining_speed": 3.5,
+  "texture": [
+    0,
+    3
+  ]
+}

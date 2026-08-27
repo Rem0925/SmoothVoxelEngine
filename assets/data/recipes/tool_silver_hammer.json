@@ -1,0 +1,21 @@
+{
+  "name": "Martillo de Plata",
+  "result": {
+    "type": "tool",
+    "tool_type": "hammer",
+    "tool_tier": "silver",
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 5,
+      "count": 4
+    },
+    {
+      "type": "item",
+      "id": 0,
+      "count": 2
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "type": "sword",
+  "tier": "gold",
+  "name": "Espada de Oro",
+  "durability": 45,
+  "mining_speed": 3.5,
+  "texture": [
+    5,
+    3
+  ]
+}

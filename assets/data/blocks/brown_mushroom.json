@@ -1,0 +1,23 @@
+{
+  "id": 10,
+  "name": "Seta Marron",
+  "shape": "terrain",
+  "hardness": 0.1,
+  "transparent": true,
+  "is_waving": false,
+  "tool": {
+    "ideal": "none",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 10,
+    "is_item": false
+  },
+  "textures": {
+    "default": [
+      4,
+      3
+    ]
+  }
+}

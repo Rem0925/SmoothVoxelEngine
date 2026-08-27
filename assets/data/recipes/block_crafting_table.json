@@ -1,0 +1,15 @@
+{
+  "name": "Mesa de Crafteo",
+  "result": {
+    "type": "block",
+    "id": 30,
+    "count": 1
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 4
+    }
+  ]
+}

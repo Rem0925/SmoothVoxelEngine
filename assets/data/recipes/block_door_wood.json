@@ -1,0 +1,15 @@
+{
+  "name": "Puerta de Madera",
+  "result": {
+    "type": "block",
+    "id": 27,
+    "count": 3
+  },
+  "ingredients": [
+    {
+      "type": "item",
+      "id": 2,
+      "count": 6
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "type": "hammer",
+  "tier": "diamond",
+  "name": "Martillo de Diamante",
+  "durability": 2250,
+  "mining_speed": 3.0,
+  "texture": [
+    3,
+    2
+  ]
+}

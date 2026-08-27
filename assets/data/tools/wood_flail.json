@@ -1,0 +1,11 @@
+{
+  "type": "flail",
+  "tier": "wood",
+  "name": "Mangual de Madera",
+  "durability": 80,
+  "mining_speed": 1.0,
+  "texture": [
+    4,
+    7
+  ]
+}

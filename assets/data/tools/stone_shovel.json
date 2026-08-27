@@ -1,0 +1,11 @@
+{
+  "type": "shovel",
+  "tier": "stone",
+  "name": "Pala de Piedra",
+  "durability": 200,
+  "mining_speed": 3.0,
+  "texture": [
+    2,
+    6
+  ]
+}

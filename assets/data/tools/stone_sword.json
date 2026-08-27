@@ -1,0 +1,11 @@
+{
+  "type": "sword",
+  "tier": "stone",
+  "name": "Espada de Piedra",
+  "durability": 180,
+  "mining_speed": 1.5,
+  "texture": [
+    5,
+    6
+  ]
+}
