@@ -48,8 +48,10 @@ set(SOURCES
 # Definir el ejecutable principal
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+find_package(OpenGL REQUIRED)
+
 # Enlazar librerías (Raylib ya vincula dependencias del SO internamente o vía cmake)
-target_link_libraries(${PROJECT_NAME} PRIVATE raylib)
+target_link_libraries(${PROJECT_NAME} PRIVATE raylib OpenGL::GL)
 
 # Copiar carpeta assets al directorio de salida
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD

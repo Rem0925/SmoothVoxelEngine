@@ -11,6 +11,7 @@
 #include "Chat.hpp"
 #include "CommandHandler.hpp"
 #include <rlgl.h>
+#include <GL/gl.h>
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
@@ -210,6 +211,520 @@ void DrawSkybox(Camera3D camera, Texture2D side, Texture2D top, Texture2D bottom
     
     rlEnableDepthTest();
     rlEnableDepthMask();
+}
+
+void DrawFirstPersonViewmodel(
+    UI& ui,
+    Texture2D spritesheet_tiles,
+    Texture2D spritesheet_items,
+    float light_intensity,
+    bool is_mining,
+    float mining_progress,
+    bool is_grounded,
+    float dt
+) {
+    static float walk_bob_timer = 0.0f;
+    static float bob_x = 0.0f, bob_y = 0.0f;
+    static float swing_timer = 0.0f;
+    static int prev_slot = -1;
+    static int prev_tool_idx = -2;
+    static float equip_anim = 1.0f;
+
+    bool is_moving = is_grounded && (IsKeyDown(KEY_W) || IsKeyDown(KEY_A) || IsKeyDown(KEY_S) || IsKeyDown(KEY_D));
+    if (is_moving) {
+        walk_bob_timer += dt * 9.0f;
+        float target_bob_x = std::sin(walk_bob_timer) * 0.012f;
+        float target_bob_y = std::abs(std::cos(walk_bob_timer)) * 0.010f;
+        bob_x = Lerp(bob_x, target_bob_x, 15.0f * dt);
+        bob_y = Lerp(bob_y, target_bob_y, 15.0f * dt);
+    } else {
+        bob_x = Lerp(bob_x, 0.0f, 10.0f * dt);
+        bob_y = Lerp(bob_y, 0.0f, 10.0f * dt);
+    }
+
+    int current_tool_idx = (ui.selected_slot == 0) ? ui.selected_tool_idx : -2;
+    if (ui.selected_slot != prev_slot || current_tool_idx != prev_tool_idx) {
+        prev_slot = ui.selected_slot;
+        prev_tool_idx = current_tool_idx;
+        equip_anim = 0.0f;
+    }
+    if (equip_anim < 1.0f) {
+        equip_anim = std::min(1.0f, equip_anim + dt * 6.0f);
+    }
+    float equip_y = (1.0f - equip_anim) * -0.32f;
+
+    if (is_mining) {
+        swing_timer += dt * 6.0f;
+        if (swing_timer >= 1.0f) swing_timer -= 1.0f;
+    } else {
+        if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON) && swing_timer <= 0.0f) {
+            swing_timer = 0.01f;
+        }
+        if (swing_timer > 0.0f) {
+            swing_timer += dt * 5.0f;
+            if (swing_timer >= 1.0f) swing_timer = 0.0f;
+        }
+    }
+    float swing_sin = (swing_timer > 0.0f) ? std::sin(swing_timer * PI) : 0.0f;
+
+    Camera3D vm_cam = { 0 };
+    vm_cam.position = { 0.0f, 0.0f, 0.0f };
+    vm_cam.target = { 0.0f, 0.0f, 1.0f };
+    vm_cam.up = { 0.0f, 1.0f, 0.0f };
+    vm_cam.fovy = 54.0f;
+    vm_cam.projection = CAMERA_PERSPECTIVE;
+
+    BeginMode3D(vm_cam);
+    rlDrawRenderBatchActive();
+    glClear(GL_DEPTH_BUFFER_BIT);
+    rlEnableDepthTest();
+    rlEnableDepthMask();
+    rlEnableBackfaceCulling();
+    rlEnableColorBlend();
+
+    float light = std::clamp(light_intensity, 0.25f, 1.0f);
+
+    rlPushMatrix();
+        // Posición visible y prominente de la mano DERECHA
+        rlTranslatef(-0.28f - bob_x, -0.20f + bob_y + equip_y, 0.50f);
+        
+        if (swing_sin > 0.0f) {
+            rlTranslatef(swing_sin * 0.08f, swing_sin * 0.04f, -swing_sin * 0.06f);
+            rlRotatef(swing_sin * 38.0f, 1.0f, 0.0f, 0.0f);
+            rlRotatef(swing_sin * 20.0f, 0.0f, 1.0f, 0.0f);
+            rlRotatef(-swing_sin * 14.0f, 0.0f, 0.0f, 1.0f);
+        }
+
+        // Rotación de reposo orientada naturalmente hacia el frente-centro
+        rlRotatef(-14.0f, 1.0f, 0.0f, 0.0f);
+        rlRotatef(14.0f, 0.0f, 1.0f, 0.0f);
+        rlRotatef(-4.0f, 0.0f, 0.0f, 1.0f);
+
+        // --- DIBUJAR BRAZO DEL JUGADOR (Winding CCW exacto) ---
+        auto draw_shaded_box = [&](float x0, float y0, float z0, float x1, float y1, float z1, Color base_col) {
+            Color c_top = ColorAlpha(ColorBrightness(base_col, 0.06f), 1.0f);
+            Color c_front = ColorAlpha(ColorBrightness(base_col, -0.04f), 1.0f);
+            Color c_right = ColorAlpha(ColorBrightness(base_col, -0.10f), 1.0f);
+            Color c_left = ColorAlpha(ColorBrightness(base_col, -0.16f), 1.0f);
+            Color c_bot = ColorAlpha(ColorBrightness(base_col, -0.28f), 1.0f);
+
+            auto mul_light = [&](Color c) -> Color {
+                return Color{ (unsigned char)(c.r * light), (unsigned char)(c.g * light), (unsigned char)(c.b * light), c.a };
+            };
+            c_top = mul_light(c_top);
+            c_front = mul_light(c_front);
+            c_right = mul_light(c_right);
+            c_left = mul_light(c_left);
+            c_bot = mul_light(c_bot);
+
+            rlSetTexture(0);
+            rlBegin(RL_QUADS);
+                // Top (+Y)
+                rlColor4ub(c_top.r, c_top.g, c_top.b, c_top.a);
+                rlVertex3f(x0, y1, z0); rlVertex3f(x0, y1, z1); rlVertex3f(x1, y1, z1); rlVertex3f(x1, y1, z0);
+                // Bottom (-Y)
+                rlColor4ub(c_bot.r, c_bot.g, c_bot.b, c_bot.a);
+                rlVertex3f(x0, y0, z1); rlVertex3f(x0, y0, z0); rlVertex3f(x1, y0, z0); rlVertex3f(x1, y0, z1);
+                // Front (+Z)
+                rlColor4ub(c_front.r, c_front.g, c_front.b, c_front.a);
+                rlVertex3f(x0, y0, z1); rlVertex3f(x1, y0, z1); rlVertex3f(x1, y1, z1); rlVertex3f(x0, y1, z1);
+                // Back (-Z)
+                rlColor4ub(c_front.r, c_front.g, c_front.b, c_front.a);
+                rlVertex3f(x1, y0, z0); rlVertex3f(x0, y0, z0); rlVertex3f(x0, y1, z0); rlVertex3f(x1, y1, z0);
+                // Right (+X)
+                rlColor4ub(c_right.r, c_right.g, c_right.b, c_right.a);
+                rlVertex3f(x1, y0, z1); rlVertex3f(x1, y0, z0); rlVertex3f(x1, y1, z0); rlVertex3f(x1, y1, z1);
+                // Left (-X)
+                rlColor4ub(c_left.r, c_left.g, c_left.b, c_left.a);
+                rlVertex3f(x0, y0, z0); rlVertex3f(x0, y0, z1); rlVertex3f(x0, y1, z1); rlVertex3f(x0, y1, z0);
+            rlEnd();
+        };
+
+        // Manga (Sleeve): Cyan / Teal
+        draw_shaded_box(-0.065f, -0.065f, -0.50f, 0.065f, 0.065f, -0.16f, Color{ 0, 155, 175, 255 });
+        // Mano y antebrazo (Skin)
+        draw_shaded_box(-0.060f, -0.060f, -0.16f, 0.060f, 0.060f, 0.06f, Color{ 215, 155, 125, 255 });
+
+        // Identificar qué elemento sostiene
+        uint8_t held_block = AIR;
+        uint8_t held_item = 255;
+        Config::ToolType held_tool_type = Config::TOOL_COUNT;
+        Config::ToolTier held_tool_tier = Config::TIER_COUNT;
+        bool holding_tool = false;
+        bool holding_item = false;
+        bool holding_block = false;
+
+        if (ui.selected_slot == 0) {
+            ToolSlot* t = ui.get_active_tool();
+            if (t != nullptr) {
+                holding_tool = true;
+                held_tool_type = t->type;
+                held_tool_tier = t->tier;
+            }
+        } else if (ui.selected_slot >= 1 && ui.selected_slot <= 9) {
+            const InventorySlot& s = ui.slots[ui.selected_slot];
+            if (s.count > 0) {
+                if (s.id == 254) {
+                    for (auto& [iid, itype] : Config::ITEMS) {
+                        if (itype.name == s.name) {
+                            held_item = iid;
+                            holding_item = true;
+                            break;
+                        }
+                    }
+                } else if (s.id != AIR && Config::BLOCKS.count(s.id)) {
+                    held_block = s.id;
+                    holding_block = true;
+                }
+            }
+        }
+
+        float tw = 1.0f / 9.0f;
+        float th = 1.0f / 10.0f;
+        auto get_tile_uv = [&](int tx, int ty) -> std::array<Vector2, 4> {
+            float u0 = (float)tx * tw;
+            float v0 = (10.0f - 1.0f - (float)ty) * th;
+            float u1 = u0 + tw;
+            float v1 = v0 + th;
+            return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
+        };
+
+        float itw = 1.0f / 7.0f;
+        float ith = 1.0f / 8.0f;
+        auto get_item_uv = [&](int ix, int iy) -> std::array<Vector2, 4> {
+            float u0 = (float)ix * itw;
+            float v0 = (8.0f - 1.0f - (float)iy) * ith;
+            float u1 = u0 + itw;
+            float v1 = v0 + ith;
+            return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
+        };
+
+        auto draw_tex_box = [&](float x0, float y0, float z0, float x1, float y1, float z1,
+                                 int top_tx, int top_ty, int bot_tx, int bot_ty,
+                                 int front_tx, int front_ty, int back_tx, int back_ty,
+                                 int right_tx, int right_ty, int left_tx, int left_ty) {
+            rlSetTexture(spritesheet_tiles.id);
+            rlBegin(RL_QUADS);
+                // Top (+Y)
+                unsigned char c_t = (unsigned char)(255 * light);
+                rlColor4ub(c_t, c_t, c_t, 255);
+                auto uvs = get_tile_uv(top_tx, top_ty);
+                rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(x0, y1, z0);
+                rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(x0, y1, z1);
+                rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(x1, y1, z1);
+                rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(x1, y1, z0);
+
+                // Bottom (-Y)
+                unsigned char c_b = (unsigned char)(140 * light);
+                rlColor4ub(c_b, c_b, c_b, 255);
+                uvs = get_tile_uv(bot_tx, bot_ty);
+                rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(x0, y0, z1);
+                rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(x0, y0, z0);
+                rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(x1, y0, z0);
+                rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(x1, y0, z1);
+
+                // Front (+Z)
+                unsigned char c_f = (unsigned char)(215 * light);
+                rlColor4ub(c_f, c_f, c_f, 255);
+                uvs = get_tile_uv(front_tx, front_ty);
+                rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(x0, y0, z1);
+                rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(x1, y0, z1);
+                rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(x1, y1, z1);
+                rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(x0, y1, z1);
+
+                // Back (-Z)
+                unsigned char c_bk = (unsigned char)(190 * light);
+                rlColor4ub(c_bk, c_bk, c_bk, 255);
+                uvs = get_tile_uv(back_tx, back_ty);
+                rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(x1, y0, z0);
+                rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(x0, y0, z0);
+                rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(x0, y1, z0);
+                rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(x1, y1, z0);
+
+                // Right (+X)
+                unsigned char c_r = (unsigned char)(200 * light);
+                rlColor4ub(c_r, c_r, c_r, 255);
+                uvs = get_tile_uv(right_tx, right_ty);
+                rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(x1, y0, z1);
+                rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(x1, y0, z0);
+                rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(x1, y1, z0);
+                rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(x1, y1, z1);
+
+                // Left (-X)
+                unsigned char c_l = (unsigned char)(175 * light);
+                rlColor4ub(c_l, c_l, c_l, 255);
+                uvs = get_tile_uv(left_tx, left_ty);
+                rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(x0, y0, z0);
+                rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(x0, y0, z1);
+                rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(x0, y1, z1);
+                rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(x0, y1, z0);
+            rlEnd();
+            rlSetTexture(0);
+        };
+
+        if (holding_tool) {
+            // === HERRAMIENTA EMPUÑADA EN LA MANO DERECHA ===
+            int ix = 0, iy = 7;
+            for (auto& ti : Config::TOOLS) {
+                if (ti.type == held_tool_type && ti.tier == held_tool_tier) {
+                    ix = ti.item_tex_x;
+                    iy = ti.item_tex_y;
+                    break;
+                }
+            }
+            auto uvs = get_item_uv(ix, iy);
+            unsigned char c_tool = (unsigned char)(255 * light);
+
+            rlPushMatrix();
+                // Anclado directamente en el puño
+                rlTranslatef(0.0f, 0.02f, 0.02f);
+                rlRotatef(-12.0f, 1.0f, 0.0f, 0.0f);
+                rlRotatef(-22.0f, 0.0f, 1.0f, 0.0f);
+                rlRotatef(24.0f, 0.0f, 0.0f, 1.0f);
+
+                float s = 0.30f;
+                rlSetTexture(spritesheet_items.id);
+                rlBegin(RL_QUADS);
+                    rlColor4ub(c_tool, c_tool, c_tool, 255);
+                    // Front quad (CCW)
+                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(0.0f, 0.0f, 0.0f);
+                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(   s, 0.0f, 0.0f);
+                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(   s,    s, 0.0f);
+                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(0.0f,    s, 0.0f);
+
+                    // Back quad (CCW)
+                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(   s, 0.0f, 0.0f);
+                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(0.0f, 0.0f, 0.0f);
+                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(0.0f,    s, 0.0f);
+                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(   s,    s, 0.0f);
+                rlEnd();
+                rlSetTexture(0);
+            rlPopMatrix();
+        }
+        else if (holding_item && held_item != 255 && Config::ITEMS.count(held_item)) {
+            // === ÍTEMS PLANOS/RECTOS EN LA PALMA DERECHA ===
+            auto& itype = Config::ITEMS.at(held_item);
+            auto uvs = get_item_uv(itype.item_tex_x, itype.item_tex_y);
+            unsigned char c_item = (unsigned char)(255 * light);
+
+            rlPushMatrix();
+                rlTranslatef(0.01f, 0.04f, 0.04f);
+                if (held_item == Config::ITEM_STICK) {
+                    rlRotatef(25.0f, 1.0f, 0.0f, 0.0f);
+                    rlRotatef(-20.0f, 0.0f, 1.0f, 0.0f);
+                } else {
+                    rlRotatef(-12.0f, 1.0f, 0.0f, 0.0f);
+                    rlRotatef(-10.0f, 0.0f, 1.0f, 0.0f);
+                    rlRotatef(4.0f, 0.0f, 0.0f, 1.0f);
+                }
+
+                float s = 0.22f;
+                rlSetTexture(spritesheet_items.id);
+                rlBegin(RL_QUADS);
+                    rlColor4ub(c_item, c_item, c_item, 255);
+                    // Front quad (CCW)
+                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s*0.5f, -s*0.5f, 0.0f);
+                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s*0.5f, -s*0.5f, 0.0f);
+                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s*0.5f,  s*0.5f, 0.0f);
+                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s*0.5f,  s*0.5f, 0.0f);
+
+                    // Back quad (CCW)
+                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s*0.5f, -s*0.5f, 0.0f);
+                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s*0.5f, -s*0.5f, 0.0f);
+                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s*0.5f,  s*0.5f, 0.0f);
+                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s*0.5f,  s*0.5f, 0.0f);
+                rlEnd();
+                rlSetTexture(0);
+            rlPopMatrix();
+        }
+        else if (holding_block && held_block != AIR && Config::BLOCKS.count(held_block)) {
+            const auto& bt = Config::BLOCKS.at(held_block);
+            bool is_plant = bt.transparent && (held_block == Config::TALL_GRASS || held_block == Config::RED_MUSHROOM || held_block == Config::BROWN_MUSHROOM || held_block == Config::DEAD_BUSH);
+
+            if (is_plant) {
+                // === PLANTA CROSS-QUAD 3D ===
+                auto uvs = get_tile_uv(bt.tex_x, bt.tex_y);
+                unsigned char c_plant = (unsigned char)(255 * light);
+
+                rlPushMatrix();
+                    rlTranslatef(0.01f, 0.06f, 0.04f);
+                    float ps_w = 0.20f;
+                    float ps_h = 0.28f;
+                    rlSetTexture(spritesheet_tiles.id);
+                    rlBegin(RL_QUADS);
+                        rlColor4ub(c_plant, c_plant, c_plant, 255);
+                        // Quad 1 (CCW)
+                        rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-ps_w*0.5f, 0.0f, -ps_w*0.5f);
+                        rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( ps_w*0.5f, 0.0f,  ps_w*0.5f);
+                        rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( ps_w*0.5f, ps_h,  ps_w*0.5f);
+                        rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-ps_w*0.5f, ps_h, -ps_w*0.5f);
+
+                        // Quad 1 back (CCW)
+                        rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( ps_w*0.5f, 0.0f,  ps_w*0.5f);
+                        rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-ps_w*0.5f, 0.0f, -ps_w*0.5f);
+                        rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-ps_w*0.5f, ps_h, -ps_w*0.5f);
+                        rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( ps_w*0.5f, ps_h,  ps_w*0.5f);
+
+                        // Quad 2 (CCW)
+                        rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-ps_w*0.5f, 0.0f,  ps_w*0.5f);
+                        rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( ps_w*0.5f, 0.0f, -ps_w*0.5f);
+                        rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( ps_w*0.5f, ps_h, -ps_w*0.5f);
+                        rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-ps_w*0.5f, ps_h,  ps_w*0.5f);
+
+                        // Quad 2 back (CCW)
+                        rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( ps_w*0.5f, 0.0f, -ps_w*0.5f);
+                        rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-ps_w*0.5f, 0.0f,  ps_w*0.5f);
+                        rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-ps_w*0.5f, ps_h,  ps_w*0.5f);
+                        rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( ps_w*0.5f, ps_h, -ps_w*0.5f);
+                    rlEnd();
+                    rlSetTexture(0);
+                rlPopMatrix();
+            }
+            else if (bt.shape != Config::SHAPE_TERRAIN) {
+                // === BLOQUE DE CONSTRUCCIÓN: CUBO 3D / MODELO ISOMÉTRICO ===
+                int def_tx = bt.tex_x, def_ty = bt.tex_y;
+                int top_tx = bt.tex_top_x >= 0 ? bt.tex_top_x : def_tx, top_ty = bt.tex_top_y >= 0 ? bt.tex_top_y : def_ty;
+                int bot_tx = bt.tex_bottom_x >= 0 ? bt.tex_bottom_x : def_tx, bot_ty = bt.tex_bottom_y >= 0 ? bt.tex_bottom_y : def_ty;
+                int front_tx = bt.tex_front_x >= 0 ? bt.tex_front_x : def_tx, front_ty = bt.tex_front_y >= 0 ? bt.tex_front_y : def_ty;
+
+                rlPushMatrix();
+                    rlTranslatef(0.02f, 0.06f, 0.06f);
+                    rlRotatef(45.0f, 0.0f, 1.0f, 0.0f);
+                    rlRotatef(22.0f, 1.0f, 0.0f, 0.0f);
+                    rlRotatef(-10.0f, 0.0f, 0.0f, 1.0f);
+
+                    float cs = 0.11f;
+                    if (bt.shape == Config::SHAPE_TORCH) {
+                        draw_tex_box(-0.02f, -0.14f, -0.02f, 0.02f, 0.14f, 0.02f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                    } else if (bt.shape == Config::SHAPE_STAIRS) {
+                        draw_tex_box(-cs, -cs, -cs, cs, 0.0f, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        draw_tex_box(-cs, 0.0f, 0.0f, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                    } else if (bt.shape == Config::SHAPE_CHEST) {
+                        draw_tex_box(-cs, -cs, -cs, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        int latch_tx = bt.tex_latch_x >= 0 ? bt.tex_latch_x : 2;
+                        int latch_ty = bt.tex_latch_y >= 0 ? bt.tex_latch_y : 3;
+                        draw_tex_box(-0.02f, -0.02f, cs, 0.02f, 0.04f, cs + 0.02f, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                    } else {
+                        draw_tex_box(-cs, -cs, -cs, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                    }
+                rlPopMatrix();
+            }
+            else {
+                // === BLOQUE NATURAL: TERRÓN / ROCA ORGÁNICA FACETADA POLIGONAL ===
+                int def_tx = bt.tex_x, def_ty = bt.tex_y;
+                int top_tx = (bt.tex_top_x >= 0) ? bt.tex_top_x : def_tx;
+                int top_ty = (bt.tex_top_y >= 0) ? bt.tex_top_y : def_ty;
+                int bot_tx = (bt.tex_bottom_x >= 0) ? bt.tex_bottom_x : def_tx;
+                int bot_ty = (bt.tex_bottom_y >= 0) ? bt.tex_bottom_y : def_ty;
+
+                if (held_block == Config::GRASS) {
+                    top_tx = 6; top_ty = 8;
+                    def_tx = 6; def_ty = 8;
+                    bot_tx = 7; bot_ty = 4; // Tierra en base
+                }
+
+                rlPushMatrix();
+                    rlTranslatef(0.02f, 0.06f, 0.06f);
+                    rlRotatef(32.0f, 0.0f, 1.0f, 0.0f);
+                    rlRotatef(18.0f, 1.0f, 0.0f, 0.0f);
+
+                    float r_top = 0.08f;
+                    float r_mid = 0.12f;
+                    float r_bot = 0.09f;
+                    float y_peak = +0.12f;
+                    float y_top  = +0.07f;
+                    float y_mid  =  0.00f;
+                    float y_bot  = -0.08f;
+
+                    Vector3 v_top[8], v_mid[8], v_bot[8];
+                    for (int i = 0; i < 8; ++i) {
+                        float a = (float)i * (2.0f * PI / 8.0f);
+                        float ca = std::cos(a);
+                        float sa = std::sin(a);
+                        v_top[i] = { r_top * ca, y_top, r_top * sa };
+                        v_mid[i] = { r_mid * ca, y_mid, r_mid * sa };
+                        v_bot[i] = { r_bot * ca, y_bot, r_bot * sa };
+                    }
+                    Vector3 v_peak = { 0.0f, y_peak, 0.0f };
+                    Vector3 v_bot_center = { 0.0f, y_bot, 0.0f };
+
+                    auto uvs_top = get_tile_uv(top_tx, top_ty);
+                    auto uvs_mid = get_tile_uv(def_tx, def_ty);
+                    auto uvs_bot = get_tile_uv(bot_tx, bot_ty);
+
+                    rlSetTexture(spritesheet_tiles.id);
+                    
+                    // 1. Corona superior (Triángulos con CCW exacto)
+                    unsigned char c_crown = (unsigned char)(255 * light);
+                    rlBegin(RL_TRIANGLES);
+                        rlColor4ub(c_crown, c_crown, c_crown, 255);
+                        for (int i = 0; i < 8; ++i) {
+                            int next = (i + 1) % 8;
+                            rlTexCoord2f((uvs_top[0].x + uvs_top[1].x)*0.5f, (uvs_top[0].y + uvs_top[2].y)*0.5f);
+                            rlVertex3f(v_peak.x, v_peak.y, v_peak.z);
+
+                            rlTexCoord2f(uvs_top[0].x, uvs_top[0].y);
+                            rlVertex3f(v_top[i].x, v_top[i].y, v_top[i].z);
+
+                            rlTexCoord2f(uvs_top[1].x, uvs_top[1].y);
+                            rlVertex3f(v_top[next].x, v_top[next].y, v_top[next].z);
+                        }
+                    rlEnd();
+
+                    // 2. Pendiente superior (Cuadriláteros biselados CCW)
+                    unsigned char c_us = (unsigned char)(220 * light);
+                    rlBegin(RL_QUADS);
+                        rlColor4ub(c_us, c_us, c_us, 255);
+                        for (int i = 0; i < 8; ++i) {
+                            int next = (i + 1) % 8;
+                            rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(v_top[i].x, v_top[i].y, v_top[i].z);
+                            rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(v_top[next].x, v_top[next].y, v_top[next].z);
+                            rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(v_mid[next].x, v_mid[next].y, v_mid[next].z);
+                            rlTexCoord2f(uvs_mid[0].x, uvs_mid[0].y); rlVertex3f(v_mid[i].x, v_mid[i].y, v_mid[i].z);
+                        }
+                    rlEnd();
+
+                    // 3. Pendiente inferior (Cuadriláteros biselados CCW)
+                    unsigned char c_ls = (unsigned char)(180 * light);
+                    rlBegin(RL_QUADS);
+                        rlColor4ub(c_ls, c_ls, c_ls, 255);
+                        for (int i = 0; i < 8; ++i) {
+                            int next = (i + 1) % 8;
+                            rlTexCoord2f(uvs_bot[3].x, uvs_bot[3].y); rlVertex3f(v_mid[i].x, v_mid[i].y, v_mid[i].z);
+                            rlTexCoord2f(uvs_bot[2].x, uvs_bot[2].y); rlVertex3f(v_mid[next].x, v_mid[next].y, v_mid[next].z);
+                            rlTexCoord2f(uvs_bot[1].x, uvs_bot[1].y); rlVertex3f(v_bot[next].x, v_bot[next].y, v_bot[next].z);
+                            rlTexCoord2f(uvs_bot[0].x, uvs_bot[0].y); rlVertex3f(v_bot[i].x, v_bot[i].y, v_bot[i].z);
+                        }
+                    rlEnd();
+
+                    // 4. Base inferior (Triángulos fan CCW)
+                    unsigned char c_base = (unsigned char)(140 * light);
+                    rlBegin(RL_TRIANGLES);
+                        rlColor4ub(c_base, c_base, c_base, 255);
+                        for (int i = 0; i < 8; ++i) {
+                            int next = (i + 1) % 8;
+                            rlTexCoord2f((uvs_bot[0].x + uvs_bot[1].x)*0.5f, (uvs_bot[0].y + uvs_bot[2].y)*0.5f);
+                            rlVertex3f(v_bot_center.x, v_bot_center.y, v_bot_center.z);
+
+                            rlTexCoord2f(uvs_bot[1].x, uvs_bot[1].y);
+                            rlVertex3f(v_bot[next].x, v_bot[next].y, v_bot[next].z);
+
+                            rlTexCoord2f(uvs_bot[0].x, uvs_bot[0].y);
+                            rlVertex3f(v_bot[i].x, v_bot[i].y, v_bot[i].z);
+                        }
+                    rlEnd();
+
+                    rlSetTexture(0);
+                rlPopMatrix();
+            }
+        }
+
+    rlPopMatrix();
+
+    rlDrawRenderBatchActive();
+    rlEnableDepthMask();
+    rlEnableBackfaceCulling();
+    EndMode3D();
 }
 
 int main() {
@@ -454,72 +969,90 @@ int main() {
                 Chunk* current_chunk = world.get_chunk(cx, cz);
                 
                 if (current_chunk && current_chunk->is_ready) {
-                    float r = 0.25f; // cylinder radius
+                    float r = 0.28f; // Radio horizontal del jugador (ancho 0.56m para paso fluido en puertas de 1.0m)
                     auto is_solid = [&](float x, float y, float z) {
                         uint8_t b = world.get_block(std::floor(x), std::floor(y), std::floor(z));
                         return b != AIR && b != WATER;
                     };
-                auto check_wall = [&](float vx, float vz, float y) {
-                    return is_solid(vx - r, y, vz - r) || is_solid(vx + r, y, vz - r) ||
-                           is_solid(vx - r, y, vz + r) || is_solid(vx + r, y, vz + r);
-                };
+                    auto check_wall = [&](float vx, float vz, float y) {
+                        return is_solid(vx - r, y, vz - r) || is_solid(vx + r, y, vz - r) ||
+                               is_solid(vx - r, y, vz + r) || is_solid(vx + r, y, vz + r) ||
+                               is_solid(vx - r, y, vz)     || is_solid(vx + r, y, vz)     ||
+                               is_solid(vx, y, vz - r)     || is_solid(vx, y, vz + r);
+                    };
 
-                float new_x = camera.position.x;
-                float old_x = old_pos.x;
-                float new_z = camera.position.z;
-                float old_z = old_pos.z;
-                
-                // Horizontal collision (X)
-                float base_y = camera.position.y - 1.4f;
-                float head_y = camera.position.y - 0.2f;
-                if (check_wall(new_x, old_z, base_y) || check_wall(new_x, old_z, head_y)) {
-                    if (!check_wall(new_x, old_z, base_y + 1.05f) && !check_wall(new_x, old_z, head_y + 1.05f)) {
-                        camera.position.y += 1.05f; // Auto-step
-                        smooth_step_offset -= 1.05f;
-                    } else {
+                    float eye_y = camera.position.y;
+                    float feet_y = eye_y - Config::PLAYER_EYE_HEIGHT + 0.08f;
+                    float waist_y = eye_y - 0.80f;
+                    float head_y = eye_y + Config::PLAYER_HEAD_OFFSET - 0.06f;
+
+                    float new_x = camera.position.x;
+                    float old_x = old_pos.x;
+                    float new_z = camera.position.z;
+                    float old_z = old_pos.z;
+                    
+                    // Colisión horizontal (X): Separar choque con pared de escalones
+                    bool blocked_x_wall = check_wall(new_x, old_z, waist_y) || check_wall(new_x, old_z, head_y);
+                    if (blocked_x_wall) {
                         camera.position.x = old_x;
                         new_x = old_x;
+                    } else if (check_wall(new_x, old_z, feet_y)) {
+                        // Solo los pies chocan: intentar auto-step
+                        if (!check_wall(new_x, old_z, feet_y + 1.05f) &&
+                            !check_wall(new_x, old_z, waist_y + 1.05f) &&
+                            !check_wall(new_x, old_z, head_y + 1.05f)) {
+                            camera.position.y += 1.05f;
+                            smooth_step_offset -= 1.05f;
+                        } else {
+                            camera.position.x = old_x;
+                            new_x = old_x;
+                        }
                     }
-                }
-                
-                // Horizontal collision (Z)
-                base_y = camera.position.y - 1.4f; 
-                head_y = camera.position.y - 0.2f;
-                if (check_wall(new_x, new_z, base_y) || check_wall(new_x, new_z, head_y)) {
-                    if (!check_wall(new_x, new_z, base_y + 1.05f) && !check_wall(new_x, new_z, head_y + 1.05f)) {
-                        camera.position.y += 1.05f; // Auto-step
-                        smooth_step_offset -= 1.05f;
-                    } else {
+                    
+                    // Colisión horizontal (Z): Separar choque con pared de escalones
+                    bool blocked_z_wall = check_wall(new_x, new_z, waist_y) || check_wall(new_x, new_z, head_y);
+                    if (blocked_z_wall) {
                         camera.position.z = old_z;
+                    } else if (check_wall(new_x, new_z, feet_y)) {
+                        // Solo los pies chocan: intentar auto-step
+                        if (!check_wall(new_x, new_z, feet_y + 1.05f) &&
+                            !check_wall(new_x, new_z, waist_y + 1.05f) &&
+                            !check_wall(new_x, new_z, head_y + 1.05f)) {
+                            camera.position.y += 1.05f;
+                            smooth_step_offset -= 1.05f;
+                        } else {
+                            camera.position.z = old_z;
+                        }
                     }
-                }
-                
-                // Vertical collision (Y)
-                player_vel_y -= 30.0f * GetFrameTime();
-                camera.position.y += player_vel_y * GetFrameTime();
-                
-                // Ceiling collision
-                if (player_vel_y > 0 && check_wall(camera.position.x, camera.position.z, camera.position.y + 0.2f)) {
-                    camera.position.y = std::floor(camera.position.y + 0.2f) - 0.21f;
-                    player_vel_y = 0.0f;
-                }
-                
-                // Floor collision
-                is_grounded = false;
-                if (player_vel_y <= 0 && check_wall(camera.position.x, camera.position.z, camera.position.y - 1.5f)) {
-                    camera.position.y = std::floor(camera.position.y - 1.5f) + 1.0f + 1.5f;
-                    player_vel_y = 0.0f;
-                    is_grounded = true;
-                }
-                
-                if (is_grounded && IsKeyPressed(KEY_SPACE)) {
-                    player_vel_y = 11.0f;
-                }
-                
-                if (camera.position.y < -20.0f) {
-                    camera.position.y = 80.0f;
-                    player_vel_y = 0.0f;
-                }
+                    
+                    // Colisión vertical (Y)
+                    player_vel_y -= 30.0f * GetFrameTime();
+                    camera.position.y += player_vel_y * GetFrameTime();
+                    
+                    // Techo (Head top: eye + PLAYER_HEAD_OFFSET)
+                    float head_top = camera.position.y + Config::PLAYER_HEAD_OFFSET;
+                    if (player_vel_y > 0 && check_wall(camera.position.x, camera.position.z, head_top)) {
+                        camera.position.y = std::floor(head_top) - Config::PLAYER_HEAD_OFFSET - 0.01f;
+                        player_vel_y = 0.0f;
+                    }
+                    
+                    // Suelo (Feet bottom: eye - PLAYER_EYE_HEIGHT)
+                    is_grounded = false;
+                    float feet_bottom = camera.position.y - Config::PLAYER_EYE_HEIGHT;
+                    if (player_vel_y <= 0 && check_wall(camera.position.x, camera.position.z, feet_bottom - 0.02f)) {
+                        camera.position.y = std::floor(feet_bottom - 0.02f) + 1.0f + Config::PLAYER_EYE_HEIGHT;
+                        player_vel_y = 0.0f;
+                        is_grounded = true;
+                    }
+                    
+                    if (is_grounded && IsKeyPressed(KEY_SPACE)) {
+                        player_vel_y = 10.5f;
+                    }
+                    
+                    if (camera.position.y < -20.0f) {
+                        camera.position.y = 80.0f;
+                        player_vel_y = 0.0f;
+                    }
                 } // End physics pause if chunk is loading
                 
                 // Compensate camera.target so the view pitch/yaw doesn't get messed up by physical displacements (gravity/collisions)
@@ -1279,6 +1812,11 @@ int main() {
             EndMode3D();
         }
 
+        // === PRIMERA PERSONA: MANO Y OBJETO EN MANO (VIEWMODEL 3D) ===
+        if (!spectator_mode && !ui.is_open && !chat.is_open) {
+            DrawFirstPersonViewmodel(ui, spritesheet, spritesheet_items, light_intensity, is_mining, mining_progress, is_grounded, GetFrameTime());
+        }
+
         int cam_x = std::floor(camera.position.x);
         int cam_y = std::floor(camera.position.y);
         int cam_z = std::floor(camera.position.z);
@@ -1340,11 +1878,12 @@ int main() {
             else if (norm_time >= 3.92f && norm_time < 5.49f) time_str = "Noche";
             else time_str = "Amanecer";
             
+            int feet_y = (int)std::floor(camera.position.y - Config::PLAYER_EYE_HEIGHT);
             std::vector<std::pair<std::string, Color>> lines;
             lines.push_back({ TextFormat("SmoothVoxelEngine C++ | %d FPS", fps), fps_color });
             lines.push_back({ TextFormat("XYZ: %.2f / %.2f / %.2f", camera.position.x, camera.position.y, camera.position.z), WHITE });
-            lines.push_back({ TextFormat("Bloque: %d, %d, %d", cam_x, cam_y, cam_z), Color{220, 225, 235, 255} });
-            lines.push_back({ TextFormat("Chunk: %d, %d  [En chunk: %d, %d, %d]", p_cx, p_cz, in_cx, cam_y, in_cz), Color{220, 225, 235, 255} });
+            lines.push_back({ TextFormat("Bloque: %d, %d, %d", cam_x, feet_y, cam_z), Color{220, 225, 235, 255} });
+            lines.push_back({ TextFormat("Chunk: %d, %d  [En chunk: %d, %d, %d]", p_cx, p_cz, in_cx, feet_y, in_cz), Color{220, 225, 235, 255} });
             lines.push_back({ TextFormat("Orientacion: %s", facing), Color{200, 215, 235, 255} });
             lines.push_back({ TextFormat("Bioma: %s", biome_name), Color{140, 230, 160, 255} });
             

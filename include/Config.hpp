@@ -23,6 +23,12 @@ namespace Config {
 
     constexpr float WATER_LEVEL = 38.0f;
 
+    // ===================== JUGADOR (Dimensiones estilo Minecraft) =====================
+    constexpr float PLAYER_HEIGHT = 1.8f;
+    constexpr float PLAYER_EYE_HEIGHT = 1.62f;
+    constexpr float PLAYER_HEAD_OFFSET = PLAYER_HEIGHT - PLAYER_EYE_HEIGHT; // 0.18f
+    constexpr float PLAYER_RADIUS = 0.30f;
+
     // ===================== ITEMS (no bloque) =====================
 
     enum ItemID : uint8_t {
@@ -129,6 +135,7 @@ namespace Config {
         int tex_bottom_x = -1, tex_bottom_y = -1;
         int tex_front_x = -1, tex_front_y = -1;
         int tex_latch_x = -1, tex_latch_y = -1; // Para el pomo/cerrojo del cofre
+        int tex_icon_x = -1, tex_icon_y = -1;   // Portada / Icono de inventario (si es -1, usa fallback)
     };
 
     struct VoxelData {
@@ -171,9 +178,9 @@ namespace Config {
         {STAIRS_STONE,   {"Escalera de Piedra", 4,  7, false, false, STAIRS_STONE,false, TOOL_PICKAXE, 255, 0, 1.8f, SHAPE_STAIRS}},
         {FENCE_WOOD,     {"Valla de Madera",    0,  8, false, false, FENCE_WOOD,  false, TOOL_AXE,  255,  0,  1.0f, SHAPE_FENCE}},
         {DOOR_WOOD,      {"Puerta de Madera",   0,  8, false, false, DOOR_WOOD,   false, TOOL_AXE,  255,  0,  1.5f, SHAPE_DOOR, 0, 8, 0, 8, 0, 8}},
-        {CHEST,          {"Cofre",              1,  9, false, false, CHEST,       false, TOOL_AXE,  255,  0,  1.5f, SHAPE_CHEST, -1, -1, -1, -1, -1, -1, 0, 8}},
-        {FURNACE,        {"Horno",              3,  5, false, false, FURNACE,     false, TOOL_PICKAXE, 255, 0, 2.0f, SHAPE_FURNACE, 3, 5, 3, 5, 4, 5}},
-        {CRAFTING_TABLE, {"Mesa de Crafteo",    0,  8, false, false, CRAFTING_TABLE,false,TOOL_AXE, 255,  0,  1.5f, SHAPE_CRAFTING_TABLE, 1, 2, 0, 8, 0, 8}},
+        {CHEST,          {"Cofre",              1,  9, false, false, CHEST,       false, TOOL_AXE,  255,  0,  1.5f, SHAPE_CHEST, -1, -1, -1, -1, -1, -1, 0, 8, 1, 9}},
+        {FURNACE,        {"Horno",              3,  5, false, false, FURNACE,     false, TOOL_PICKAXE, 255, 0, 2.0f, SHAPE_FURNACE, 3, 5, 3, 5, 4, 5, -1, -1, 4, 5}},
+        {CRAFTING_TABLE, {"Mesa de Crafteo",    0,  8, false, false, CRAFTING_TABLE,false,TOOL_AXE, 255,  0,  1.5f, SHAPE_CRAFTING_TABLE, 1, 2, 0, 8, 0, 8, -1, -1, 1, 2}},
         {GLASS,          {"Vidrio",             5,  6, true,  false, 255,         false, TOOL_PICKAXE, 255, 0, 0.3f, SHAPE_GLASS}},
     };
 

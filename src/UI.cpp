@@ -671,10 +671,22 @@ void UI::craft(int recipe_index, int times) {
 void UI::draw_block_icon(uint8_t block_id, int x, int y, int size) {
     if (BLOCKS.find(block_id) == BLOCKS.end()) return;
     auto b = BLOCKS.at(block_id);
+    int tx = b.tex_x;
+    int ty = b.tex_y;
+    if (b.tex_icon_x >= 0 && b.tex_icon_y >= 0) {
+        tx = b.tex_icon_x;
+        ty = b.tex_icon_y;
+    } else if (b.tex_front_x >= 0 && b.tex_front_y >= 0) {
+        tx = b.tex_front_x;
+        ty = b.tex_front_y;
+    } else if (b.shape == SHAPE_CRAFTING_TABLE && b.tex_top_x >= 0 && b.tex_top_y >= 0) {
+        tx = b.tex_top_x;
+        ty = b.tex_top_y;
+    }
     float tex_w = spritesheet.width / 9.0f;
     float tex_h = spritesheet.height / 10.0f;
-    float correct_y = 10.0f - 1.0f - b.tex_y;
-    Rectangle src = { b.tex_x * tex_w, correct_y * tex_h, tex_w, tex_h };
+    float correct_y = 10.0f - 1.0f - ty;
+    Rectangle src = { tx * tex_w, correct_y * tex_h, tex_w, tex_h };
     Rectangle dest = { (float)x, (float)y, (float)size, (float)size };
     DrawTexturePro(spritesheet, src, dest, {0, 0}, 0.0f, WHITE);
 }
