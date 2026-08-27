@@ -975,11 +975,47 @@ int main() {
                 Chunk* current_chunk = world.get_chunk(cx, cz);
                 
                 if (current_chunk && current_chunk->is_ready) {
-                    float r = 0.28f; // Radio horizontal del jugador (ancho 0.56m para paso fluido en puertas de 1.0m)
-                    auto is_solid = [&](float x, float y, float z) {
-                        uint8_t b = world.get_block(std::floor(x + 0.5f), std::floor(y + 0.5f), std::floor(z + 0.5f));
-                        return b != AIR && b != WATER;
+                    float r = 0.28f; // Radio horizontal del jugador
+
+                    // === Interpolación trilineal de la densidad del campo escalar ===
+                    auto sample_density = [&](float x, float y, float z) -> float {
+                        int ix = (int)std::floor(x);
+                        int iy = (int)std::floor(y);
+                        int iz = (int)std::floor(z);
+                        float fx = x - ix;
+                        float fy = y - iy;
+                        float fz = z - iz;
+
+                        float d000 = world.get_density(ix,   iy,   iz);
+                        float d100 = world.get_density(ix+1, iy,   iz);
+                        float d010 = world.get_density(ix,   iy+1, iz);
+                        float d110 = world.get_density(ix+1, iy+1, iz);
+                        float d001 = world.get_density(ix,   iy,   iz+1);
+                        float d101 = world.get_density(ix+1, iy,   iz+1);
+                        float d011 = world.get_density(ix,   iy+1, iz+1);
+                        float d111 = world.get_density(ix+1, iy+1, iz+1);
+
+                        float c00 = d000 * (1.0f - fx) + d100 * fx;
+                        float c10 = d010 * (1.0f - fx) + d110 * fx;
+                        float c01 = d001 * (1.0f - fx) + d101 * fx;
+                        float c11 = d011 * (1.0f - fx) + d111 * fx;
+                        float c0  = c00  * (1.0f - fz) + c01  * fz;
+                        float c1  = c10  * (1.0f - fz) + c11  * fz;
+                        return c0 * (1.0f - fy) + c1 * fy;
                     };
+
+                    // === is_solid: híbrido (densidad para terreno, cúbico para construcción) ===
+                    auto is_solid = [&](float x, float y, float z) -> bool {
+                        int bx = (int)std::floor(x + 0.5f);
+                        int by = (int)std::floor(y + 0.5f);
+                        int bz = (int)std::floor(z + 0.5f);
+                        uint8_t b = world.get_block(bx, by, bz);
+                        if (b != AIR && b != WATER && BLOCKS.count(b) && BLOCKS.at(b).shape != Config::SHAPE_TERRAIN) {
+                            return true; // Colisión cúbica para bloques de construcción
+                        }
+                        return sample_density(x, y, z) >= Config::ISO_SURFACE;
+                    };
+
                     auto check_wall = [&](float vx, float vz, float y) {
                         return is_solid(vx - r, y, vz - r) || is_solid(vx + r, y, vz - r) ||
                                is_solid(vx - r, y, vz + r) || is_solid(vx + r, y, vz + r) ||
@@ -987,9 +1023,69 @@ int main() {
                                is_solid(vx, y, vz - r)     || is_solid(vx, y, vz + r);
                     };
 
+                    // === Escaneo robusto de superficie del terreno para deslizamiento suave ===
+                    auto get_surface_height = [&](float px, float pz, float ref_feet_y) -> float {
+                        float ground_y = -999.0f;
+                        float scan_top = ref_feet_y + 0.60f;
+                        float scan_bot = ref_feet_y - 0.80f;
+                        
+                        float prev_y = scan_bot;
+                        float prev_d = sample_density(px, prev_y, pz);
+                        
+                        for (float y = scan_bot + 0.15f; y <= scan_top + 0.05f; y += 0.15f) {
+                            float d = sample_density(px, y, pz);
+                            if (prev_d >= Config::ISO_SURFACE && d < Config::ISO_SURFACE) {
+                                float lo = prev_y;
+                                float hi = y;
+                                for (int i = 0; i < 8; i++) {
+                                    float mid = (lo + hi) * 0.5f;
+                                    if (sample_density(px, mid, pz) >= Config::ISO_SURFACE) lo = mid;
+                                    else hi = mid;
+                                }
+                                ground_y = (lo + hi) * 0.5f;
+                                break;
+                            }
+                            prev_y = y;
+                            prev_d = d;
+                        }
+                        
+                        if (ground_y < -900.0f) {
+                            float d_bot = sample_density(px, scan_bot, pz);
+                            float d_top = sample_density(px, scan_top, pz);
+                            if (d_bot >= Config::ISO_SURFACE && d_top < Config::ISO_SURFACE) {
+                                float lo = scan_bot;
+                                float hi = scan_top;
+                                for (int i = 0; i < 10; i++) {
+                                    float mid = (lo + hi) * 0.5f;
+                                    if (sample_density(px, mid, pz) >= Config::ISO_SURFACE) lo = mid;
+                                    else hi = mid;
+                                }
+                                ground_y = (lo + hi) * 0.5f;
+                            }
+                        }
+                        
+                        // Bloques de construcción
+                        int bx = (int)std::floor(px + 0.5f);
+                        int bz = (int)std::floor(pz + 0.5f);
+                        for (int dy = -1; dy <= 1; dy++) {
+                            int by = (int)std::floor(ref_feet_y + 0.5f) + dy;
+                            uint8_t b = world.get_block(bx, by, bz);
+                            if (b != AIR && b != WATER && BLOCKS.count(b) && BLOCKS.at(b).shape != Config::SHAPE_TERRAIN) {
+                                float block_top = (float)by + 0.5f;
+                                if (block_top > ground_y && block_top <= ref_feet_y + 0.60f) {
+                                    ground_y = block_top;
+                                }
+                            }
+                        }
+                        
+                        return ground_y;
+                    };
+
                     float eye_y = camera.position.y;
-                    float feet_y = eye_y - Config::PLAYER_EYE_HEIGHT + 0.08f;
-                    float waist_y = eye_y - 0.80f;
+                    float feet_bottom = eye_y - Config::PLAYER_EYE_HEIGHT;
+                    float step_height = 0.50f; // Altura máxima que el jugador puede subir suavemente
+                    float feet_test_y = feet_bottom + step_height; // Evaluar paredes solo por encima del escalón
+                    float waist_y = eye_y - 0.75f;
                     float head_y = eye_y + Config::PLAYER_HEAD_OFFSET - 0.06f;
 
                     float new_x = camera.position.x;
@@ -997,60 +1093,51 @@ int main() {
                     float new_z = camera.position.z;
                     float old_z = old_pos.z;
                     
-                    // Colisión horizontal (X): Separar choque con pared de escalones
-                    bool blocked_x_wall = check_wall(new_x, old_z, waist_y) || check_wall(new_x, old_z, head_y);
-                    if (blocked_x_wall) {
+                    // Colisión horizontal (X) con deslizamiento sobre paredes
+                    bool blocked_x = check_wall(new_x, old_z, feet_test_y) || check_wall(new_x, old_z, waist_y) || check_wall(new_x, old_z, head_y);
+                    if (blocked_x) {
                         camera.position.x = old_x;
                         new_x = old_x;
-                    } else if (check_wall(new_x, old_z, feet_y)) {
-                        // Solo los pies chocan: intentar auto-step
-                        if (!check_wall(new_x, old_z, feet_y + 1.05f) &&
-                            !check_wall(new_x, old_z, waist_y + 1.05f) &&
-                            !check_wall(new_x, old_z, head_y + 1.05f)) {
-                            camera.position.y += 1.05f;
-                            smooth_step_offset -= 1.05f;
-                        } else {
-                            camera.position.x = old_x;
-                            new_x = old_x;
-                        }
                     }
                     
-                    // Colisión horizontal (Z): Separar choque con pared de escalones
-                    bool blocked_z_wall = check_wall(new_x, new_z, waist_y) || check_wall(new_x, new_z, head_y);
-                    if (blocked_z_wall) {
+                    // Colisión horizontal (Z) con deslizamiento sobre paredes
+                    bool blocked_z = check_wall(new_x, new_z, feet_test_y) || check_wall(new_x, new_z, waist_y) || check_wall(new_x, new_z, head_y);
+                    if (blocked_z) {
                         camera.position.z = old_z;
-                    } else if (check_wall(new_x, new_z, feet_y)) {
-                        // Solo los pies chocan: intentar auto-step
-                        if (!check_wall(new_x, new_z, feet_y + 1.05f) &&
-                            !check_wall(new_x, new_z, waist_y + 1.05f) &&
-                            !check_wall(new_x, new_z, head_y + 1.05f)) {
-                            camera.position.y += 1.05f;
-                            smooth_step_offset -= 1.05f;
-                        } else {
-                            camera.position.z = old_z;
-                        }
                     }
                     
                     // Colisión vertical (Y)
-                    player_vel_y -= 30.0f * GetFrameTime();
-                    camera.position.y += player_vel_y * GetFrameTime();
+                    float dt = GetFrameTime();
+                    player_vel_y -= 30.0f * dt;
+                    camera.position.y += player_vel_y * dt;
                     
-                    // Techo (Head top: eye + PLAYER_HEAD_OFFSET)
+                    // Techo
                     float head_top = camera.position.y + Config::PLAYER_HEAD_OFFSET;
                     if (player_vel_y > 0 && check_wall(camera.position.x, camera.position.z, head_top)) {
-                        float ceil_y = std::floor(head_top + 0.5f) - 0.5f;
-                        camera.position.y = ceil_y - Config::PLAYER_HEAD_OFFSET - 0.01f;
+                        camera.position.y = old_pos.y;
                         player_vel_y = 0.0f;
                     }
                     
-                    // Suelo (Feet bottom: eye - PLAYER_EYE_HEIGHT)
+                    // Suelo y escalado suave
                     is_grounded = false;
-                    float feet_bottom = camera.position.y - Config::PLAYER_EYE_HEIGHT;
-                    if (player_vel_y <= 0 && check_wall(camera.position.x, camera.position.z, feet_bottom - 0.02f)) {
-                        float ground_y = std::floor(feet_bottom - 0.02f + 0.5f) + 0.5f;
-                        camera.position.y = ground_y + Config::PLAYER_EYE_HEIGHT;
-                        player_vel_y = 0.0f;
-                        is_grounded = true;
+                    feet_bottom = camera.position.y - Config::PLAYER_EYE_HEIGHT;
+                    float ground_y = get_surface_height(camera.position.x, camera.position.z, feet_bottom);
+
+                    if (ground_y > -900.0f && player_vel_y <= 0.0f) {
+                        float diff = ground_y - feet_bottom;
+                        // Si está a nivel de suelo, subiendo rampa o sobre pequeño obstáculo
+                        if (diff >= -0.25f && diff <= step_height) {
+                            float target_cam_y = ground_y + Config::PLAYER_EYE_HEIGHT;
+                            float dy = target_cam_y - camera.position.y;
+                            
+                            camera.position.y = target_cam_y;
+                            if (dy > 0.02f) {
+                                // Deslizamiento visual suave: absorbe el desnivel para que la cámara no salte
+                                smooth_step_offset -= dy;
+                            }
+                            player_vel_y = 0.0f;
+                            is_grounded = true;
+                        }
                     }
                     
                     if (is_grounded && IsKeyPressed(KEY_SPACE)) {
