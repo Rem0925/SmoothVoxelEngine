@@ -1,5 +1,6 @@
 #include "World.hpp"
 #include "UI.hpp"
+#include "ItemDrop.hpp"
 #include <cmath>
 
 sqlite3* db = nullptr;
@@ -483,7 +484,7 @@ float World::get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea
     return base_hardness + extra_hardness;
 }
 
-int World::flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, UI* ui) {
+int World::flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, ItemDropManager* item_drops) {
     // Aplana el terreno tomando wy como piso plano de referencia.
     // 1. Desbasta y recolecta las elevaciones por encima de wy hasta area.max_h.
     // 2. Nivela la base en wy a una superficie 100% plana con su bloque natural SOLO si ya es sólida.
@@ -506,12 +507,14 @@ int World::flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int t
                         continue;
                     }
                     
-                    if (ui && bt.drop_id != 255) {
-                        if (bt.drop_is_item) {
-                            ui->add_item(bt.drop_id);
-                        } else {
-                            ui->add_resource(bt.drop_id);
-                        }
+                    if (item_drops && bt.drop_id != 255) {
+                        Vector3 drop_pos = { (float)bx + 0.5f, (float)by + 0.5f, (float)bz + 0.5f };
+                        Vector3 drop_vel = {
+                            ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f,
+                            2.5f + (float)(rand() % 50) / 100.0f,
+                            ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f
+                        };
+                        item_drops->spawn(drop_pos, bt.drop_id, bt.drop_is_item, 1, drop_vel, 0.1f);
                     }
                     set_block(bx, by, bz, AIR);
                     broken_count++;

@@ -386,7 +386,7 @@ void UI::update() {
 
 // ===================== HERRAMIENTAS =====================
 
-void UI::add_tool(ToolType type, ToolTier tier) {
+void UI::add_tool(ToolType type, ToolTier tier, int durability) {
     const ToolInfo* info = nullptr;
     for (auto& t : TOOLS) {
         if (t.type == type && t.tier == tier) {
@@ -400,8 +400,8 @@ void UI::add_tool(ToolType type, ToolTier tier) {
     ToolSlot ts;
     ts.type = type;
     ts.tier = tier;
-    ts.durability_current = info->durability;
     ts.durability_max = info->durability;
+    ts.durability_current = (durability > 0) ? std::min(durability, info->durability) : info->durability;
     ts.active = false;
     tool_inventory.push_back(ts);
 

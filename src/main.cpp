@@ -16,9 +16,9 @@
 #include <filesystem>
 #include <fstream>
 #include <cstdio>
-#include <climits>
 #include <sqlite3.h>
 #include "DatabaseIO.hpp"
+#include "ItemDrop.hpp"
 
 using namespace Config;
 
@@ -824,6 +824,7 @@ int main() {
     World world(mat_solid, mat_plants, mat_water);
     UI ui(spritesheet, spritesheet_items);
     Chat chat;
+    ItemDropManager item_drops;
     
     std::string world_name = "world1";
     std::string save_dir = "worlds/" + world_name;
@@ -969,6 +970,30 @@ int main() {
         }
 
         if (!ui.is_open && !chat.is_open) {
+            if (IsKeyPressed(KEY_Q)) {
+                Vector3 forward_dir = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
+                Vector3 throw_pos = Vector3Add(camera.position, Vector3Scale(forward_dir, 0.6f));
+                Vector3 throw_vel = Vector3Add(Vector3Scale(forward_dir, 5.0f), Vector3{ 0.0f, 2.0f, 0.0f });
+
+                if (ui.selected_slot == 0) {
+                    ToolSlot* tool = ui.get_active_tool();
+                    if (tool && tool->durability_current > 0) {
+                        item_drops.spawn_tool(throw_pos, tool->type, tool->tier, tool->durability_current, throw_vel, 0.8f);
+                        ui.remove_active_tool();
+                    }
+                } else if (ui.selected_slot > 0 && ui.selected_slot < (int)ui.slots.size()) {
+                    if (ui.slots[ui.selected_slot].count > 0 && ui.slots[ui.selected_slot].id != Config::AIR) {
+                        uint8_t drop_id = ui.slots[ui.selected_slot].id;
+                        ui.slots[ui.selected_slot].count--;
+                        if (ui.slots[ui.selected_slot].count <= 0) {
+                            ui.slots[ui.selected_slot].id = Config::AIR;
+                            ui.slots[ui.selected_slot].name = "";
+                        }
+                        item_drops.spawn(throw_pos, drop_id, false, 1, throw_vel, 0.8f);
+                    }
+                }
+            }
+
             Vector3 old_pos = camera.position;
             float dt_cam = GetFrameTime();
             Vector2 mouse_delta = GetMouseDelta();
@@ -1201,7 +1226,7 @@ int main() {
             }
 
             Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-            ray_hit_valid = VoxelRaycastSmooth(world, camera.position, forward, 15.0f, hit, target_solid, target_empty);
+            ray_hit_valid = VoxelRaycastSmooth(world, camera.position, forward, 4.5f, hit, target_solid, target_empty);
             if (ray_hit_valid) {
                 // === SLOT 0: HERRAMIENTAS ===
                 if (ui.selected_slot == 0) {
@@ -1276,17 +1301,19 @@ int main() {
                             
                                 if (mining_progress >= 1.0f) {
                                     if (tool && tool->type == TOOL_HAMMER) {
-                                        int broken = world.flatten_terrain((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier, &ui);
+                                        int broken = world.flatten_terrain((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier, &item_drops);
                                         int uses = std::max(1, broken);
                                         tool->durability_current -= uses;
                                         if (tool->durability_current <= 0) ui.remove_active_tool();
                                     } else {
                                         if (bt.drop_id != 255) {
-                                            if (bt.drop_is_item) {
-                                                ui.add_item(bt.drop_id);
-                                            } else {
-                                                ui.add_resource(bt.drop_id);
-                                            }
+                                            Vector3 drop_pos = { (float)mining_block.x + 0.5f, (float)mining_block.y + 0.5f, (float)mining_block.z + 0.5f };
+                                            Vector3 drop_vel = {
+                                                ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f,
+                                                2.5f + (float)(rand() % 50) / 100.0f,
+                                                ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f
+                                            };
+                                            item_drops.spawn(drop_pos, bt.drop_id, bt.drop_is_item, 1, drop_vel, 0.1f);
                                         }
                                         world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
                                         if (tool) {
@@ -1436,6 +1463,7 @@ int main() {
         
         CommandHandler::process(chat, day_time, camera, spectator_mode, player_vel_y, ui, show_chunks);
         world.update(camera.position);
+        item_drops.update(GetFrameTime(), world, camera.position, ui);
 
         float shaderTime = GetTime();
         SetShaderValue(world.mat_solid.shader, timeLocSolid, &shaderTime, SHADER_UNIFORM_FLOAT);
@@ -1619,6 +1647,7 @@ int main() {
         rlEnableDepthMask();
 
         world.draw(camera);
+        item_drops.draw(spritesheet, spritesheet_items, light_intensity);
         
         // Minecraft-style Chunk Boundaries (F3+G)
         if (show_chunks) {

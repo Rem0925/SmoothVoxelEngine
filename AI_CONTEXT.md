@@ -57,7 +57,16 @@ El sistema de colisiones del jugador resuelve el contacto directo con la isosupe
 
 ---
 
-### 4. Control de Cámara y Primera Persona (`main.cpp`)
+### 4. Sistema de Ítems Flotantes en el Mundo (`ItemDrop.hpp/cpp`)
+*   **Físicas de Drops y Apilado:**
+    *   Al minar con pico/mano o desbastar con el martillo (`flatten_terrain`), o soltar con la tecla **`Q`**, los bloques, ítems y herramientas se generan como entidades 3D en el mundo con impulso y gravedad.
+    *   **Fusión Dinámica (Stacking):** Drops cercanos (< 1.2m) del mismo tipo se atraen y combinan en una sola entidad acumulativa.
+    *   **Magnetismo:** Al acercarse a < 2.5m, los drops son atraídos flotando hacia el jugador y se recolectan automáticamente al contacto (< 0.6m), preservando la durabilidad en caso de herramientas.
+    *   **Modelos 3D idénticos:** Los bloques naturales flotan como rocas facetadas de 8 caras, los bloques de construcción como modelos mini compuestos (cofres, antorchas, etc.) y los ítems/herramientas como quads 3D con textura.
+
+---
+
+### 5. Control de Cámara y Primera Persona (`main.cpp`)
 *   **Desacople con `UpdateCameraPro`:** Se eliminó la captura rígida por defecto de Raylib (`CAMERA_FIRST_PERSON`) para liberar las teclas **`Q`** y **`E`** (evitando rotaciones y ladeos involuntarios de la cámara).
 *   **Controles:**
     *   **Ratón:** Rotación pura de Yaw y Pitch con sensibilidad balanceada (`0.15f`) y bloqueo de Roll.

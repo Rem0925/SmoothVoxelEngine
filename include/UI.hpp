@@ -52,7 +52,7 @@ public:
     void select_slot(int index);
 
     // Herramientas
-    void add_tool(Config::ToolType type, Config::ToolTier tier);
+    void add_tool(Config::ToolType type, Config::ToolTier tier, int durability = -1);
     void remove_active_tool();
     ToolSlot* get_active_tool();
     void cycle_tool(int direction);     // rueda del mouse en slot 0

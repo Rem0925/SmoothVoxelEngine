@@ -38,6 +38,7 @@ set(SOURCES
     src/CommandHandler.cpp
     src/Chunk.cpp
     src/DatabaseIO.cpp
+    src/ItemDrop.cpp
     src/MarchingCubes.cpp
     src/Noise.cpp
     src/UI.cpp
