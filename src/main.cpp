@@ -593,24 +593,28 @@ void DrawFirstPersonViewmodel(
                     rlRotatef(22.0f, 1.0f, 0.0f, 0.0f);
                     rlRotatef(-10.0f, 0.0f, 0.0f, 1.0f);
 
-                    float cs = 0.11f;
+                    float scale = 0.72f; // Aumentado un 20% (0.60 * 1.20)
                     if (bt.shape == Config::SHAPE_TORCH) {
+                        float cs = 0.11f;
                         draw_tex_box(-0.02f, -0.14f, -0.02f, 0.02f, 0.14f, 0.02f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                     } else if (bt.shape == Config::SHAPE_STAIRS) {
+                        float cs = 0.06f * scale;
                         draw_tex_box(-cs, -cs, -cs, cs, 0.0f, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                         draw_tex_box(-cs, 0.0f, 0.0f, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                     } else if (bt.shape == Config::SHAPE_CHEST) {
-                        draw_tex_box(-cs, -cs, -cs, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                        float cs = 0.07f * scale;
                         int latch_tx = bt.tex_latch_x >= 0 ? bt.tex_latch_x : 2;
                         int latch_ty = bt.tex_latch_y >= 0 ? bt.tex_latch_y : 3;
-                        draw_tex_box(-0.02f, -0.02f, cs, 0.02f, 0.04f, cs + 0.02f, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                        draw_tex_box(-0.02f*scale, -0.02f*scale, cs, 0.02f*scale, 0.04f*scale, cs + 0.02f*scale, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                        draw_tex_box(-cs, -cs, -cs, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                     } else {
+                        float cs = 0.08f * scale;
                         draw_tex_box(-cs, -cs, -cs, cs, cs, cs, top_tx, top_ty, bot_tx, bot_ty, front_tx, front_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
                     }
                 rlPopMatrix();
             }
             else {
-                // === BLOQUE NATURAL: TERRÓN / ROCA ORGÁNICA FACETADA POLIGONAL ===
+                // === BLOQUE NATURAL: ROCA FACETADA 8 LADOS ===
                 int def_tx = bt.tex_x, def_ty = bt.tex_y;
                 int top_tx = (bt.tex_top_x >= 0) ? bt.tex_top_x : def_tx;
                 int top_ty = (bt.tex_top_y >= 0) ? bt.tex_top_y : def_ty;
@@ -620,7 +624,7 @@ void DrawFirstPersonViewmodel(
                 if (held_block == Config::GRASS) {
                     top_tx = 6; top_ty = 8;
                     def_tx = 6; def_ty = 8;
-                    bot_tx = 7; bot_ty = 4; // Tierra en base
+                    bot_tx = 7; bot_ty = 4;
                 }
 
                 rlPushMatrix();
@@ -628,92 +632,94 @@ void DrawFirstPersonViewmodel(
                     rlRotatef(32.0f, 0.0f, 1.0f, 0.0f);
                     rlRotatef(18.0f, 1.0f, 0.0f, 0.0f);
 
-                    float r_top = 0.08f;
-                    float r_mid = 0.12f;
-                    float r_bot = 0.09f;
-                    float y_peak = +0.12f;
-                    float y_top  = +0.07f;
+                    float n_scale = 1.20f; // Aumentado un 20%
+                    float r_top = 0.04f * n_scale;
+                    float r_mid = 0.06f * n_scale;
+                    float r_bot = 0.045f * n_scale;
+                    float y_peak = +0.06f * n_scale;
+                    float y_top  = +0.035f * n_scale;
                     float y_mid  =  0.00f;
-                    float y_bot  = -0.08f;
-
-                    Vector3 v_top[8], v_mid[8], v_bot[8];
-                    for (int i = 0; i < 8; ++i) {
-                        float a = (float)i * (2.0f * PI / 8.0f);
-                        float ca = std::cos(a);
-                        float sa = std::sin(a);
-                        v_top[i] = { r_top * ca, y_top, r_top * sa };
-                        v_mid[i] = { r_mid * ca, y_mid, r_mid * sa };
-                        v_bot[i] = { r_bot * ca, y_bot, r_bot * sa };
-                    }
-                    Vector3 v_peak = { 0.0f, y_peak, 0.0f };
-                    Vector3 v_bot_center = { 0.0f, y_bot, 0.0f };
-
+                    float y_bot  = -0.04f * n_scale;
+                    
                     auto uvs_top = get_tile_uv(top_tx, top_ty);
                     auto uvs_mid = get_tile_uv(def_tx, def_ty);
                     auto uvs_bot = get_tile_uv(bot_tx, bot_ty);
 
+                    unsigned char c_t = (unsigned char)(255 * light);
+                    unsigned char c_s = (unsigned char)(200 * light);
+                    unsigned char c_ls = (unsigned char)(160 * light);
+                    unsigned char c_b = (unsigned char)(120 * light);
+
                     rlSetTexture(spritesheet_tiles.id);
-                    
-                    // 1. Corona superior (Triángulos con CCW exacto)
-                    unsigned char c_crown = (unsigned char)(255 * light);
-                    rlBegin(RL_TRIANGLES);
-                        rlColor4ub(c_crown, c_crown, c_crown, 255);
-                        for (int i = 0; i < 8; ++i) {
-                            int next = (i + 1) % 8;
-                            rlTexCoord2f((uvs_top[0].x + uvs_top[1].x)*0.5f, (uvs_top[0].y + uvs_top[2].y)*0.5f);
-                            rlVertex3f(v_peak.x, v_peak.y, v_peak.z);
-
-                            rlTexCoord2f(uvs_top[0].x, uvs_top[0].y);
-                            rlVertex3f(v_top[i].x, v_top[i].y, v_top[i].z);
-
-                            rlTexCoord2f(uvs_top[1].x, uvs_top[1].y);
-                            rlVertex3f(v_top[next].x, v_top[next].y, v_top[next].z);
-                        }
-                    rlEnd();
-
-                    // 2. Pendiente superior (Cuadriláteros biselados CCW)
-                    unsigned char c_us = (unsigned char)(220 * light);
                     rlBegin(RL_QUADS);
-                        rlColor4ub(c_us, c_us, c_us, 255);
-                        for (int i = 0; i < 8; ++i) {
-                            int next = (i + 1) % 8;
-                            rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(v_top[i].x, v_top[i].y, v_top[i].z);
-                            rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(v_top[next].x, v_top[next].y, v_top[next].z);
-                            rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(v_mid[next].x, v_mid[next].y, v_mid[next].z);
-                            rlTexCoord2f(uvs_mid[0].x, uvs_mid[0].y); rlVertex3f(v_mid[i].x, v_mid[i].y, v_mid[i].z);
-                        }
-                    rlEnd();
 
-                    // 3. Pendiente inferior (Cuadriláteros biselados CCW)
-                    unsigned char c_ls = (unsigned char)(180 * light);
-                    rlBegin(RL_QUADS);
+                    // 1. Tapa Superior (Apex -> Apex -> Top-1 -> Top-0)
+                    for(int i=0; i<8; i++) {
+                        int next = (i+1)%8;
+                        float a0 = i * (PI / 4.0f);
+                        float a1 = next * (PI / 4.0f);
+                        
+                        float u_cen_top = (uvs_top[0].x + uvs_top[1].x) * 0.5f;
+                        float v_cen_top = (uvs_top[0].y + uvs_top[2].y) * 0.5f;
+                        float uv_x0 = u_cen_top + std::cos(a0) * (tw * 0.45f);
+                        float uv_y0 = v_cen_top - std::sin(a0) * (th * 0.45f);
+                        float uv_x1 = u_cen_top + std::cos(a1) * (tw * 0.45f);
+                        float uv_y1 = v_cen_top - std::sin(a1) * (th * 0.45f);
+
+                        rlColor4ub(c_t, c_t, c_t, 255);
+                        rlTexCoord2f(u_cen_top, v_cen_top); rlVertex3f(0.0f, y_peak, 0.0f);
+                        rlTexCoord2f(u_cen_top, v_cen_top); rlVertex3f(0.0f, y_peak, 0.0f);
+                        rlTexCoord2f(uv_x1, uv_y1); rlVertex3f(r_top * std::cos(a1), y_top, r_top * std::sin(a1));
+                        rlTexCoord2f(uv_x0, uv_y0); rlVertex3f(r_top * std::cos(a0), y_top, r_top * std::sin(a0));
+                    }
+
+                    // 2. Caras Laterales Superiores (Top-0 -> Top-1 -> Mid-1 -> Mid-0)
+                    for(int i=0; i<8; i++) {
+                        int next = (i+1)%8;
+                        float a0 = i * (PI / 4.0f);
+                        float a1 = next * (PI / 4.0f);
+                        
+                        rlColor4ub(c_s, c_s, c_s, 255);
+                        rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(r_top * std::cos(a0), y_top, r_top * std::sin(a0));
+                        rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(r_top * std::cos(a1), y_top, r_top * std::sin(a1));
+                        rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(r_mid * std::cos(a1), y_mid, r_mid * std::sin(a1));
+                        rlTexCoord2f(uvs_mid[0].x, uvs_mid[0].y); rlVertex3f(r_mid * std::cos(a0), y_mid, r_mid * std::sin(a0));
+                    }
+
+                    // 3. Caras Laterales Inferiores (Mid-0 -> Mid-1 -> Bot-1 -> Bot-0)
+                    for(int i=0; i<8; i++) {
+                        int next = (i+1)%8;
+                        float a0 = i * (PI / 4.0f);
+                        float a1 = next * (PI / 4.0f);
+                        
                         rlColor4ub(c_ls, c_ls, c_ls, 255);
-                        for (int i = 0; i < 8; ++i) {
-                            int next = (i + 1) % 8;
-                            rlTexCoord2f(uvs_bot[3].x, uvs_bot[3].y); rlVertex3f(v_mid[i].x, v_mid[i].y, v_mid[i].z);
-                            rlTexCoord2f(uvs_bot[2].x, uvs_bot[2].y); rlVertex3f(v_mid[next].x, v_mid[next].y, v_mid[next].z);
-                            rlTexCoord2f(uvs_bot[1].x, uvs_bot[1].y); rlVertex3f(v_bot[next].x, v_bot[next].y, v_bot[next].z);
-                            rlTexCoord2f(uvs_bot[0].x, uvs_bot[0].y); rlVertex3f(v_bot[i].x, v_bot[i].y, v_bot[i].z);
-                        }
+                        rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(r_mid * std::cos(a0), y_mid, r_mid * std::sin(a0));
+                        rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(r_mid * std::cos(a1), y_mid, r_mid * std::sin(a1));
+                        rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(r_bot * std::cos(a1), y_bot, r_bot * std::sin(a1));
+                        rlTexCoord2f(uvs_mid[0].x, uvs_mid[0].y); rlVertex3f(r_bot * std::cos(a0), y_bot, r_bot * std::sin(a0));
+                    }
+
+                    // 4. Base Inferior (Center -> Center -> Bot-0 -> Bot-1)
+                    for(int i=0; i<8; i++) {
+                        int next = (i+1)%8;
+                        float a0 = i * (PI / 4.0f);
+                        float a1 = next * (PI / 4.0f);
+                        
+                        float u_cen_bot = (uvs_bot[0].x + uvs_bot[1].x) * 0.5f;
+                        float v_cen_bot = (uvs_bot[0].y + uvs_bot[2].y) * 0.5f;
+                        float uv_x0 = u_cen_bot + std::cos(a0) * (tw * 0.45f);
+                        float uv_y0 = v_cen_bot - std::sin(a0) * (th * 0.45f);
+                        float uv_x1 = u_cen_bot + std::cos(a1) * (tw * 0.45f);
+                        float uv_y1 = v_cen_bot - std::sin(a1) * (th * 0.45f);
+
+                        rlColor4ub(c_b, c_b, c_b, 255);
+                        rlTexCoord2f(u_cen_bot, v_cen_bot); rlVertex3f(0.0f, y_bot, 0.0f);
+                        rlTexCoord2f(u_cen_bot, v_cen_bot); rlVertex3f(0.0f, y_bot, 0.0f);
+                        rlTexCoord2f(uv_x0, uv_y0); rlVertex3f(r_bot * std::cos(a0), y_bot, r_bot * std::sin(a0));
+                        rlTexCoord2f(uv_x1, uv_y1); rlVertex3f(r_bot * std::cos(a1), y_bot, r_bot * std::sin(a1));
+                    }
+
                     rlEnd();
-
-                    // 4. Base inferior (Triángulos fan CCW)
-                    unsigned char c_base = (unsigned char)(140 * light);
-                    rlBegin(RL_TRIANGLES);
-                        rlColor4ub(c_base, c_base, c_base, 255);
-                        for (int i = 0; i < 8; ++i) {
-                            int next = (i + 1) % 8;
-                            rlTexCoord2f((uvs_bot[0].x + uvs_bot[1].x)*0.5f, (uvs_bot[0].y + uvs_bot[2].y)*0.5f);
-                            rlVertex3f(v_bot_center.x, v_bot_center.y, v_bot_center.z);
-
-                            rlTexCoord2f(uvs_bot[1].x, uvs_bot[1].y);
-                            rlVertex3f(v_bot[next].x, v_bot[next].y, v_bot[next].z);
-
-                            rlTexCoord2f(uvs_bot[0].x, uvs_bot[0].y);
-                            rlVertex3f(v_bot[i].x, v_bot[i].y, v_bot[i].z);
-                        }
-                    rlEnd();
-
                     rlSetTexture(0);
                 rlPopMatrix();
             }
@@ -971,7 +977,7 @@ int main() {
                 if (current_chunk && current_chunk->is_ready) {
                     float r = 0.28f; // Radio horizontal del jugador (ancho 0.56m para paso fluido en puertas de 1.0m)
                     auto is_solid = [&](float x, float y, float z) {
-                        uint8_t b = world.get_block(std::floor(x), std::floor(y), std::floor(z));
+                        uint8_t b = world.get_block(std::floor(x + 0.5f), std::floor(y + 0.5f), std::floor(z + 0.5f));
                         return b != AIR && b != WATER;
                     };
                     auto check_wall = [&](float vx, float vz, float y) {
@@ -1032,7 +1038,8 @@ int main() {
                     // Techo (Head top: eye + PLAYER_HEAD_OFFSET)
                     float head_top = camera.position.y + Config::PLAYER_HEAD_OFFSET;
                     if (player_vel_y > 0 && check_wall(camera.position.x, camera.position.z, head_top)) {
-                        camera.position.y = std::floor(head_top) - Config::PLAYER_HEAD_OFFSET - 0.01f;
+                        float ceil_y = std::floor(head_top + 0.5f) - 0.5f;
+                        camera.position.y = ceil_y - Config::PLAYER_HEAD_OFFSET - 0.01f;
                         player_vel_y = 0.0f;
                     }
                     
@@ -1040,7 +1047,8 @@ int main() {
                     is_grounded = false;
                     float feet_bottom = camera.position.y - Config::PLAYER_EYE_HEIGHT;
                     if (player_vel_y <= 0 && check_wall(camera.position.x, camera.position.z, feet_bottom - 0.02f)) {
-                        camera.position.y = std::floor(feet_bottom - 0.02f) + 1.0f + Config::PLAYER_EYE_HEIGHT;
+                        float ground_y = std::floor(feet_bottom - 0.02f + 0.5f) + 0.5f;
+                        camera.position.y = ground_y + Config::PLAYER_EYE_HEIGHT;
                         player_vel_y = 0.0f;
                         is_grounded = true;
                     }
