@@ -476,6 +476,8 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     int lx = wx - cx * CHUNK_SIZE;
     int lz = wz - cz * CHUNK_SIZE;
     
+    uint8_t old_b = get_block(wx, wy, wz);
+
     auto update_chunk = [&](int c_x, int c_z, int l_x, int l_z) {
         Chunk* c = get_chunk(c_x, c_z);
         if (c) c->set_block(l_x, wy, l_z, type, rotation);
@@ -486,26 +488,25 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     if (lz == 0) update_chunk(cx, cz - 1, lx, CHUNK_SIZE);
     if (lx == 0 && lz == 0) update_chunk(cx - 1, cz - 1, CHUNK_SIZE, CHUNK_SIZE);
 
-    // Selective neighbor dirtying: only propagate to neighbors if near chunk border or if lighting changes
-    bool is_light_changer = (type == Config::TORCH || (Config::BLOCKS.count(type) && Config::BLOCKS.at(type).light_emission > 0));
-    uint8_t old_b = get_block(wx, wy, wz);
-    if (old_b == Config::TORCH || (Config::BLOCKS.count(old_b) && Config::BLOCKS.at(old_b).light_emission > 0)) {
-        is_light_changer = true;
-    }
+    // Selective neighbor dirtying: propagate to all 8 neighbors if lighting changes, or to adjacent chunks if on borders
+    bool is_light_changer = (type == Config::TORCH || (Config::BLOCKS.count(type) && Config::BLOCKS.at(type).light_emission > 0) ||
+                             old_b == Config::TORCH || (Config::BLOCKS.count(old_b) && Config::BLOCKS.at(old_b).light_emission > 0));
 
-    if (is_light_changer) {
-        for(int dx = -1; dx <= 1; dx++) {
-            for(int dz = -1; dz <= 1; dz++) {
-                if (dx == 0 && dz == 0) continue;
+    for (int dx = -1; dx <= 1; dx++) {
+        for (int dz = -1; dz <= 1; dz++) {
+            if (dx == 0 && dz == 0) continue;
+            bool should_dirty = is_light_changer;
+            if (!should_dirty) {
+                if (dx == -1 && lx <= 1) should_dirty = true;
+                if (dx == 1 && lx >= CHUNK_SIZE - 1) should_dirty = true;
+                if (dz == -1 && lz <= 1) should_dirty = true;
+                if (dz == 1 && lz >= CHUNK_SIZE - 1) should_dirty = true;
+            }
+            if (should_dirty) {
                 Chunk* c = get_chunk(cx + dx, cz + dz);
-                if(c) c->is_dirty = true;
+                if (c) c->is_dirty = true;
             }
         }
-    } else {
-        if (lx <= 1) { Chunk* c = get_chunk(cx - 1, cz); if (c) c->is_dirty = true; }
-        if (lx >= CHUNK_SIZE - 1) { Chunk* c = get_chunk(cx + 1, cz); if (c) c->is_dirty = true; }
-        if (lz <= 1) { Chunk* c = get_chunk(cx, cz - 1); if (c) c->is_dirty = true; }
-        if (lz >= CHUNK_SIZE - 1) { Chunk* c = get_chunk(cx, cz + 1); if (c) c->is_dirty = true; }
     }
 
     activate(wx, wy, wz);

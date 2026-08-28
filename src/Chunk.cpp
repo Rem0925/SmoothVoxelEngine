@@ -574,7 +574,7 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
                 l_cache.chunks[1][1] = voxels_ptr;
             } else {
                 neighbors[dx + 1][dz + 1] = g_world->get_chunk_shared(cx + dx, cz + dz);
-                if (neighbors[dx + 1][dz + 1] && neighbors[dx + 1][dz + 1]->is_ready) {
+                if (neighbors[dx + 1][dz + 1] && !neighbors[dx + 1][dz + 1]->voxels.empty()) {
                     l_cache.chunks[dx + 1][dz + 1] = neighbors[dx + 1][dz + 1]->voxels.data();
                 } else {
                     l_cache.chunks[dx + 1][dz + 1] = nullptr;

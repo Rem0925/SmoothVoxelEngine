@@ -26,41 +26,39 @@ struct LightCache {
     uint8_t get_block(int wx, int wy, int wz) const {
         if (wy < 0 || wy >= Config::GRID_Y) return Config::AIR;
         
-        int lx = wx - base_cx * Config::CHUNK_SIZE;
-        int lz = wz - base_cz * Config::CHUNK_SIZE;
+        int cx = (int)std::floor((float)wx / (float)Config::CHUNK_SIZE);
+        int cz = (int)std::floor((float)wz / (float)Config::CHUNK_SIZE);
+        int dx = cx - base_cx;
+        int dz = cz - base_cz;
+        if (dx < -1 || dx > 1 || dz < -1 || dz > 1) return Config::AIR;
         
-        int dx = 0, dz = 0;
-        if (lx < 0) { dx = -1; lx += Config::CHUNK_SIZE; }
-        else if (lx > Config::CHUNK_SIZE) { dx = 1; lx -= Config::CHUNK_SIZE; }
-        
-        if (lz < 0) { dz = -1; lz += Config::CHUNK_SIZE; }
-        else if (lz > Config::CHUNK_SIZE) { dz = 1; lz -= Config::CHUNK_SIZE; }
+        int lx = wx - cx * Config::CHUNK_SIZE;
+        int lz = wz - cz * Config::CHUNK_SIZE;
         
         const Config::VoxelData* c = chunks[dx + 1][dz + 1];
         if (c) {
             return c[wy * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx].block;
         }
-        return 1; // Config::STONE
+        return Config::AIR;
     }
 
     float get_density(int wx, int wy, int wz) const {
         if (wy < 0 || wy >= Config::GRID_Y) return -1.0f;
         
-        int lx = wx - base_cx * Config::CHUNK_SIZE;
-        int lz = wz - base_cz * Config::CHUNK_SIZE;
+        int cx = (int)std::floor((float)wx / (float)Config::CHUNK_SIZE);
+        int cz = (int)std::floor((float)wz / (float)Config::CHUNK_SIZE);
+        int dx = cx - base_cx;
+        int dz = cz - base_cz;
+        if (dx < -1 || dx > 1 || dz < -1 || dz > 1) return -1.0f;
         
-        int dx = 0, dz = 0;
-        if (lx < 0) { dx = -1; lx += Config::CHUNK_SIZE; }
-        else if (lx > Config::CHUNK_SIZE) { dx = 1; lx -= Config::CHUNK_SIZE; }
-        
-        if (lz < 0) { dz = -1; lz += Config::CHUNK_SIZE; }
-        else if (lz > Config::CHUNK_SIZE) { dz = 1; lz -= Config::CHUNK_SIZE; }
+        int lx = wx - cx * Config::CHUNK_SIZE;
+        int lz = wz - cz * Config::CHUNK_SIZE;
         
         const Config::VoxelData* c = chunks[dx + 1][dz + 1];
         if (c) {
             return c[wy * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx].density;
         }
-        return 1.0f; // Config::STONE opacity
+        return -1.0f;
     }
 };
 
