@@ -14,5 +14,6 @@ namespace mc {
                   std::vector<Vector2>& uvs2,
                   std::vector<Color>& colors,
                   float origin_x = 0.0f, float origin_z = 0.0f, int seed_offset = 0, int lod = 1,
-                  const Color* grass_tint_cache = nullptr, const Color* foliage_tint_cache = nullptr);
+                  const Color* grass_tint_cache = nullptr, const Color* foliage_tint_cache = nullptr,
+                  const uint8_t* light_grid = nullptr);
 }

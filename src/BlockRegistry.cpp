@@ -68,6 +68,8 @@ bool load_blocks(const std::string& blocks_dir) {
             bt.hardness = j.value("hardness", 1.0f);
             bt.transparent = j.value("transparent", false);
             bt.is_waving = j.value("is_waving", false);
+            bt.light_emission = (uint8_t)j.value("light_emission", (int)j.value("light", 0));
+            bt.light_filter = (uint8_t)j.value("light_filter", bt.transparent ? 0 : 15);
             
             std::string shape_str = j.value("shape", "terrain");
             bt.shape = parse_block_shape(shape_str);

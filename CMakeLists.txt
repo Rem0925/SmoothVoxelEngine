@@ -42,6 +42,7 @@ set(SOURCES
     src/MarchingCubes.cpp
     src/Noise.cpp
     src/UI.cpp
+    src/VoxelLighting.cpp
     src/World.cpp
     src/main.cpp
     src/sqlite3.c

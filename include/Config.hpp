@@ -142,6 +142,8 @@ namespace Config {
         uint8_t require_tool;   // ToolType minimo para romper (255 = no requiere)
         uint8_t require_tier;   // ToolTier minimo (255 = inrompible)
         float hardness;         // tiempo base para romper
+        uint8_t light_emission = 0; // Nivel de luz emitida (0 a 15, configurable por JSON)
+        uint8_t light_filter = 15;  // Cuanta luz atenua al pasar (0 = transparente como aire/cristal, 1 = hojas, 15 = solido opaco)
         BlockShape shape = SHAPE_TERRAIN;
         // Texturas especificas por cara (si son -1, usan tex_x y tex_y)
         int tex_top_x = -1, tex_top_y = -1;

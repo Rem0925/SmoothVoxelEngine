@@ -21,6 +21,8 @@ out vec3 fragPosition;
 out float viewDist; // Para la niebla
 out vec2 outFoliageFlags; // x: primario es follaje (pasto/hojas), y: secundario es follaje
 out float fragAO;
+out float fragSunLight;
+out float fragBlockLight;
 
 void main()
 {
@@ -46,6 +48,8 @@ void main()
     fragColor = vertexColor;
     outFoliageFlags = vec2(foliage_pri ? 1.0 : 0.0, foliage_sec ? 1.0 : 0.0);
     fragAO = vertexNormal.x;
+    fragSunLight = vertexNormal.y;
+    fragBlockLight = vertexNormal.z;
     
     // Apply wind sway if needed
     vec3 animatedPos = vertexPosition;

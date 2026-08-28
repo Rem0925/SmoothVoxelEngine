@@ -9,6 +9,7 @@
 #include "ThreadPool.hpp"
 
 extern ThreadPool global_thread_pool;
+extern class World* g_world;
 
 struct pair_hash {
     template <class T1, class T2>
@@ -44,12 +45,21 @@ public:
     void stop_simulation();
 
     uint8_t get_block(int wx, int wy, int wz);
+    uint8_t get_light(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
     void set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation = 0);
     int flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, class ItemDropManager* item_drops = nullptr);
     float get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea& area, int tool_tier);
     
     Chunk* get_chunk(int cx, int cz);
+    std::shared_ptr<Chunk> get_chunk_shared(int cx, int cz) {
+        std::lock_guard<std::mutex> lock(chunks_mutex);
+        auto key = std::make_pair(cx, cz);
+        if (chunks.find(key) != chunks.end()) {
+            return chunks[key];
+        }
+        return nullptr;
+    }
 
 private:
     void simulate_water();

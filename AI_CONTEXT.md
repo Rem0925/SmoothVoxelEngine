@@ -99,14 +99,25 @@ El sistema de colisiones del jugador resuelve el contacto directo con la isosupe
 
 ---
 
-### 8. Shaders, Oclusión Ambiental e Iluminación (`MarchingCubes.cpp`, `Chunk.cpp`, `assets/shaders/`)
-*   **Pipeline Desacoplado de Tinte y AO:**
-    *   **Tinte Biómico (`vertexColor` / `fragColor`):** Se mantiene uniforme por triángulo para pasto y follaje, preservando el corte geométrico nítido sin halos ni desvanecimientos a blanco en los bordes con tierra/piedra/madera (`outFoliageFlags`).
-    *   **Oclusión Ambiental Continua (`vertexNormal.x` -> `fragAO`):** Se transmite de forma independiente como un canal escalar continuo por vértice, interpolado suavemente por la GPU e integrado en la iluminación difusa (`lighting = (0.75 + 0.25 * diff) * ao`) sin alterar la crominancia de las texturas.
-    *   **Marching Cubes:** Muestreo continuo trilineal de densidad en 4 puntos ortogonales al vértice.
-    *   **Bloques Cúbicos (`add_box`):** Smooth lighting clásico por esquina evaluando los bloques sólidos vecinos.
-*   **`terrain_solid.fs`:** Flat-shading calculado por derivadas en GPU (`dFdx/dFdy`), proyección triplanar y niebla atmosférica (Fog).
-*   **`terrain.fs`:** Viento ondulante para plantas y hojas.
+### 8. Shaders, Oclusión Ambiental e Iluminación (`VoxelLighting.hpp/cpp`, `MarchingCubes.cpp`, `Chunk.cpp`, `assets/shaders/`)
+*   **Motor Modular de Iluminación Voxel (`VoxelLighting.hpp/cpp`):**
+    *   **Canal Dual de Luz (Luz Solar y Luz de Bloques):** Empaquetado compacto en 1 byte por voxel ($4\text{ bits}$ sol, $4\text{ bits}$ bloque, rango $0 \sim 15$).
+    *   **Transparencia y Filtrado de Luz por JSON (`light_filter`):** Configurable en cada bloque ($0$ = traspasa luz total como aire/cristal, $1$ = hojas/agua que atenúan solo 1 nivel, $15$ = sólido opaco).
+    *   **Emisión de Luz por JSON (`light_emission`):** Potencia lumínica configurable en JSON ($0 \sim 15$).
+    *   **Barrido Vertical y Propagación BFS:** Barrido directo de luz solar que atraviesa hojas/agua atenuándose suavemente + Flood-fill BFS 3D en cuevas y salientes.
+    *   **Muestreo Trilineal Continuo con Offset Normal (`sample_smooth_light`):** Muestrea en el espacio de aire exterior a lo largo de la normal para eliminar bandas oscuras y artefactos de grid.
+*   **Pipeline de Atributos de Vértice en Shaders:**
+    *   `vertexColor`: Tinte biómico y blend weight ($a$) uniforme por triángulo para evitar halos o degradados a blanco en transiciones.
+    *   `vertexNormal.x`: Factor de Oclusión Ambiental continua ($\text{fragAO}$, $0.75 \sim 1.0$).
+    *   `vertexNormal.y`: Luz Solar continua ($\text{fragSunLight}$, $0.0 \sim 1.0$).
+    *   `vertexNormal.z`: Luz de Bloque / Antorchas ($\text{fragBlockLight}$, $0.0 \sim 1.0$).
+*   **Vegetación y Plantas (`Chunk.cpp`):**
+    *   Generación ortogonal vertical estricta ($Y = \{0, 1, 0\}$) para crucetas de pasto alto y setas, muestreando luz en el espacio de aire superior ($center.y + 0.4$) para evitar plantas negras o inclinadas.
+*   **Shaders (`terrain_solid.fs` / `terrain.fs`):**
+    *   Curva de respuesta lumínica perceptual suave estilo Minecraft (evita caídas bruscas a negro en entradas de cuevas).
+    *   Luz solar dinámica con ciclo día/noche ($\text{sunDir.y}$) y luz ambiente balanceada en cuevas ($\text{ambientCave} = 0.07$).
+    *   Tinte cálido sutil para antorchas y fuentes de luz artificial.
+    *   Flat-shading por derivadas (`dFdx/dFdy`), proyección triplanar y niebla atmosférica.
 *   **`water.fs`:** Animación paramétrica con textura de ruido Perlin y espuma costera en bordes de contacto.
 *   **`skybox.vs/fs`:** Ciclo día/noche con sol y luna volumétricos que sincronizan la iluminación global y el color de la niebla.
 
@@ -116,3 +127,4 @@ El sistema de colisiones del jugador resuelve el contacto directo con la isosupe
 *   HUD nativo 2D con Hotbar, Inventario y Sistema de Crafteo.
 *   Pestañas de crafteo filtradas automáticamente entre herramientas y bloques/ítems leyendo `Config::RECIPES` dinámicamente.
 *   Previsualización holográfica 3D (Ghost voxel) del bloque seleccionado para guiar la construcción.
+*   Pantalla de depuración F3 estilo Minecraft: muestra coordenadas, bioma, bloque objetivo y nivel de iluminación (`Luz: X (Sol: Y, Bloque: Z)`).

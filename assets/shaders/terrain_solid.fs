@@ -8,6 +8,8 @@ in vec3 fragPosition;
 in float viewDist;
 in vec2 outFoliageFlags;
 in float fragAO;
+in float fragSunLight;
+in float fragBlockLight;
 
 // Uniforms
 uniform sampler2D texture0;
@@ -76,8 +78,7 @@ void main()
         blockColor = (outFoliageFlags.y > 0.5) ? fragColor.rgb : vec3(1.0);
     }
 
-    // --- ILUMINACIÓN FLAT SHADING CON AO ---
-    // Reconstruimos la normal del polígono a partir de sus derivadas en pantalla
+    // --- ILUMINACIÓN FLAT SHADING CON AO Y LUZ VOXEL ---
     vec3 dpdx = dFdx(fragPosition);
     vec3 dpdy = dFdy(fragPosition);
     vec3 surfNormal = cross(dpdx, dpdy);
@@ -87,16 +88,33 @@ void main()
         surfNormal = vec3(0.0, 1.0, 0.0);
     }
     
-    // Luz Direccional (Sol) y Luz Ambiental
+    // Luz Direccional (Sol)
     vec3 lightDir = normalize(vec3(0.6, 0.8, -0.4));
     float diff = max(dot(surfNormal, lightDir), 0.0);
     
-    // Oclusión ambiental continua
+    // 1. Luz Solar modulada por el ciclo día/noche con respuesta perceptual suave
+    float sunAltitude = clamp(sunDir.y * 1.2 + 0.3, 0.05, 1.0);
+    float sunLight = (fragSunLight * (0.85 + 0.15 * fragSunLight)) * sunAltitude;
+
+    // 2. Luz de Antorchas / Bloques (brillante y cálida)
+    float blockLight = (fragBlockLight * (0.85 + 0.15 * fragBlockLight)) * 1.3;
+
+    // 3. Luz Total Combinada (luz ambiental mínima en cuevas suaves de 0.07)
+    float ambientCave = 0.07;
+    float voxelLight = clamp(max(max(sunLight, blockLight), ambientCave), 0.0, 1.0);
+
+    // 4. Oclusión Ambiental
     float ao = (fragAO > 0.01) ? fragAO : 1.0;
-    float lighting = (0.75 + 0.25 * diff) * ao;
+
+    // 5. Iluminación final modulada
+    float lighting = (0.75 + 0.25 * diff) * ao * voxelLight;
+
+    // Tinte cálido suave para la luz de antorchas
+    vec3 torchWarmth = vec3(1.0, 0.95, 0.85);
+    vec3 finalTint = mix(blockColor, blockColor * torchWarmth, clamp(blockLight, 0.0, 0.5));
 
     // Apply vertex color, lighting, and diffuse
-    vec4 colorNoAlpha = vec4(blockColor * lighting, 1.0);
+    vec4 colorNoAlpha = vec4(finalTint * lighting, 1.0);
     finalColor = blendedTex * colorNoAlpha * colDiffuse;
     
     // --- NIEBLA DE PROFUNDIDAD Y ATARDECER DIRECCIONAL ---

@@ -1,6 +1,7 @@
 #include "MarchingCubes.hpp"
 #include "Config.hpp"
 #include "Biome.hpp"
+#include "VoxelLighting.hpp"
 #include <raymath.h>
 #include <cmath>
 #include <algorithm>
@@ -309,7 +310,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
               std::vector<Vector2>& uvs2,
               std::vector<Color>& colors,
               float origin_x, float origin_z, int seed_offset, int lod,
-              const Color* grass_tint_cache, const Color* foliage_tint_cache) 
+              const Color* grass_tint_cache, const Color* foliage_tint_cache,
+              const uint8_t* light_grid) 
 {
     vertices.reserve(vertices.size() + 2048);
     normals.reserve(normals.size() + 2048);
@@ -574,10 +576,14 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     col2.a = (b2 == b_primary) ? 255 : 0;
                     col3.a = (b3 == b_primary) ? 255 : 0;
 
-                    // El orden de vertices es v3, v2, v1
-                    normals.push_back({ ao3, 0.0f, 0.0f });
-                    normals.push_back({ ao2, 0.0f, 0.0f });
-                    normals.push_back({ ao1, 0.0f, 0.0f });
+                    VoxelLighting::LightSample ls1 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v1.x, v1.y, v1.z, n);
+                    VoxelLighting::LightSample ls2 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v2.x, v2.y, v2.z, n);
+                    VoxelLighting::LightSample ls3 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v3.x, v3.y, v3.z, n);
+
+                    // El orden de vertices es v3, v2, v1: x = AO, y = Luz Solar, z = Luz de Bloque
+                    normals.push_back({ ao3, ls3.sunlight, ls3.blocklight });
+                    normals.push_back({ ao2, ls2.sunlight, ls2.blocklight });
+                    normals.push_back({ ao1, ls1.sunlight, ls1.blocklight });
 
                     colors.push_back(col3);
                     colors.push_back(col2);

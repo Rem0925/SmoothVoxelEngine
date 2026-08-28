@@ -52,8 +52,8 @@ void World::update(Vector3 player_pos) {
         if (pair.second->needs_upload) pending_uploads++;
     }
     
-    upload_budget = 2 + pending_uploads / 12;
-    if (upload_budget > 6) upload_budget = 6;
+    upload_budget = 4 + pending_uploads / 4;
+    if (upload_budget > 16) upload_budget = 16;
     for (auto it = chunks.begin(); it != chunks.end();) {
         int cx = it->first.first;
         int cz = it->first.second;
@@ -390,6 +390,8 @@ Chunk* World::get_chunk(int cx, int cz) {
 }
 
 uint8_t World::get_block(int wx, int wy, int wz) {
+
+
     int cx = std::floor((float)wx / CHUNK_SIZE);
     int cz = std::floor((float)wz / CHUNK_SIZE);
     
@@ -416,13 +418,32 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
         if (c) c->set_block(l_x, wy, l_z, type, rotation);
     };
     
-    // 1. Chunk principal
     update_chunk(cx, cz, lx, lz);
-    
-    // 2. Sincronizar vóxeles de frontera compartidos con chunks adyacentes
     if (lx == 0) update_chunk(cx - 1, cz, CHUNK_SIZE, lz);
     if (lz == 0) update_chunk(cx, cz - 1, lx, CHUNK_SIZE);
     if (lx == 0 && lz == 0) update_chunk(cx - 1, cz - 1, CHUNK_SIZE, CHUNK_SIZE);
+
+    // Selective neighbor dirtying: only propagate to neighbors if near chunk border or if lighting changes
+    bool is_light_changer = (type == Config::TORCH || (Config::BLOCKS.count(type) && Config::BLOCKS.at(type).light_emission > 0));
+    uint8_t old_b = get_block(wx, wy, wz);
+    if (old_b == Config::TORCH || (Config::BLOCKS.count(old_b) && Config::BLOCKS.at(old_b).light_emission > 0)) {
+        is_light_changer = true;
+    }
+
+    if (is_light_changer) {
+        for(int dx = -1; dx <= 1; dx++) {
+            for(int dz = -1; dz <= 1; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                Chunk* c = get_chunk(cx + dx, cz + dz);
+                if(c) c->is_dirty = true;
+            }
+        }
+    } else {
+        if (lx <= 1) { Chunk* c = get_chunk(cx - 1, cz); if (c) c->is_dirty = true; }
+        if (lx >= CHUNK_SIZE - 1) { Chunk* c = get_chunk(cx + 1, cz); if (c) c->is_dirty = true; }
+        if (lz <= 1) { Chunk* c = get_chunk(cx, cz - 1); if (c) c->is_dirty = true; }
+        if (lz >= CHUNK_SIZE - 1) { Chunk* c = get_chunk(cx, cz + 1); if (c) c->is_dirty = true; }
+    }
 
     activate(wx, wy, wz);
     activate(wx + 1, wy, wz);
@@ -548,4 +569,17 @@ float World::get_density(int x, int y, int z) const {
         return it->second->get_density(lx, y, lz);
     }
     return -1.0f;
+}
+
+uint8_t World::get_light(int wx, int wy, int wz) {
+    int cx = std::floor((float)wx / Config::CHUNK_SIZE);
+    int cz = std::floor((float)wz / Config::CHUNK_SIZE);
+    
+    Chunk* chunk = get_chunk(cx, cz);
+    if (chunk) {
+        int lx = wx - cx * Config::CHUNK_SIZE;
+        int lz = wz - cz * Config::CHUNK_SIZE;
+        return chunk->get_light(lx, wy, lz);
+    }
+    return 0;
 }

@@ -19,6 +19,7 @@
 #include <sqlite3.h>
 #include "DatabaseIO.hpp"
 #include "ItemDrop.hpp"
+#include "VoxelLighting.hpp"
 
 using namespace Config;
 
@@ -734,6 +735,8 @@ void DrawFirstPersonViewmodel(
     EndMode3D();
 }
 
+World* g_world = nullptr;
+
 int main() {
     InitWindow(1280, 720, "Smooth Voxel Engine C++");
     SetExitKey(0);
@@ -822,6 +825,7 @@ int main() {
     BlockRegistry::load_all("assets/data");
 
     World world(mat_solid, mat_plants, mat_water);
+    g_world = &world;
     UI ui(spritesheet, spritesheet_items);
     Chat chat;
     ItemDropManager item_drops;
@@ -1078,15 +1082,15 @@ int main() {
                     };
 
                     // === Escaneo robusto de superficie del terreno para deslizamiento suave ===
-                    auto get_surface_height = [&](float px, float pz, float ref_feet_y) -> float {
+                    auto sample_surface_at = [&](float px, float pz, float ref_feet_y) -> float {
                         float ground_y = -999.0f;
-                        float scan_top = ref_feet_y + 0.60f;
-                        float scan_bot = ref_feet_y - 0.80f;
+                        float scan_top = ref_feet_y + 0.80f;
+                        float scan_bot = ref_feet_y - 1.20f;
                         
                         float prev_y = scan_bot;
                         float prev_d = sample_density(px, prev_y, pz);
                         
-                        for (float y = scan_bot + 0.15f; y <= scan_top + 0.05f; y += 0.15f) {
+                        for (float y = scan_bot + 0.12f; y <= scan_top + 0.05f; y += 0.12f) {
                             float d = sample_density(px, y, pz);
                             if (prev_d >= Config::ISO_SURFACE && d < Config::ISO_SURFACE) {
                                 float lo = prev_y;
@@ -1126,7 +1130,7 @@ int main() {
                             uint8_t b = world.get_block(bx, by, bz);
                             if (b != AIR && b != WATER && BLOCKS.count(b) && BLOCKS.at(b).shape != Config::SHAPE_TERRAIN) {
                                 float block_top = (float)by + 0.5f;
-                                if (block_top > ground_y && block_top <= ref_feet_y + 0.60f) {
+                                if (block_top > ground_y && block_top <= ref_feet_y + 0.80f) {
                                     ground_y = block_top;
                                 }
                             }
@@ -1135,9 +1139,23 @@ int main() {
                         return ground_y;
                     };
 
+                    auto get_surface_height = [&](float px, float pz, float ref_feet_y) -> float {
+                        float max_ground = sample_surface_at(px, pz, ref_feet_y);
+                        float off = 0.18f;
+                        float g1 = sample_surface_at(px - off, pz - off, ref_feet_y);
+                        float g2 = sample_surface_at(px + off, pz - off, ref_feet_y);
+                        float g3 = sample_surface_at(px - off, pz + off, ref_feet_y);
+                        float g4 = sample_surface_at(px + off, pz + off, ref_feet_y);
+                        if (g1 > max_ground) max_ground = g1;
+                        if (g2 > max_ground) max_ground = g2;
+                        if (g3 > max_ground) max_ground = g3;
+                        if (g4 > max_ground) max_ground = g4;
+                        return max_ground;
+                    };
+
                     float eye_y = camera.position.y;
                     float feet_bottom = eye_y - Config::PLAYER_EYE_HEIGHT;
-                    float step_height = 0.50f; // Altura máxima que el jugador puede subir suavemente
+                    float step_height = 0.55f; // Altura máxima que el jugador puede subir suavemente
                     float feet_test_y = feet_bottom + step_height; // Evaluar paredes solo por encima del escalón
                     float waist_y = eye_y - 0.75f;
                     float head_y = eye_y + Config::PLAYER_HEAD_OFFSET - 0.06f;
@@ -1160,8 +1178,8 @@ int main() {
                         camera.position.z = old_z;
                     }
                     
-                    // Colisión vertical (Y)
-                    float dt = GetFrameTime();
+                    // Colisión vertical (Y) con delta time protegido contra caídas por tirones de framerate
+                    float dt = std::min(GetFrameTime(), 0.033f);
                     player_vel_y -= 30.0f * dt;
                     camera.position.y += player_vel_y * dt;
                     
@@ -1180,7 +1198,7 @@ int main() {
                     if (ground_y > -900.0f && player_vel_y <= 0.0f) {
                         float diff = ground_y - feet_bottom;
                         // Si está a nivel de suelo, subiendo rampa o sobre pequeño obstáculo
-                        if (diff >= -0.25f && diff <= step_height) {
+                        if (diff >= -0.40f && diff <= 0.85f) {
                             float target_cam_y = ground_y + Config::PLAYER_EYE_HEIGHT;
                             float dy = target_cam_y - camera.position.y;
                             
@@ -1479,17 +1497,23 @@ int main() {
         float sun_x = std::cos(day_time);
         // Alinear la claridad del terreno con la del cielo
         float dayFactor = std::clamp(sun_y * 2.0f + 0.2f, 0.0f, 1.0f);
-        float light_intensity = std::max(0.2f, dayFactor);
+        float light_intensity = std::max(0.05f, dayFactor);
+        
+        // Color dinámico de niebla que coincide exactamente con el cielo diurno y nocturno (evita niebla brillante en la noche)
+        float fogColorVec[3] = {
+            (1.0f - dayFactor) * 0.01f + dayFactor * (135.0f / 255.0f),
+            (1.0f - dayFactor) * 0.02f + dayFactor * (206.0f / 255.0f),
+            (1.0f - dayFactor) * 0.05f + dayFactor * (235.0f / 255.0f)
+        };
         Color sky_color = { 
-            (unsigned char)(135 * light_intensity), 
-            (unsigned char)(206 * light_intensity), 
-            (unsigned char)(235 * light_intensity), 
+            (unsigned char)(fogColorVec[0] * 255.0f), 
+            (unsigned char)(fogColorVec[1] * 255.0f), 
+            (unsigned char)(fogColorVec[2] * 255.0f), 
             255 
         };
         ClearBackground(sky_color);
         
         // Pass dynamic fog color to shaders
-        float fogColorVec[3] = { sky_color.r / 255.0f, sky_color.g / 255.0f, sky_color.b / 255.0f };
         SetShaderValue(world.mat_solid.shader, fogLocSolid, fogColorVec, SHADER_UNIFORM_VEC3);
         SetShaderValue(world.mat_plants.shader, fogLocPlants, fogColorVec, SHADER_UNIFORM_VEC3);
         SetShaderValue(world.mat_water.shader, fogLocWater, fogColorVec, SHADER_UNIFORM_VEC3);
@@ -1501,11 +1525,10 @@ int main() {
         SetShaderValue(world.mat_water.shader, fogStartLocWater, &Config::FOG_START, SHADER_UNIFORM_FLOAT);
         SetShaderValue(world.mat_water.shader, fogEndLocWater, &Config::FOG_END, SHADER_UNIFORM_FLOAT);
         
-        // Dynamically update material colors for lighting
-        unsigned char light_val = (unsigned char)(255 * light_intensity);
-        world.mat_solid.maps[MATERIAL_MAP_DIFFUSE].color = { light_val, light_val, light_val, 255 };
-        world.mat_water.maps[MATERIAL_MAP_DIFFUSE].color = { light_val, light_val, light_val, 200 };
-        world.mat_plants.maps[MATERIAL_MAP_DIFFUSE].color = { light_val, light_val, light_val, 255 };
+        // Materials remain pure white so the voxel light shader handles night and torch intensity accurately
+        world.mat_solid.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
+        world.mat_water.maps[MATERIAL_MAP_DIFFUSE].color = { 255, 255, 255, 200 };
+        world.mat_plants.maps[MATERIAL_MAP_DIFFUSE].color = WHITE;
 
         // Apply smooth camera transition for auto-steps
         if (!spectator_mode) {
@@ -2042,8 +2065,20 @@ int main() {
             
             if (look_block != AIR) {
                 lines.push_back({ TextFormat("Mirando a: %s (ID %d en %d, %d, %d)", block_name.c_str(), (int)look_block, (int)target_solid.x, (int)target_solid.y, (int)target_solid.z), Color{255, 220, 100, 255} });
+                
+                uint8_t raw_l = world.get_light(target_empty.x, target_empty.y, target_empty.z);
+                if (raw_l == 0) raw_l = world.get_light(target_solid.x, target_solid.y, target_solid.z);
+                uint8_t sun_l = VoxelLighting::get_sunlight(raw_l);
+                uint8_t blk_l = VoxelLighting::get_blocklight(raw_l);
+                uint8_t max_l = std::max(sun_l, blk_l);
+                lines.push_back({ TextFormat("Luz del bloque: %d (Sol: %d, Bloque: %d)", (int)max_l, (int)sun_l, (int)blk_l), Color{255, 235, 120, 255} });
             } else {
                 lines.push_back({ "Mirando a: Aire", Color{170, 180, 195, 255} });
+                uint8_t raw_l = world.get_light(cam_x, feet_y, cam_z);
+                uint8_t sun_l = VoxelLighting::get_sunlight(raw_l);
+                uint8_t blk_l = VoxelLighting::get_blocklight(raw_l);
+                uint8_t max_l = std::max(sun_l, blk_l);
+                lines.push_back({ TextFormat("Luz en jugador: %d (Sol: %d, Bloque: %d)", (int)max_l, (int)sun_l, (int)blk_l), Color{255, 235, 120, 255} });
             }
             
             lines.push_back({ TextFormat("Hora: %.2f (%s)", norm_time, time_str.c_str()), Color{240, 240, 200, 255} });

@@ -3,6 +3,7 @@
 #include "MarchingCubes.hpp"
 #include "Biome.hpp"
 #include "Caves.hpp"
+#include "VoxelLighting.hpp"
 #include <rlgl.h>
 #include <raymath.h>
 #include <cmath>
@@ -555,7 +556,31 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
     std::vector<Color> foliage_tint_cache(CACHE_SIZE * CACHE_SIZE);
     Biome::compute_chunk_tint_cache(cx, cz, seed_offset, grass_tint_cache.data(), foliage_tint_cache.data());
 
-    mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod, grass_tint_cache.data(), foliage_tint_cache.data());
+    // Calculo de Iluminacion Voxel (Luz Solar + Luz de Bloques / Antorchas)
+    VoxelLighting::LightCache l_cache;
+    l_cache.base_cx = cx;
+    l_cache.base_cz = cz;
+    
+    std::shared_ptr<Chunk> neighbors[3][3];
+    for (int dx = -1; dx <= 1; ++dx) {
+        for (int dz = -1; dz <= 1; ++dz) {
+            if (dx == 0 && dz == 0) {
+                l_cache.chunks[1][1] = voxels_ptr;
+            } else {
+                neighbors[dx + 1][dz + 1] = g_world->get_chunk_shared(cx + dx, cz + dz);
+                if (neighbors[dx + 1][dz + 1] && neighbors[dx + 1][dz + 1]->is_ready) {
+                    l_cache.chunks[dx + 1][dz + 1] = neighbors[dx + 1][dz + 1]->voxels.data();
+                } else {
+                    l_cache.chunks[dx + 1][dz + 1] = nullptr;
+                }
+            }
+        }
+    }
+
+    std::vector<uint8_t> local_light_grid((Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1));
+    VoxelLighting::compute_chunk_lighting(l_cache, local_light_grid.data());
+
+    mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod, grass_tint_cache.data(), foliage_tint_cache.data(), local_light_grid.data());
     
     // Remap vertices to global coords
     for (auto& v : ls_vertices) {
@@ -644,12 +669,9 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
                 float v1 = v0 + th;
                 
                 Vector3 base = center;
-                Vector3 up = n;
-                Vector3 right = {1, 0, 0};
-                if (std::abs(up.y) < 0.999f) {
-                    right = Vector3Normalize(Vector3CrossProduct({0,1,0}, up));
-                }
-                Vector3 fwd = Vector3Normalize(Vector3CrossProduct(right, up));
+                Vector3 up = { 0.0f, 1.0f, 0.0f };
+                Vector3 right = { 1.0f, 0.0f, 0.0f };
+                Vector3 fwd = { 0.0f, 0.0f, 1.0f };
                 
                 Vector3 d1 = Vector3Add(Vector3Scale(right, plant_width), Vector3Scale(fwd, plant_width));
                 Vector3 d2 = Vector3Subtract(Vector3Scale(right, plant_width), Vector3Scale(fwd, plant_width));
@@ -678,7 +700,11 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
                     {u0 + sway, v0 + foliage_offset}, 
                     {u1 + sway, v0 + foliage_offset} 
                 };
-                Vector3 nor = {0, 1, 0};
+                float plx = center.x - (float)(cx * CHUNK_SIZE);
+                float ply = center.y + 0.4f;
+                float plz = center.z - (float)(cz * CHUNK_SIZE);
+                auto plant_light = VoxelLighting::sample_smooth_light(local_light_grid.data(), CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, plx, ply, plz, {0, 1, 0});
+                Vector3 nor = { 1.0f, plant_light.sunlight, plant_light.blocklight };
                 
                 auto add_quad = [&](Vector3* v) {
                     lp_vertices.push_back(v[0]); lp_vertices.push_back(v[1]); lp_vertices.push_back(v[2]);
@@ -710,13 +736,14 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
         p_normals = std::move(lp_normals);
         p_uvs = std::move(lp_uvs);
         p_colors = std::move(lp_colors);
+        light_grid = local_light_grid;
     }
 
-    build_construction_mesh(voxels_ptr);
+    build_construction_mesh(voxels_ptr, local_light_grid.data());
     build_water_mesh(voxels_ptr, lod);
 }
 
-void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
+void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid) {
     std::vector<Vector3> lb_vertices, lb_normals;
     std::vector<Vector2> lb_uvs;
     std::vector<Color> lb_colors;
@@ -759,16 +786,16 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
         return 0.65f + 0.116f * (float)level;
     };
 
-    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, int tx, int ty) {
+    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, float sun, float block, int tx, int ty) {
         auto uvs = get_face_uv(tx, ty);
         Color white = { 255, 255, 255, 255 };
         // Triangle 1: v0, v1, v2
         lb_vertices.push_back(v0);
         lb_vertices.push_back(v1);
         lb_vertices.push_back(v2);
-        lb_normals.push_back({ ao0, 0.0f, 0.0f });
-        lb_normals.push_back({ ao1, 0.0f, 0.0f });
-        lb_normals.push_back({ ao2, 0.0f, 0.0f });
+        lb_normals.push_back({ ao0, sun, block });
+        lb_normals.push_back({ ao1, sun, block });
+        lb_normals.push_back({ ao2, sun, block });
         lb_uvs.push_back(uvs[0]);
         lb_uvs.push_back(uvs[1]);
         lb_uvs.push_back(uvs[2]);
@@ -780,9 +807,9 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
         lb_vertices.push_back(v0);
         lb_vertices.push_back(v2);
         lb_vertices.push_back(v3);
-        lb_normals.push_back({ ao0, 0.0f, 0.0f });
-        lb_normals.push_back({ ao2, 0.0f, 0.0f });
-        lb_normals.push_back({ ao3, 0.0f, 0.0f });
+        lb_normals.push_back({ ao0, sun, block });
+        lb_normals.push_back({ ao2, sun, block });
+        lb_normals.push_back({ ao3, sun, block });
         lb_uvs.push_back(uvs[0]);
         lb_uvs.push_back(uvs[2]);
         lb_uvs.push_back(uvs[3]);
@@ -807,42 +834,48 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr) {
             float ao1 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
             float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
             float ao3 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
-            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, ao0, ao1, ao2, ao3, top_tx, top_ty);
+            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly+1, lz);
+            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, top_tx, top_ty);
         }
         if (!cull_bot) {
             float ao0 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
             float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
             float ao2 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
             float ao3 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
-            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, ao0, ao1, ao2, ao3, bot_tx, bot_ty);
+            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly-1, lz);
+            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, bot_tx, bot_ty);
         }
         if (!cull_front) {
             float ao0 = calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
             float ao1 = calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
             float ao2 = calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
             float ao3 = calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
-            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, ao0, ao1, ao2, ao3, front_tx, front_ty);
+            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly, lz+1);
+            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, front_tx, front_ty);
         }
         if (!cull_back) {
             float ao0 = calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
             float ao1 = calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
             float ao2 = calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
             float ao3 = calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
-            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, back_tx, back_ty);
+            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly, lz-1);
+            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, back_tx, back_ty);
         }
         if (!cull_right) {
             float ao0 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
             float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
             float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
             float ao3 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
-            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, right_tx, right_ty);
+            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx+1, ly, lz);
+            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, right_tx, right_ty);
         }
         if (!cull_left) {
             float ao0 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
             float ao1 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly-1, lz+1));
             float ao2 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
             float ao3 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
-            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, left_tx, left_ty);
+            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx-1, ly, lz);
+            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, left_tx, left_ty);
         }
     };
 
@@ -1431,7 +1464,7 @@ void Chunk::pack_meshes(int mask) {
 
 void Chunk::upload_meshes() {
     int mask = pending_upload_mask.exchange(0);
-    if (mask == 0) mask = 3; // Fallback to all if called directly
+    if (mask == 0) return;
 
     std::lock_guard<std::mutex> lock(mesh_mutex);
 

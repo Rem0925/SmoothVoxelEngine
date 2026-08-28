@@ -5,6 +5,7 @@
   "hardness": 0.2,
   "transparent": false,
   "is_waving": true,
+  "light_filter": 0,
   "tool": {
     "ideal": "none",
     "required_tool": "none",

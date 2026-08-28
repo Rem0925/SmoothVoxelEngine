@@ -26,6 +26,7 @@ public:
     std::mutex mesh_mutex;
 
     std::vector<Config::VoxelData> voxels;
+    std::vector<uint8_t> light_grid;
 
     Mesh solid_mesh = { 0 };
     Mesh build_mesh = { 0 }; // For construction blocks, stairs, fences, props
@@ -82,6 +83,14 @@ public:
         return voxels[get_idx(x, y, z)].water;
     }
 
+    inline uint8_t get_light(int x, int y, int z) const {
+        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return 0;
+        if (light_grid.empty()) return 0;
+        int idx = get_idx(x, y, z);
+        if (idx < 0 || idx >= (int)light_grid.size()) return 0;
+        return light_grid[idx];
+    }
+
     void set_block(int x, int y, int z, uint8_t type, uint8_t rotation = 0);
     void set_water_node(int x, int y, int z, uint8_t level);
     void rebuild_mesh(bool water_only = false);
@@ -103,7 +112,7 @@ private:
     void generate_thread();
     void rebuild_thread();
     void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1);
-    void build_construction_mesh(const Config::VoxelData* voxels_ptr);
+    void build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid = nullptr);
     void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1);
     void pack_meshes(int mask);
     void upload_meshes();
