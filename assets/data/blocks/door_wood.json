@@ -3,7 +3,7 @@
   "name": "Puerta de Madera",
   "shape": "door",
   "hardness": 1.5,
-  "transparent": false,
+  "transparent": true,
   "is_waving": false,
   "light_filter": 1,
   "tool": {

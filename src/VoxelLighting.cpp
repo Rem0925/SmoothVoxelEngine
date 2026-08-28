@@ -240,6 +240,12 @@ LightSample sample_smooth_light(const uint8_t* light_grid, int size_x, int size_
     float sun = interp(l000.first, l100.first, l010.first, l110.first, l001.first, l101.first, l011.first, l111.first);
     float block = interp(l000.second, l100.second, l010.second, l110.second, l001.second, l101.second, l011.second, l111.second);
 
+    float max_sun = std::max({l000.first, l100.first, l010.first, l110.first, l001.first, l101.first, l011.first, l111.first});
+    float max_block = std::max({l000.second, l100.second, l010.second, l110.second, l001.second, l101.second, l011.second, l111.second});
+
+    sun = std::max(sun, max_sun * 0.70f);
+    block = std::max(block, max_block * 0.70f);
+
     return { std::clamp(sun, 0.0f, 1.0f), std::clamp(block, 0.0f, 1.0f) };
 }
 

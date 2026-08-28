@@ -402,104 +402,109 @@ void UI::draw_tool_hud() {
     }
 }
 
-void UI::draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y, bool is_l_click, bool is_r_click, bool is_shift) {
+void UI::draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y, bool is_l_click, bool is_r_click, bool is_shift, bool show_tools) {
     int slot_size = 40;
     int slot_pad = 4;
     int slot_total = slot_size + slot_pad;
     
-    // 1. Herramientas
-    DrawText("Herramientas:", px, py, 12, Color{200, 210, 225, 255});
+    int cur_y = py;
     
-    int hx = px + 95;
-    int hy = py - 4;
-    bool hover_mano = (mouse_x >= hx && mouse_x <= hx + slot_size && mouse_y >= hy && mouse_y <= hy + slot_size);
-    DrawRectangle(hx, hy, slot_size, slot_size, hover_mano ? Color{60, 75, 95, 255} : Color{35, 42, 52, 255});
-    DrawRectangleLines(hx, hy, slot_size, slot_size, (selected_slot == 0 && selected_tool_idx == -1) ? GOLD : Color{70, 80, 95, 255});
-    DrawText("Mano", hx + 5, hy + 14, 10, WHITE);
-    if (hover_mano) {
-        tooltip_text = "Mano vacía / Golpe básico";
-        if (is_l_click && !is_dragging) {
-            selected_slot = 0;
-            selected_tool_idx = -1;
-        }
-    }
-
-    for (int i = 0; i < 6; i++) {
-        int tx = hx + (i + 1) * slot_total;
-        int ty = hy;
-        bool hover = (mouse_x >= tx && mouse_x <= tx + slot_size && mouse_y >= ty && mouse_y <= ty + slot_size);
-        DrawRectangle(tx, ty, slot_size, slot_size, hover ? Color{60, 75, 95, 255} : Color{35, 42, 52, 255});
-        DrawRectangleLines(tx, ty, slot_size, slot_size, (selected_slot == 0 && selected_tool_idx == i) ? GOLD : Color{70, 80, 95, 255});
+    // 1. Herramientas
+    if (show_tools) {
+        DrawText("Herramientas:", px, cur_y + 12, 12, Color{200, 210, 225, 255});
         
-        if (i < (int)tool_inventory.size()) {
-            const auto& t = tool_inventory[i];
-            draw_tool_icon(t.type, t.tier, tx + 4, ty + 4, slot_size - 8);
-            if (t.durability_max > 0) {
-                float pct = (float)t.durability_current / (float)t.durability_max;
-                Color dur_col = (pct > 0.5f) ? GREEN : ((pct > 0.2f) ? ORANGE : RED);
-                DrawRectangle(tx + 4, ty + slot_size - 6, (int)((slot_size - 8) * pct), 3, dur_col);
+        int hx = px + 95;
+        int hy = cur_y;
+        bool hover_mano = (mouse_x >= hx && mouse_x <= hx + slot_size && mouse_y >= hy && mouse_y <= hy + slot_size);
+        DrawRectangle(hx, hy, slot_size, slot_size, hover_mano ? Color{60, 75, 95, 255} : Color{35, 42, 52, 255});
+        DrawRectangleLines(hx, hy, slot_size, slot_size, (selected_slot == 0 && selected_tool_idx == -1) ? GOLD : Color{70, 80, 95, 255});
+        DrawText("Mano", hx + 5, hy + 14, 10, WHITE);
+        if (hover_mano) {
+            tooltip_text = "Mano vacía / Golpe básico";
+            if (is_l_click && !is_dragging) {
+                selected_slot = 0;
+                selected_tool_idx = -1;
             }
         }
-        
-        if (hover) {
+
+        for (int i = 0; i < 6; i++) {
+            int tx = hx + (i + 1) * slot_total;
+            int ty = hy;
+            bool hover = (mouse_x >= tx && mouse_x <= tx + slot_size && mouse_y >= ty && mouse_y <= ty + slot_size);
+            DrawRectangle(tx, ty, slot_size, slot_size, hover ? Color{60, 75, 95, 255} : Color{35, 42, 52, 255});
+            DrawRectangleLines(tx, ty, slot_size, slot_size, (selected_slot == 0 && selected_tool_idx == i) ? GOLD : Color{70, 80, 95, 255});
+            
             if (i < (int)tool_inventory.size()) {
                 const auto& t = tool_inventory[i];
-                static const char* TIER_N[] = { "Madera", "Piedra", "Hierro", "Plata", "Oro", "Diamante" };
-                static const char* TYPE_N[] = { "Pico", "Hacha", "Pala", "Martillo", "Mangual", "Espada" };
-                tooltip_text = std::string(TYPE_N[t.type]) + " de " + TIER_N[t.tier] + "\nDurabilidad: " + std::to_string(t.durability_current) + "/" + std::to_string(t.durability_max);
+                draw_tool_icon(t.type, t.tier, tx + 4, ty + 4, slot_size - 8);
+                if (t.durability_max > 0) {
+                    float pct = (float)t.durability_current / (float)t.durability_max;
+                    Color dur_col = (pct > 0.5f) ? GREEN : ((pct > 0.2f) ? ORANGE : RED);
+                    DrawRectangle(tx + 4, ty + slot_size - 6, (int)((slot_size - 8) * pct), 3, dur_col);
+                }
             }
+            
+            if (hover) {
+                if (i < (int)tool_inventory.size()) {
+                    const auto& t = tool_inventory[i];
+                    static const char* TIER_N[] = { "Madera", "Piedra", "Hierro", "Plata", "Oro", "Diamante" };
+                    static const char* TYPE_N[] = { "Pico", "Hacha", "Pala", "Martillo", "Mangual", "Espada" };
+                    tooltip_text = std::string(TYPE_N[t.type]) + " de " + TIER_N[t.tier] + "\nDurabilidad: " + std::to_string(t.durability_current) + "/" + std::to_string(t.durability_max);
+                }
 
-            if (is_l_click) {
-                if (is_shift && mode == UI_MODE_CHEST && i < (int)tool_inventory.size()) {
-                    // Shift+Click tool into chest
-                    auto key = std::make_tuple((int)active_container_pos.x, (int)active_container_pos.y, (int)active_container_pos.z);
-                    auto& c = world_chests[key];
-                    for (auto& cs : c.slots) {
-                        if (!cs.is_tool && cs.item.count == 0) {
-                            cs.is_tool = true;
-                            cs.tool = tool_inventory[i];
-                            cs.item = { AIR, "", 0 };
+                if (is_l_click) {
+                    if (is_shift && mode == UI_MODE_CHEST && i < (int)tool_inventory.size()) {
+                        // Shift+Click tool into chest
+                        auto key = std::make_tuple((int)active_container_pos.x, (int)active_container_pos.y, (int)active_container_pos.z);
+                        auto& c = world_chests[key];
+                        for (auto& cs : c.slots) {
+                            if (!cs.is_tool && cs.item.count == 0) {
+                                cs.is_tool = true;
+                                cs.tool = tool_inventory[i];
+                                cs.item = { AIR, "", 0 };
+                                tool_inventory.erase(tool_inventory.begin() + i);
+                                if (selected_tool_idx >= (int)tool_inventory.size()) {
+                                    selected_tool_idx = tool_inventory.empty() ? -1 : (int)tool_inventory.size() - 1;
+                                }
+                                break;
+                            }
+                        }
+                    } else if (is_dragging) {
+                        if (dragging_tool) {
+                            if (i < (int)tool_inventory.size()) {
+                                ToolSlot temp = tool_inventory[i];
+                                tool_inventory[i] = drag_tool;
+                                drag_tool = temp;
+                            } else {
+                                tool_inventory.push_back(drag_tool);
+                                is_dragging = false;
+                                dragging_tool = false;
+                            }
+                        }
+                    } else {
+                        if (i < (int)tool_inventory.size()) {
+                            selected_slot = 0;
+                            selected_tool_idx = i;
+                            drag_tool = tool_inventory[i];
                             tool_inventory.erase(tool_inventory.begin() + i);
                             if (selected_tool_idx >= (int)tool_inventory.size()) {
                                 selected_tool_idx = tool_inventory.empty() ? -1 : (int)tool_inventory.size() - 1;
                             }
-                            break;
+                            is_dragging = true;
+                            dragging_tool = true;
+                            drag_source_type = 1;
+                            drag_source_idx = i;
                         }
-                    }
-                } else if (is_dragging) {
-                    if (dragging_tool) {
-                        if (i < (int)tool_inventory.size()) {
-                            ToolSlot temp = tool_inventory[i];
-                            tool_inventory[i] = drag_tool;
-                            drag_tool = temp;
-                        } else {
-                            tool_inventory.push_back(drag_tool);
-                            is_dragging = false;
-                            dragging_tool = false;
-                        }
-                    }
-                } else {
-                    if (i < (int)tool_inventory.size()) {
-                        selected_slot = 0;
-                        selected_tool_idx = i;
-                        drag_tool = tool_inventory[i];
-                        tool_inventory.erase(tool_inventory.begin() + i);
-                        if (selected_tool_idx >= (int)tool_inventory.size()) {
-                            selected_tool_idx = tool_inventory.empty() ? -1 : (int)tool_inventory.size() - 1;
-                        }
-                        is_dragging = true;
-                        dragging_tool = true;
-                        drag_source_type = 1;
-                        drag_source_idx = i;
                     }
                 }
             }
         }
+        cur_y += slot_total + 8;
     }
 
     // 2. Almacenamiento Principal (27 slots: 9x3)
-    int st_y = py + 48;
-    DrawText("Inventario (27 casillas):", px, st_y - 18, 12, Color{200, 210, 225, 255});
+    DrawText("Mochila (27 casillas):", px, cur_y + 2, 12, Color{200, 210, 225, 255});
+    int st_y = cur_y + 18;
     for (int i = 0; i < 27; i++) {
         int col = i % 9;
         int row = i / 9;
@@ -745,15 +750,15 @@ void UI::draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y,
 void UI::draw_chest_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
-    int panel_w = 680;
-    int panel_h = 580;
+    int panel_w = 436;
+    int panel_h = 500;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
     DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
     DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
     
-    DrawText("Cofre de Almacenamiento (27 Casillas)", px + 20, py + 15, 16, Color{255, 215, 0, 255});
+    DrawText("Cofre de Almacenamiento", px + 20, py + 15, 16, Color{255, 215, 0, 255});
     
     Vector2 m = GetMousePosition();
     bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -776,7 +781,7 @@ void UI::draw_chest_panel() {
     int slot_pad = 4;
     int slot_total = slot_size + slot_pad;
     int chest_x = px + 20;
-    int chest_y = py + 48;
+    int chest_y = py + 45;
     
     for (int i = 0; i < 27; i++) {
         int col = i % 9;
@@ -914,15 +919,15 @@ void UI::draw_chest_panel() {
         }
     }
     
-    DrawLine(px + 20, py + 195, px + panel_w - 20, py + 195, Color{60, 75, 95, 255});
-    draw_player_inventory_section(px + 20, py + 220, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift);
+    DrawLine(px + 20, py + 185, px + panel_w - 20, py + 185, Color{60, 75, 95, 255});
+    draw_player_inventory_section(px + 20, py + 195, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
 }
 
 void UI::draw_furnace_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
-    int panel_w = 680;
-    int panel_h = 580;
+    int panel_w = 436;
+    int panel_h = 440;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
@@ -948,15 +953,15 @@ void UI::draw_furnace_panel() {
     auto key = std::make_tuple((int)active_container_pos.x, (int)active_container_pos.y, (int)active_container_pos.z);
     auto& furnace = world_furnaces[key];
     
-    int slot_size = 44;
-    int in_x = px + 140;
-    int in_y = py + 48;
+    int slot_size = 40;
+    int in_x = px + 110;
+    int in_y = py + 45;
     int fuel_x = in_x;
-    int fuel_y = py + 124;
-    int out_x = px + 320;
-    int out_y = py + 84;
+    int fuel_y = py + 115;
+    int out_x = px + 260;
+    int out_y = py + 75;
     
-    DrawText("Mineral / Material:", in_x - 90, in_y + 14, 11, Color{190, 200, 215, 255});
+    DrawText("Mineral:", in_x - 65, in_y + 14, 11, Color{190, 200, 215, 255});
     bool hover_in = (m.x >= in_x && m.x <= in_x + slot_size && m.y >= in_y && m.y <= in_y + slot_size);
     DrawRectangle(in_x, in_y, slot_size, slot_size, hover_in ? Color{65, 80, 105, 255} : Color{30, 36, 46, 255});
     DrawRectangleLines(in_x, in_y, slot_size, slot_size, Color{85, 100, 125, 255});
@@ -983,8 +988,8 @@ void UI::draw_furnace_panel() {
         }
     }
     
-    int fire_x = in_x + 14;
-    int fire_y = in_y + 48;
+    int fire_x = in_x + 12;
+    int fire_y = in_y + 45;
     float fire_pct = (furnace.max_burn_ticks > 0) ? ((float)furnace.burn_ticks / (float)furnace.max_burn_ticks) : 0.0f;
     DrawRectangle(fire_x, fire_y, 16, 20, Color{40, 40, 40, 255});
     if (fire_pct > 0.0f) {
@@ -993,7 +998,7 @@ void UI::draw_furnace_panel() {
         DrawRectangle(fire_x + 3, fire_y + (20 - fh) + 3, 10, fh - 3, YELLOW);
     }
     
-    DrawText("Combustible:", fuel_x - 80, fuel_y + 14, 11, Color{190, 200, 215, 255});
+    DrawText("Carbon:", fuel_x - 65, fuel_y + 14, 11, Color{190, 200, 215, 255});
     bool hover_fuel = (m.x >= fuel_x && m.x <= fuel_x + slot_size && m.y >= fuel_y && m.y <= fuel_y + slot_size);
     DrawRectangle(fuel_x, fuel_y, slot_size, slot_size, hover_fuel ? Color{65, 80, 105, 255} : Color{30, 36, 46, 255});
     DrawRectangleLines(fuel_x, fuel_y, slot_size, slot_size, Color{85, 100, 125, 255});
@@ -1026,15 +1031,15 @@ void UI::draw_furnace_panel() {
         }
     }
     
-    int arrow_x = in_x + 60;
-    int arrow_y = py + 92;
+    int arrow_x = in_x + 55;
+    int arrow_y = py + 83;
     float cook_pct = (float)furnace.cook_ticks / 200.0f;
     DrawRectangle(arrow_x, arrow_y, 45, 14, Color{45, 52, 65, 255});
     DrawRectangle(arrow_x, arrow_y, (int)(45.0f * cook_pct), 14, Color{255, 215, 0, 255});
     DrawRectangleLines(arrow_x, arrow_y, 45, 14, Color{80, 95, 120, 255});
     DrawText(">>>", arrow_x + 12, arrow_y + 1, 12, WHITE);
     
-    DrawText("Resultado:", out_x + 55, out_y + 16, 11, Color{190, 200, 215, 255});
+    DrawText("Salida:", out_x + 52, out_y + 16, 11, Color{190, 200, 215, 255});
     bool hover_out = (m.x >= out_x && m.x <= out_x + slot_size + 6 && m.y >= out_y && m.y <= out_y + slot_size + 6);
     DrawRectangle(out_x, out_y, slot_size + 6, slot_size + 6, hover_out ? Color{70, 90, 115, 255} : Color{35, 42, 55, 255});
     DrawRectangleLines(out_x, out_y, slot_size + 6, slot_size + 6, GOLD);
@@ -1062,23 +1067,22 @@ void UI::draw_furnace_panel() {
         }
     }
     
-    DrawLine(px + 20, py + 195, px + panel_w - 20, py + 195, Color{60, 75, 95, 255});
-    draw_player_inventory_section(px + 20, py + 220, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift);
+    DrawLine(px + 20, py + 168, px + panel_w - 20, py + 168, Color{60, 75, 95, 255});
+    draw_player_inventory_section(px + 20, py + 178, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, false /* NO tools in furnace */);
 }
 
 void UI::draw_inventory_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
-    int panel_w = 950;
-    int panel_h = 580;
+    int panel_w = 436;
+    int panel_h = 320;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
     DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
     DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
     
-    bool is_table = (mode == UI_MODE_CRAFTING_TABLE);
-    DrawText(is_table ? "Mesa de Crafteo (3x3 - Recetario Completo)" : "Inventario del Jugador (Crafteo 2x2 Basico)", px + 20, py + 15, 16, is_table ? GOLD : Color{200, 220, 255, 255});
+    DrawText("Inventario del Jugador", px + 20, py + 15, 16, Color{200, 220, 255, 255});
     
     Vector2 m = GetMousePosition();
     bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -1094,28 +1098,61 @@ void UI::draw_inventory_panel() {
         DrawText("X", px + panel_w - 28, py + 14, 14, WHITE);
     }
     
-    int craft_x = px + 440;
+    draw_player_inventory_section(px + 20, py + 48, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
+}
+
+void UI::draw_crafting_table_panel() {
+    int sw = GetScreenWidth();
+    int sh = GetScreenHeight();
+    int panel_w = 920;
+    int panel_h = 380;
+    int px = (sw - panel_w) / 2;
+    int py = (sh - panel_h) / 2;
+    
+    DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
+    DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
+    
+    DrawText("Mesa de Crafteo (Recetario Avanzado)", px + 20, py + 15, 16, GOLD);
+    
+    Vector2 m = GetMousePosition();
+    bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
+    bool is_r_click = IsMouseButtonPressed(MOUSE_RIGHT_BUTTON);
+    bool is_shift = IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT);
+    
+    if (m.x >= px + panel_w - 35 && m.x <= px + panel_w - 10 && m.y >= py + 10 && m.y <= py + 35) {
+        DrawRectangle(px + panel_w - 35, py + 10, 25, 25, RED);
+        DrawText("X", px + panel_w - 28, py + 14, 14, WHITE);
+        if (is_l_click) { close_ui(); return; }
+    } else {
+        DrawRectangle(px + panel_w - 35, py + 10, 25, 25, Color{50, 60, 75, 255});
+        DrawText("X", px + panel_w - 28, py + 14, 14, WHITE);
+    }
+    
+    // Left: Player Inventory with tools
+    draw_player_inventory_section(px + 20, py + 48, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
+    
+    // Vertical separator
+    DrawLine(px + 430, py + 45, px + 430, py + panel_h - 20, Color{60, 75, 95, 255});
+    
+    // Right: Recipe Catalog
+    int craft_x = px + 445;
     int craft_y = py + 85;
-    int craft_w = panel_w - 460;
+    int craft_w = panel_w - 465;
     int craft_h = panel_h - 105;
     
-    if (is_table) {
-        static const char* CAT_NAMES[] = { "Todos", "Herramientas", "Bloques", "Listos" };
-        for (int t = 0; t < 4; t++) {
-            int tx = craft_x + t * 105;
-            int ty = py + 48;
-            bool active = (craft_category == t);
-            bool hover = (m.x >= tx && m.x <= tx + 100 && m.y >= ty && m.y <= ty + 28);
-            DrawRectangle(tx, ty, 100, 28, active ? Color{70, 95, 130, 255} : (hover ? Color{50, 60, 75, 255} : Color{32, 38, 48, 255}));
-            DrawRectangleLines(tx, ty, 100, 28, active ? GOLD : Color{70, 80, 95, 255});
-            DrawText(CAT_NAMES[t], tx + 12, ty + 7, 12, active ? WHITE : Color{200, 205, 215, 255});
-            if (hover && is_l_click) {
-                craft_category = t;
-                craft_scroll_offset = 0;
-            }
+    static const char* CAT_NAMES[] = { "Todos", "Herramientas", "Bloques", "Listos" };
+    for (int t = 0; t < 4; t++) {
+        int tx = craft_x + t * 110;
+        int ty = py + 48;
+        bool active = (craft_category == t);
+        bool hover = (m.x >= tx && m.x <= tx + 105 && m.y >= ty && m.y <= ty + 28);
+        DrawRectangle(tx, ty, 105, 28, active ? Color{70, 95, 130, 255} : (hover ? Color{50, 60, 75, 255} : Color{32, 38, 48, 255}));
+        DrawRectangleLines(tx, ty, 105, 28, active ? GOLD : Color{70, 80, 95, 255});
+        DrawText(CAT_NAMES[t], tx + 14, ty + 7, 12, active ? WHITE : Color{200, 205, 215, 255});
+        if (hover && is_l_click) {
+            craft_category = t;
+            craft_scroll_offset = 0;
         }
-    } else {
-        DrawText("Crafteo Basico (Sin Mesa):", craft_x, py + 55, 13, Color{220, 200, 140, 255});
     }
     
     DrawRectangle(craft_x, craft_y, craft_w, craft_h, Color{18, 21, 27, 255});
@@ -1130,13 +1167,9 @@ void UI::draw_inventory_panel() {
     std::vector<int> visible_recipes;
     for (size_t i = 0; i < Config::RECIPES.size(); i++) {
         const auto& rec = Config::RECIPES[i];
-        if (!is_table && rec.requires_table) continue;
-        
-        if (is_table) {
-            if (craft_category == 1 && !rec.result_is_tool) continue;
-            if (craft_category == 2 && rec.result_is_tool) continue;
-            if (craft_category == 3 && !can_craft(i)) continue;
-        }
+        if (craft_category == 1 && !rec.result_is_tool) continue;
+        if (craft_category == 2 && rec.result_is_tool) continue;
+        if (craft_category == 3 && !can_craft(i)) continue;
         visible_recipes.push_back(i);
     }
     
@@ -1205,8 +1238,6 @@ void UI::draw_inventory_panel() {
             craft(r_idx, is_shift ? 5 : 1);
         }
     }
-    
-    draw_player_inventory_section(px + 20, py + 60, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift);
 }
 
 void UI::draw() {
@@ -1232,6 +1263,8 @@ void UI::draw() {
             draw_chest_panel();
         } else if (mode == UI_MODE_FURNACE) {
             draw_furnace_panel();
+        } else if (mode == UI_MODE_CRAFTING_TABLE) {
+            draw_crafting_table_panel();
         } else {
             draw_inventory_panel();
         }

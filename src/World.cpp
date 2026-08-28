@@ -502,10 +502,6 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     if (lz == 0) update_chunk(cx, cz - 1, lx, CHUNK_SIZE);
     if (lx == 0 && lz == 0) update_chunk(cx - 1, cz - 1, CHUNK_SIZE, CHUNK_SIZE);
 
-    // Selective neighbor dirtying: propagate to all 8 neighbors if lighting changes, or to adjacent chunks if on borders
-    bool is_light_changer = (type == Config::TORCH || (Config::BLOCKS.count(type) && Config::BLOCKS.at(type).light_emission > 0) ||
-                             old_b == Config::TORCH || (Config::BLOCKS.count(old_b) && Config::BLOCKS.at(old_b).light_emission > 0));
-
     int sub_y = std::clamp(wy / Config::SUBCHUNK_SIZE, 0, Config::NUM_SUBCHUNKS - 1);
     uint8_t sub_mask = (1 << sub_y);
     if (sub_y > 0) sub_mask |= (1 << (sub_y - 1));
@@ -514,19 +510,10 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             if (dx == 0 && dz == 0) continue;
-            bool should_dirty = is_light_changer;
-            if (!should_dirty) {
-                if (dx == -1 && lx <= 1) should_dirty = true;
-                if (dx == 1 && lx >= CHUNK_SIZE - 1) should_dirty = true;
-                if (dz == -1 && lz <= 1) should_dirty = true;
-                if (dz == 1 && lz >= CHUNK_SIZE - 1) should_dirty = true;
-            }
-            if (should_dirty) {
-                Chunk* c = get_chunk(cx + dx, cz + dz);
-                if (c) {
-                    c->dirty_subchunks_mask.fetch_or(sub_mask);
-                    c->is_dirty = true;
-                }
+            Chunk* c = get_chunk(cx + dx, cz + dz);
+            if (c) {
+                c->dirty_subchunks_mask.fetch_or(sub_mask);
+                c->is_dirty = true;
             }
         }
     }

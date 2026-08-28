@@ -895,7 +895,16 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
 
     auto calc_ao = [&](bool s1, bool s2, bool c) -> float {
         int level = (s1 && s2) ? 0 : 3 - (s1 + s2 + c);
-        return 0.65f + 0.116f * (float)level;
+        return 0.78f + 0.0733f * (float)level;
+    };
+
+    auto sample_face_light = [&](int lx, int ly, int lz, int nx, int ny, int nz) -> VoxelLighting::LightSample {
+        auto self_ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly, lz);
+        if (is_opaque_cube(nx, ny, nz)) {
+            return self_ls;
+        }
+        auto n_ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, nx, ny, nz);
+        return { std::max(self_ls.sunlight, n_ls.sunlight), std::max(self_ls.blocklight, n_ls.blocklight) };
     };
 
     auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, float sun, float block, int tx, int ty) {
@@ -940,53 +949,54 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                        int right_tx, int right_ty,
                        bool cull_top = false, bool cull_bot = false,
                        bool cull_front = false, bool cull_back = false,
-                       bool cull_left = false, bool cull_right = false) {
+                       bool cull_left = false, bool cull_right = false,
+                       bool is_custom_shape = false) {
         if (!cull_top) {
-            float ao0 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
-            float ao1 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
-            float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
-            float ao3 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
-            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly+1, lz);
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            auto ls = sample_face_light(lx, ly, lz, lx, ly+1, lz);
             add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, top_tx, top_ty);
         }
         if (!cull_bot) {
-            float ao0 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
-            float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
-            float ao2 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
-            float ao3 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
-            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly-1, lz);
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            auto ls = sample_face_light(lx, ly, lz, lx, ly-1, lz);
             add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, bot_tx, bot_ty);
         }
         if (!cull_front) {
-            float ao0 = calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
-            float ao1 = calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
-            float ao2 = calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
-            float ao3 = calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
-            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly, lz+1);
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
+            auto ls = sample_face_light(lx, ly, lz, lx, ly, lz+1);
             add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, front_tx, front_ty);
         }
         if (!cull_back) {
-            float ao0 = calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
-            float ao1 = calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
-            float ao2 = calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
-            float ao3 = calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
-            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx, ly, lz-1);
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
+            auto ls = sample_face_light(lx, ly, lz, lx, ly, lz-1);
             add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, back_tx, back_ty);
         }
         if (!cull_right) {
-            float ao0 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
-            float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
-            float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly+1, lz-1));
-            float ao3 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
-            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx+1, ly, lz);
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly+1, lz-1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            auto ls = sample_face_light(lx, ly, lz, lx+1, ly, lz);
             add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, right_tx, right_ty);
         }
         if (!cull_left) {
-            float ao0 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
-            float ao1 = calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly-1, lz+1));
-            float ao2 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
-            float ao3 = calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
-            auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx-1, ly, lz);
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            auto ls = sample_face_light(lx, ly, lz, lx-1, ly, lz);
             add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, left_tx, left_ty);
         }
     };
@@ -1067,26 +1077,31 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                 gx + 0.06f, gy, gz + 0.06f, gx + 0.94f, gy + 0.88f, gz + 0.94f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty);
+                                def_tx, def_ty, def_tx, def_ty,
+                                false, false, false, false, false, false, true);
                         int latch_tx = bt.tex_latch_x >= 0 ? bt.tex_latch_x : 2;
                         int latch_ty = bt.tex_latch_y >= 0 ? bt.tex_latch_y : 3;
                         // Cerrojo orientado
                         if (rot == 0) { // South (+Z)
                             add_box(lx, ly, lz,
                                     gx + 0.44f, gy + 0.42f, gz + 0.94f, gx + 0.56f, gy + 0.62f, gz + 0.99f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
+                                    false, false, false, false, false, false, true);
                         } else if (rot == 1) { // West (-X)
                             add_box(lx, ly, lz,
                                     gx + 0.01f, gy + 0.42f, gz + 0.44f, gx + 0.06f, gy + 0.62f, gz + 0.56f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
+                                    false, false, false, false, false, false, true);
                         } else if (rot == 2) { // North (-Z)
                             add_box(lx, ly, lz,
                                     gx + 0.44f, gy + 0.42f, gz + 0.01f, gx + 0.56f, gy + 0.62f, gz + 0.06f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
+                                    false, false, false, false, false, false, true);
                         } else if (rot == 3) { // East (+X)
                             add_box(lx, ly, lz,
                                     gx + 0.94f, gy + 0.42f, gz + 0.44f, gx + 0.99f, gy + 0.62f, gz + 0.56f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty);
+                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
+                                    false, false, false, false, false, false, true);
                         }
                         break;
                     }
@@ -1096,32 +1111,37 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                 gx, gy, gz, gx + 1.0f, gy + 0.5f, gz + 1.0f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty);
+                                def_tx, def_ty, def_tx, def_ty,
+                                false, false, false, false, false, false, true);
                         // Peldaño superior segun direccion opuesta al jugador
                         if (rot == 0) { // Step on North (-Z)
                             add_box(lx, ly, lz,
                                     gx, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 0.5f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty);
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    false, false, false, false, false, false, true);
                         } else if (rot == 1) { // Step on East (+X)
                             add_box(lx, ly, lz,
                                     gx + 0.5f, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty);
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    false, false, false, false, false, false, true);
                         } else if (rot == 2) { // Step on South (+Z)
                             add_box(lx, ly, lz,
                                     gx, gy + 0.5f, gz + 0.5f, gx + 1.0f, gy + 1.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty);
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    false, false, false, false, false, false, true);
                         } else if (rot == 3) { // Step on West (-X)
                             add_box(lx, ly, lz,
                                     gx, gy + 0.5f, gz, gx + 0.5f, gy + 1.0f, gz + 1.0f,
                                     def_tx, def_ty, def_tx, def_ty,
                                     def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty);
+                                    def_tx, def_ty, def_tx, def_ty,
+                                    false, false, false, false, false, false, true);
                         }
                         break;
                     }
@@ -1171,7 +1191,8 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                 x0, gy, z0, x1, gy + 1.0f, z1,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty);
+                                def_tx, def_ty, def_tx, def_ty,
+                                false, false, false, false, false, false, true);
                         break;
                     }
                     case Config::SHAPE_FENCE: {
@@ -1180,7 +1201,8 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                 gx + 0.375f, gy, gz + 0.375f, gx + 0.625f, gy + 1.0f, gz + 0.625f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty);
+                                def_tx, def_ty, def_tx, def_ty,
+                                false, false, false, false, false, false, true);
                         
                         auto is_fence_or_solid = [&](int x, int y, int z) {
                             if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
@@ -1192,20 +1214,20 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                         };
 
                         if (is_fence_or_solid(lx + 1, ly, lz)) {
-                            add_box(lx, ly, lz, gx + 0.625f, gy + 0.2f, gz + 0.44f, gx + 1.0f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(lx, ly, lz, gx + 0.625f, gy + 0.65f, gz + 0.44f, gx + 1.0f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.625f, gy + 0.2f, gz + 0.44f, gx + 1.0f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
+                            add_box(lx, ly, lz, gx + 0.625f, gy + 0.65f, gz + 0.44f, gx + 1.0f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
                         }
                         if (is_fence_or_solid(lx - 1, ly, lz)) {
-                            add_box(lx, ly, lz, gx, gy + 0.2f, gz + 0.44f, gx + 0.375f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(lx, ly, lz, gx, gy + 0.65f, gz + 0.44f, gx + 0.375f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx, gy + 0.2f, gz + 0.44f, gx + 0.375f, gy + 0.38f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
+                            add_box(lx, ly, lz, gx, gy + 0.65f, gz + 0.44f, gx + 0.375f, gy + 0.83f, gz + 0.56f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
                         }
                         if (is_fence_or_solid(lx, ly, lz + 1)) {
-                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz + 0.625f, gx + 0.56f, gy + 0.38f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz + 0.625f, gx + 0.56f, gy + 0.83f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz + 0.625f, gx + 0.56f, gy + 0.38f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz + 0.625f, gx + 0.56f, gy + 0.83f, gz + 1.0f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
                         }
                         if (is_fence_or_solid(lx, ly, lz - 1)) {
-                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz, gx + 0.56f, gy + 0.38f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
-                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz, gx + 0.56f, gy + 0.83f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz, gx + 0.56f, gy + 0.38f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
+                            add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz, gx + 0.56f, gy + 0.83f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
                         }
                         break;
                     }
@@ -1215,13 +1237,15 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                 gx + 0.44f, gy, gz + 0.44f, gx + 0.56f, gy + 0.65f, gz + 0.56f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty);
+                                def_tx, def_ty, def_tx, def_ty,
+                                false, false, false, false, false, false, true);
                         // Cabeza con fuego
                         add_box(lx, ly, lz,
                                 gx + 0.40f, gy + 0.55f, gz + 0.40f, gx + 0.60f, gy + 0.75f, gz + 0.60f,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty);
+                                def_tx, def_ty, def_tx, def_ty,
+                                false, false, false, false, false, false, true);
                         break;
                     }
                     default:

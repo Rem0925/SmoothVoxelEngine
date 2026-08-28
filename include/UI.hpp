@@ -130,7 +130,7 @@ private:
     void draw_crafting_table_panel();
     void draw_chest_panel();
     void draw_furnace_panel();
-    void draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y, bool is_l_click, bool is_r_click, bool is_shift);
+    void draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y, bool is_l_click, bool is_r_click, bool is_shift, bool show_tools = true);
 
     void draw_block_icon(uint8_t block_id, int x, int y, int size);
     void draw_tool_icon(Config::ToolType type, Config::ToolTier tier, int x, int y, int size);
