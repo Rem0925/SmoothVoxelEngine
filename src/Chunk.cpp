@@ -604,8 +604,35 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
             
             uint8_t b1 = get_block(lx, ly, lz);
             uint8_t b2 = get_block(lx, ly - 1, lz);
+
+            auto is_invalid_vicinity = [&]() {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    for (int dy = 0; dy <= 1; ++dy) {
+                        for (int dz = -1; dz <= 1; ++dz) {
+                            uint8_t b = get_block(lx + dx, ly + dy, lz + dz);
+                            if (b == Config::WOOD || b == Config::BIRCH_WOOD || b == Config::LEAVES || 
+                                b == Config::CACTUS || b == Config::STONE || b == Config::COBBLESTONE || 
+                                b == Config::PLANKS_CUBE || b == Config::WATER) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            };
+
+            if (is_invalid_vicinity()) {
+                continue;
+            }
+
             bool on_grass = (b1 == Config::GRASS || b2 == Config::GRASS);
             bool on_sand  = (b1 == Config::SAND  || b2 == Config::SAND);
+            if (!on_grass && !on_sand && b1 != Config::TALL_GRASS && b2 != Config::TALL_GRASS && 
+                b1 != Config::RED_MUSHROOM && b2 != Config::RED_MUSHROOM && 
+                b1 != Config::BROWN_MUSHROOM && b2 != Config::BROWN_MUSHROOM && 
+                b1 != Config::DEAD_BUSH && b2 != Config::DEAD_BUSH) {
+                continue;
+            }
             
             int cache_idx = lz * CACHE_SIZE + lx;
             BiomeConfig biome = Biome::get_discrete_biome(center.x, center.z, seed_offset);
