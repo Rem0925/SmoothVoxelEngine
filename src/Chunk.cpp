@@ -509,8 +509,8 @@ void Chunk::generate_thread() {
         generating = false;
     }
 
-    build_mesh_data(voxels.data(), current_lod.load());
-    pack_meshes(3);
+    build_mesh_data(voxels.data(), current_lod.load(), 0xFF);
+    pack_meshes(3, 0xFF);
     needs_upload = true;
     is_ready = true;
 }
@@ -527,24 +527,27 @@ void Chunk::rebuild_thread() {
             rebuild_mode = 0;
         }
         if (mode == 0) break;
+        uint8_t sub_mask = dirty_subchunks_mask.exchange(0);
+        if (sub_mask == 0) sub_mask = 0xFF;
+
         {
             std::lock_guard<std::mutex> lock(chunk_mutex);
             v_copy = voxels;
         }
         int lod = current_lod.load();
         if (mode >= 2) {
-            build_mesh_data(v_copy.data(), lod);
-            pack_meshes(3);
+            build_mesh_data(v_copy.data(), lod, sub_mask);
+            pack_meshes(3, sub_mask);
         } else {
-            build_water_mesh(v_copy.data(), lod);
-            pack_meshes(1);
+            build_water_mesh(v_copy.data(), lod, sub_mask);
+            pack_meshes(1, sub_mask);
         }
     }
     rebuild_running = false;
     needs_upload = true;
 }
 
-void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
+void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_t sub_mask) {
     std::vector<Vector3> ls_vertices, ls_normals;
     std::vector<Vector2> ls_uvs, ls_uvs2;
     std::vector<Color> ls_colors;
@@ -586,7 +589,21 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
     std::vector<uint8_t> local_light_grid((Config::CHUNK_SIZE + 1) * Config::GRID_Y * (Config::CHUNK_SIZE + 1));
     VoxelLighting::compute_chunk_lighting(l_cache, local_light_grid.data());
 
-    mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod, grass_tint_cache.data(), foliage_tint_cache.data(), local_light_grid.data());
+    int min_sub = 0;
+    while (min_sub < Config::NUM_SUBCHUNKS && !(sub_mask & (1 << min_sub))) min_sub++;
+    int max_sub = Config::NUM_SUBCHUNKS - 1;
+    while (max_sub >= 0 && !(sub_mask & (1 << max_sub))) max_sub--;
+
+    if (min_sub <= max_sub) {
+        int mc_min_y = min_sub * Config::SUBCHUNK_SIZE;
+        int mc_max_y = (max_sub + 1) * Config::SUBCHUNK_SIZE;
+
+        mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, 
+                     ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, 
+                     cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod, 
+                     grass_tint_cache.data(), foliage_tint_cache.data(), local_light_grid.data(),
+                     mc_min_y, mc_max_y);
+    }
     
     // Remap vertices to global coords
     for (auto& v : ls_vertices) {
@@ -760,71 +777,84 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
     {
         std::lock_guard<std::mutex> lock(mesh_mutex);
         for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
-            subchunks[s].s_vertices.clear();
-            subchunks[s].s_normals.clear();
-            subchunks[s].s_uvs.clear();
-            subchunks[s].s_uvs2.clear();
-            subchunks[s].s_colors.clear();
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].s_vertices.clear();
+                subchunks[s].s_normals.clear();
+                subchunks[s].s_uvs.clear();
+                subchunks[s].s_uvs2.clear();
+                subchunks[s].s_colors.clear();
 
-            subchunks[s].p_vertices.clear();
-            subchunks[s].p_normals.clear();
-            subchunks[s].p_uvs.clear();
-            subchunks[s].p_colors.clear();
+                subchunks[s].p_vertices.clear();
+                subchunks[s].p_normals.clear();
+                subchunks[s].p_uvs.clear();
+                subchunks[s].p_colors.clear();
+            }
         }
         light_grid = local_light_grid;
 
         for (size_t i = 0; i < ls_vertices.size(); i += 3) {
             float avg_y = (ls_vertices[i].y + ls_vertices[i+1].y + ls_vertices[i+2].y) / 3.0f;
             int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
-            
-            subchunks[s].s_vertices.push_back(ls_vertices[i]);
-            subchunks[s].s_vertices.push_back(ls_vertices[i+1]);
-            subchunks[s].s_vertices.push_back(ls_vertices[i+2]);
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].s_vertices.push_back(ls_vertices[i]);
+                subchunks[s].s_vertices.push_back(ls_vertices[i+1]);
+                subchunks[s].s_vertices.push_back(ls_vertices[i+2]);
 
-            subchunks[s].s_normals.push_back(ls_normals[i]);
-            subchunks[s].s_normals.push_back(ls_normals[i+1]);
-            subchunks[s].s_normals.push_back(ls_normals[i+2]);
+                subchunks[s].s_normals.push_back(ls_normals[i]);
+                subchunks[s].s_normals.push_back(ls_normals[i+1]);
+                subchunks[s].s_normals.push_back(ls_normals[i+2]);
 
-            subchunks[s].s_uvs.push_back(ls_uvs[i]);
-            subchunks[s].s_uvs.push_back(ls_uvs[i+1]);
-            subchunks[s].s_uvs.push_back(ls_uvs[i+2]);
+                subchunks[s].s_uvs.push_back(ls_uvs[i]);
+                subchunks[s].s_uvs.push_back(ls_uvs[i+1]);
+                subchunks[s].s_uvs.push_back(ls_uvs[i+2]);
 
-            subchunks[s].s_uvs2.push_back(ls_uvs2[i]);
-            subchunks[s].s_uvs2.push_back(ls_uvs2[i+1]);
-            subchunks[s].s_uvs2.push_back(ls_uvs2[i+2]);
+                subchunks[s].s_uvs2.push_back(ls_uvs2[i]);
+                subchunks[s].s_uvs2.push_back(ls_uvs2[i+1]);
+                subchunks[s].s_uvs2.push_back(ls_uvs2[i+2]);
 
-            subchunks[s].s_colors.push_back(ls_colors[i]);
-            subchunks[s].s_colors.push_back(ls_colors[i+1]);
-            subchunks[s].s_colors.push_back(ls_colors[i+2]);
+                subchunks[s].s_colors.push_back(ls_colors[i]);
+                subchunks[s].s_colors.push_back(ls_colors[i+1]);
+                subchunks[s].s_colors.push_back(ls_colors[i+2]);
+            }
         }
 
         for (size_t i = 0; i < lp_vertices.size(); i += 3) {
             float avg_y = (lp_vertices[i].y + lp_vertices[i+1].y + lp_vertices[i+2].y) / 3.0f;
             int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].p_vertices.push_back(lp_vertices[i]);
+                subchunks[s].p_vertices.push_back(lp_vertices[i+1]);
+                subchunks[s].p_vertices.push_back(lp_vertices[i+2]);
 
-            subchunks[s].p_vertices.push_back(lp_vertices[i]);
-            subchunks[s].p_vertices.push_back(lp_vertices[i+1]);
-            subchunks[s].p_vertices.push_back(lp_vertices[i+2]);
+                subchunks[s].p_normals.push_back(lp_normals[i]);
+                subchunks[s].p_normals.push_back(lp_normals[i+1]);
+                subchunks[s].p_normals.push_back(lp_normals[i+2]);
 
-            subchunks[s].p_normals.push_back(lp_normals[i]);
-            subchunks[s].p_normals.push_back(lp_normals[i+1]);
-            subchunks[s].p_normals.push_back(lp_normals[i+2]);
+                subchunks[s].p_uvs.push_back(lp_uvs[i]);
+                subchunks[s].p_uvs.push_back(lp_uvs[i+1]);
+                subchunks[s].p_uvs.push_back(lp_uvs[i+2]);
 
-            subchunks[s].p_uvs.push_back(lp_uvs[i]);
-            subchunks[s].p_uvs.push_back(lp_uvs[i+1]);
-            subchunks[s].p_uvs.push_back(lp_uvs[i+2]);
-
-            subchunks[s].p_colors.push_back(lp_colors[i]);
-            subchunks[s].p_colors.push_back(lp_colors[i+1]);
-            subchunks[s].p_colors.push_back(lp_colors[i+2]);
+                subchunks[s].p_colors.push_back(lp_colors[i]);
+                subchunks[s].p_colors.push_back(lp_colors[i+1]);
+                subchunks[s].p_colors.push_back(lp_colors[i+2]);
+            }
         }
     }
 
-    build_construction_mesh(voxels_ptr, local_light_grid.data());
-    build_water_mesh(voxels_ptr, lod);
+    build_construction_mesh(voxels_ptr, local_light_grid.data(), sub_mask);
+    build_water_mesh(voxels_ptr, lod, sub_mask);
 }
 
-void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid) {
+void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid, uint8_t sub_mask) {
+    int min_sub = 0;
+    while (min_sub < Config::NUM_SUBCHUNKS && !(sub_mask & (1 << min_sub))) min_sub++;
+    int max_sub = Config::NUM_SUBCHUNKS - 1;
+    while (max_sub >= 0 && !(sub_mask & (1 << max_sub))) max_sub--;
+    if (min_sub > max_sub) return;
+
+    int ly_start = min_sub * Config::SUBCHUNK_SIZE;
+    int ly_end = (max_sub + 1) * Config::SUBCHUNK_SIZE;
+
     std::vector<Vector3> lb_vertices, lb_normals;
     std::vector<Vector2> lb_uvs;
     std::vector<Color> lb_colors;
@@ -848,6 +878,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
     auto is_opaque_cube = [&](int x, int y, int z) -> bool {
         if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
         int idx = get_idx(x, y, z);
+        if (voxels_ptr[idx].density >= Config::ISO_SURFACE) return true;
         uint8_t b = voxels_ptr[idx].block;
         if (b == Config::AIR || b == Config::WATER) return false;
         if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
@@ -945,7 +976,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
         if (!cull_right) {
             float ao0 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
             float ao1 = calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
-            float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao2 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly+1, lz-1));
             float ao3 = calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
             auto ls = VoxelLighting::sample_block_face_light(light_grid, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, lx+1, ly, lz);
             add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, right_tx, right_ty);
@@ -961,7 +992,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
     };
 
     for (int lz = 0; lz < Config::CHUNK_SIZE; ++lz) {
-        for (int ly = 0; ly < Config::GRID_Y; ++ly) {
+        for (int ly = ly_start; ly < ly_end; ++ly) {
             for (int lx = 0; lx < Config::CHUNK_SIZE; ++lx) {
                 int idx = get_idx(lx, ly, lz);
                 uint8_t b = voxels_ptr[idx].block;
@@ -1170,36 +1201,39 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
     {
         std::lock_guard<std::mutex> lock(mesh_mutex);
         for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
-            subchunks[s].b_vertices.clear();
-            subchunks[s].b_normals.clear();
-            subchunks[s].b_uvs.clear();
-            subchunks[s].b_colors.clear();
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].b_vertices.clear();
+                subchunks[s].b_normals.clear();
+                subchunks[s].b_uvs.clear();
+                subchunks[s].b_colors.clear();
+            }
         }
 
         for (size_t i = 0; i < lb_vertices.size(); i += 3) {
             float avg_y = (lb_vertices[i].y + lb_vertices[i+1].y + lb_vertices[i+2].y) / 3.0f;
             int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].b_vertices.push_back(lb_vertices[i]);
+                subchunks[s].b_vertices.push_back(lb_vertices[i+1]);
+                subchunks[s].b_vertices.push_back(lb_vertices[i+2]);
 
-            subchunks[s].b_vertices.push_back(lb_vertices[i]);
-            subchunks[s].b_vertices.push_back(lb_vertices[i+1]);
-            subchunks[s].b_vertices.push_back(lb_vertices[i+2]);
+                subchunks[s].b_normals.push_back(lb_normals[i]);
+                subchunks[s].b_normals.push_back(lb_normals[i+1]);
+                subchunks[s].b_normals.push_back(lb_normals[i+2]);
 
-            subchunks[s].b_normals.push_back(lb_normals[i]);
-            subchunks[s].b_normals.push_back(lb_normals[i+1]);
-            subchunks[s].b_normals.push_back(lb_normals[i+2]);
+                subchunks[s].b_uvs.push_back(lb_uvs[i]);
+                subchunks[s].b_uvs.push_back(lb_uvs[i+1]);
+                subchunks[s].b_uvs.push_back(lb_uvs[i+2]);
 
-            subchunks[s].b_uvs.push_back(lb_uvs[i]);
-            subchunks[s].b_uvs.push_back(lb_uvs[i+1]);
-            subchunks[s].b_uvs.push_back(lb_uvs[i+2]);
-
-            subchunks[s].b_colors.push_back(lb_colors[i]);
-            subchunks[s].b_colors.push_back(lb_colors[i+1]);
-            subchunks[s].b_colors.push_back(lb_colors[i+2]);
+                subchunks[s].b_colors.push_back(lb_colors[i]);
+                subchunks[s].b_colors.push_back(lb_colors[i+1]);
+                subchunks[s].b_colors.push_back(lb_colors[i+2]);
+            }
         }
     }
 }
 
-void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
+void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod, uint8_t sub_mask) {
     std::vector<Vector3> lw_vertices, lw_normals;
     std::vector<Vector2> lw_uvs, lw_uvs2;
     std::vector<Color> lw_colors;
@@ -1387,41 +1421,44 @@ void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
     {
         std::lock_guard<std::mutex> lock(mesh_mutex);
         for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
-            subchunks[s].w_vertices.clear();
-            subchunks[s].w_normals.clear();
-            subchunks[s].w_uvs.clear();
-            subchunks[s].w_uvs2.clear();
-            subchunks[s].w_colors.clear();
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].w_vertices.clear();
+                subchunks[s].w_normals.clear();
+                subchunks[s].w_uvs.clear();
+                subchunks[s].w_uvs2.clear();
+                subchunks[s].w_colors.clear();
+            }
         }
 
         for (size_t i = 0; i < fw_vertices.size(); i += 3) {
             float avg_y = (fw_vertices[i].y + fw_vertices[i+1].y + fw_vertices[i+2].y) / 3.0f;
             int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].w_vertices.push_back(fw_vertices[i]);
+                subchunks[s].w_vertices.push_back(fw_vertices[i+1]);
+                subchunks[s].w_vertices.push_back(fw_vertices[i+2]);
 
-            subchunks[s].w_vertices.push_back(fw_vertices[i]);
-            subchunks[s].w_vertices.push_back(fw_vertices[i+1]);
-            subchunks[s].w_vertices.push_back(fw_vertices[i+2]);
+                subchunks[s].w_normals.push_back(fw_normals[i]);
+                subchunks[s].w_normals.push_back(fw_normals[i+1]);
+                subchunks[s].w_normals.push_back(fw_normals[i+2]);
 
-            subchunks[s].w_normals.push_back(fw_normals[i]);
-            subchunks[s].w_normals.push_back(fw_normals[i+1]);
-            subchunks[s].w_normals.push_back(fw_normals[i+2]);
+                subchunks[s].w_uvs.push_back(fw_uvs[i]);
+                subchunks[s].w_uvs.push_back(fw_uvs[i+1]);
+                subchunks[s].w_uvs.push_back(fw_uvs[i+2]);
 
-            subchunks[s].w_uvs.push_back(fw_uvs[i]);
-            subchunks[s].w_uvs.push_back(fw_uvs[i+1]);
-            subchunks[s].w_uvs.push_back(fw_uvs[i+2]);
+                subchunks[s].w_uvs2.push_back(fw_uvs2[i]);
+                subchunks[s].w_uvs2.push_back(fw_uvs2[i+1]);
+                subchunks[s].w_uvs2.push_back(fw_uvs2[i+2]);
 
-            subchunks[s].w_uvs2.push_back(fw_uvs2[i]);
-            subchunks[s].w_uvs2.push_back(fw_uvs2[i+1]);
-            subchunks[s].w_uvs2.push_back(fw_uvs2[i+2]);
-
-            subchunks[s].w_colors.push_back(fw_colors[i]);
-            subchunks[s].w_colors.push_back(fw_colors[i+1]);
-            subchunks[s].w_colors.push_back(fw_colors[i+2]);
+                subchunks[s].w_colors.push_back(fw_colors[i]);
+                subchunks[s].w_colors.push_back(fw_colors[i+1]);
+                subchunks[s].w_colors.push_back(fw_colors[i+2]);
+            }
         }
     }
 }
 
-void Chunk::pack_meshes(int mask) {
+void Chunk::pack_meshes(int mask, uint8_t sub_mask) {
     std::lock_guard<std::mutex> lock(mesh_mutex);
 
     auto free_arrays = [](Mesh& m) {
@@ -1433,6 +1470,7 @@ void Chunk::pack_meshes(int mask) {
     };
 
     for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        if ((sub_mask & (1 << s)) == 0) continue;
         auto& sc = subchunks[s];
 
         if ((mask & 2) != 0) {
@@ -1594,12 +1632,14 @@ void Chunk::pack_meshes(int mask) {
         }
     }
 
+    pending_subchunks_upload_mask.fetch_or(sub_mask);
     pending_upload_mask.fetch_or(mask);
 }
 
 void Chunk::upload_meshes() {
     int mask = pending_upload_mask.exchange(0);
-    if (mask == 0) return;
+    uint8_t sub_mask = pending_subchunks_upload_mask.exchange(0);
+    if (mask == 0 && sub_mask == 0) return;
 
     std::lock_guard<std::mutex> lock(mesh_mutex);
 
@@ -1624,6 +1664,7 @@ void Chunk::upload_meshes() {
     };
 
     for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        if ((sub_mask & (1 << s)) == 0) continue;
         auto& sc = subchunks[s];
         if ((mask & 2) != 0) {
             upload_and_swap(sc.solid_mesh, sc.next_solid_mesh);
@@ -1727,12 +1768,19 @@ void Chunk::set_block(int x, int y, int z, uint8_t type, uint8_t rotation) {
     
     voxels[i].water = (type == Config::WATER) ? 8 : 0;
     
+    int sub_y = std::clamp(y / Config::SUBCHUNK_SIZE, 0, Config::NUM_SUBCHUNKS - 1);
+    uint8_t sub_mask = (1 << sub_y);
+    if (sub_y > 0) sub_mask |= (1 << (sub_y - 1));
+    if (sub_y < Config::NUM_SUBCHUNKS - 1) sub_mask |= (1 << (sub_y + 1));
+    dirty_subchunks_mask.fetch_or(sub_mask);
+
     is_dirty = true;
     needs_save = true;
     water_only_rebuild = false;
 }
 
-void Chunk::rebuild_mesh(bool water_only) {
+void Chunk::rebuild_mesh(bool water_only, uint8_t sub_mask) {
+    dirty_subchunks_mask.fetch_or(sub_mask);
     int want = water_only ? 1 : 2;
     std::lock_guard<std::mutex> lock(rebuild_mutex);
     int current = rebuild_mode.load();

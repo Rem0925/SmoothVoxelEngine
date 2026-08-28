@@ -48,6 +48,8 @@ public:
     std::atomic<bool> rebuild_running{false};
     std::atomic<bool> water_only_rebuild{false};
     std::atomic<int> pending_upload_mask{0};
+    std::atomic<uint8_t> dirty_subchunks_mask{0xFF};
+    std::atomic<uint8_t> pending_subchunks_upload_mask{0xFF};
     std::atomic<bool> generating{false};
     
     std::mutex chunk_mutex;
@@ -100,7 +102,7 @@ public:
 
     void set_block(int x, int y, int z, uint8_t type, uint8_t rotation = 0);
     void set_water_node(int x, int y, int z, uint8_t level);
-    void rebuild_mesh(bool water_only = false);
+    void rebuild_mesh(bool water_only = false, uint8_t sub_mask = 0xFF);
     void save_to_disk();
 
 private:
@@ -118,9 +120,9 @@ private:
 
     void generate_thread();
     void rebuild_thread();
-    void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1);
-    void build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid = nullptr);
-    void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1);
-    void pack_meshes(int mask);
+    void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1, uint8_t sub_mask = 0xFF);
+    void build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid = nullptr, uint8_t sub_mask = 0xFF);
+    void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1, uint8_t sub_mask = 0xFF);
+    void pack_meshes(int mask, uint8_t sub_mask = 0xFF);
     void upload_meshes();
 };

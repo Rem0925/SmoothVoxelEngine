@@ -2,6 +2,7 @@
 #pragma once
 #include <cstdint>
 #include <vector>
+#include <algorithm>
 #include <raylib.h>
 #include "Config.hpp"
 
@@ -26,18 +27,42 @@ struct LightCache {
     uint8_t get_block(int wx, int wy, int wz) const {
         if (wy < 0 || wy >= Config::GRID_Y) return Config::AIR;
         
-        int cx = (int)std::floor((float)wx / (float)Config::CHUNK_SIZE);
-        int cz = (int)std::floor((float)wz / (float)Config::CHUNK_SIZE);
-        int dx = cx - base_cx;
-        int dz = cz - base_cz;
-        if (dx < -1 || dx > 1 || dz < -1 || dz > 1) return Config::AIR;
+        int lx_raw = wx - base_cx * Config::CHUNK_SIZE;
+        int lz_raw = wz - base_cz * Config::CHUNK_SIZE;
         
-        int lx = wx - cx * Config::CHUNK_SIZE;
-        int lz = wz - cz * Config::CHUNK_SIZE;
+        int dx = 0, dz = 0;
+        int lx = lx_raw, lz = lz_raw;
+        
+        if (lx_raw < 0) {
+            dx = -1;
+            lx = lx_raw + Config::CHUNK_SIZE;
+        } else if (lx_raw > Config::CHUNK_SIZE) {
+            dx = 1;
+            lx = lx_raw - Config::CHUNK_SIZE;
+        }
+        
+        if (lz_raw < 0) {
+            dz = -1;
+            lz = lz_raw + Config::CHUNK_SIZE;
+        } else if (lz_raw > Config::CHUNK_SIZE) {
+            dz = 1;
+            lz = lz_raw - Config::CHUNK_SIZE;
+        }
+        
+        lx = std::clamp(lx, 0, Config::CHUNK_SIZE);
+        lz = std::clamp(lz, 0, Config::CHUNK_SIZE);
         
         const Config::VoxelData* c = chunks[dx + 1][dz + 1];
         if (c) {
             return c[wy * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx].block;
+        }
+        
+        // Fallback: clamp to self chunk edge
+        const Config::VoxelData* self = chunks[1][1];
+        if (self) {
+            int cx_cl = std::clamp(lx_raw, 0, Config::CHUNK_SIZE);
+            int cz_cl = std::clamp(lz_raw, 0, Config::CHUNK_SIZE);
+            return self[wy * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + cz_cl * (Config::CHUNK_SIZE + 1) + cx_cl].block;
         }
         return Config::AIR;
     }
@@ -45,18 +70,42 @@ struct LightCache {
     float get_density(int wx, int wy, int wz) const {
         if (wy < 0 || wy >= Config::GRID_Y) return -1.0f;
         
-        int cx = (int)std::floor((float)wx / (float)Config::CHUNK_SIZE);
-        int cz = (int)std::floor((float)wz / (float)Config::CHUNK_SIZE);
-        int dx = cx - base_cx;
-        int dz = cz - base_cz;
-        if (dx < -1 || dx > 1 || dz < -1 || dz > 1) return -1.0f;
+        int lx_raw = wx - base_cx * Config::CHUNK_SIZE;
+        int lz_raw = wz - base_cz * Config::CHUNK_SIZE;
         
-        int lx = wx - cx * Config::CHUNK_SIZE;
-        int lz = wz - cz * Config::CHUNK_SIZE;
+        int dx = 0, dz = 0;
+        int lx = lx_raw, lz = lz_raw;
+        
+        if (lx_raw < 0) {
+            dx = -1;
+            lx = lx_raw + Config::CHUNK_SIZE;
+        } else if (lx_raw > Config::CHUNK_SIZE) {
+            dx = 1;
+            lx = lx_raw - Config::CHUNK_SIZE;
+        }
+        
+        if (lz_raw < 0) {
+            dz = -1;
+            lz = lz_raw + Config::CHUNK_SIZE;
+        } else if (lz_raw > Config::CHUNK_SIZE) {
+            dz = 1;
+            lz = lz_raw - Config::CHUNK_SIZE;
+        }
+        
+        lx = std::clamp(lx, 0, Config::CHUNK_SIZE);
+        lz = std::clamp(lz, 0, Config::CHUNK_SIZE);
         
         const Config::VoxelData* c = chunks[dx + 1][dz + 1];
         if (c) {
             return c[wy * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx].density;
+        }
+        
+        // Fallback: clamp to self chunk edge
+        const Config::VoxelData* self = chunks[1][1];
+        if (self) {
+            int cx_cl = std::clamp(lx_raw, 0, Config::CHUNK_SIZE);
+            int cz_cl = std::clamp(lz_raw, 0, Config::CHUNK_SIZE);
+            return self[wy * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + cz_cl * (Config::CHUNK_SIZE + 1) + cx_cl].density;
         }
         return -1.0f;
     }

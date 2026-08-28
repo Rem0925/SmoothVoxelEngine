@@ -492,6 +492,11 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     bool is_light_changer = (type == Config::TORCH || (Config::BLOCKS.count(type) && Config::BLOCKS.at(type).light_emission > 0) ||
                              old_b == Config::TORCH || (Config::BLOCKS.count(old_b) && Config::BLOCKS.at(old_b).light_emission > 0));
 
+    int sub_y = std::clamp(wy / Config::SUBCHUNK_SIZE, 0, Config::NUM_SUBCHUNKS - 1);
+    uint8_t sub_mask = (1 << sub_y);
+    if (sub_y > 0) sub_mask |= (1 << (sub_y - 1));
+    if (sub_y < Config::NUM_SUBCHUNKS - 1) sub_mask |= (1 << (sub_y + 1));
+
     for (int dx = -1; dx <= 1; dx++) {
         for (int dz = -1; dz <= 1; dz++) {
             if (dx == 0 && dz == 0) continue;
@@ -504,7 +509,10 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
             }
             if (should_dirty) {
                 Chunk* c = get_chunk(cx + dx, cz + dz);
-                if (c) c->is_dirty = true;
+                if (c) {
+                    c->dirty_subchunks_mask.fetch_or(sub_mask);
+                    c->is_dirty = true;
+                }
             }
         }
     }
