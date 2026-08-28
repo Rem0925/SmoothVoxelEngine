@@ -20,7 +20,9 @@
 #include "DatabaseIO.hpp"
 #include "ItemDrop.hpp"
 #include "VoxelLighting.hpp"
+#include "json.hpp"
 
+using json = nlohmann::json;
 using namespace Config;
 
 bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dist, Vector3& out_hit, Vector3& out_solid, Vector3& out_empty) {
@@ -846,8 +848,50 @@ int main() {
     if (sqlite3_open_v2((save_dir + "/chunks.db").c_str(), &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nullptr) == SQLITE_OK) {
         sqlite3_exec(db, "PRAGMA journal_mode=WAL;", 0, 0, 0);
         sqlite3_exec(db, "PRAGMA synchronous=NORMAL;", 0, 0, 0);
-        const char* sql = "CREATE TABLE IF NOT EXISTS chunks (cx INTEGER, cz INTEGER, chunk_data BLOB, PRIMARY KEY(cx, cz))";
-        sqlite3_exec(db, sql, 0, 0, 0);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS chunks (cx INTEGER, cz INTEGER, chunk_data BLOB, PRIMARY KEY(cx, cz))", 0, 0, 0);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS chests (x INTEGER, y INTEGER, z INTEGER, data TEXT, PRIMARY KEY(x, y, z))", 0, 0, 0);
+        sqlite3_exec(db, "CREATE TABLE IF NOT EXISTS furnaces (x INTEGER, y INTEGER, z INTEGER, data TEXT, PRIMARY KEY(x, y, z))", 0, 0, 0);
+
+        // Cargar cofres guardados
+        {
+            sqlite3_stmt* stmt;
+            if (sqlite3_prepare_v2(db, "SELECT x, y, z, data FROM chests", -1, &stmt, 0) == SQLITE_OK) {
+                while (sqlite3_step(stmt) == SQLITE_ROW) {
+                    int cx = sqlite3_column_int(stmt, 0);
+                    int cy = sqlite3_column_int(stmt, 1);
+                    int cz = sqlite3_column_int(stmt, 2);
+                    const char* data_str = (const char*)sqlite3_column_text(stmt, 3);
+                    if (data_str) {
+                        try {
+                            auto j = json::parse(data_str);
+                            ChestData cd;
+                            if (j.contains("slots") && j["slots"].is_array()) {
+                                int idx = 0;
+                                for (const auto& sj : j["slots"]) {
+                                    if (idx >= 27) break;
+                                    bool is_tool = sj.value("is_tool", false);
+                                    cd.slots[idx].is_tool = is_tool;
+                                    if (is_tool) {
+                                        cd.slots[idx].tool.type = (Config::ToolType)sj.value("tool_type", 0);
+                                        cd.slots[idx].tool.tier = (Config::ToolTier)sj.value("tool_tier", 0);
+                                        cd.slots[idx].tool.durability_current = sj.value("dur_cur", 100);
+                                        cd.slots[idx].tool.durability_max = sj.value("dur_max", 100);
+                                        cd.slots[idx].tool.active = sj.value("active", true);
+                                    } else {
+                                        cd.slots[idx].item.id = sj.value("id", (uint8_t)Config::AIR);
+                                        cd.slots[idx].item.count = sj.value("count", 0);
+                                        cd.slots[idx].item.name = sj.value("name", "");
+                                    }
+                                    idx++;
+                                }
+                            }
+                            ui.world_chests[std::make_tuple(cx, cy, cz)] = cd;
+                        } catch (...) {}
+                    }
+                }
+                sqlite3_finalize(stmt);
+            }
+        }
     }
 
     Camera3D camera = { 0 };
@@ -963,7 +1007,7 @@ int main() {
             if (chat.is_open) {
                 chat.toggle();
             } else if (ui.is_open) {
-                ui.toggle_inventory();
+                ui.close_ui();
             } else {
                 break; // Exit the game
             }
@@ -1074,6 +1118,10 @@ int main() {
                         int bz = (int)std::floor(z + 0.5f);
                         uint8_t b = world.get_block(bx, by, bz);
                         if (b != AIR && b != WATER && BLOCKS.count(b) && BLOCKS.at(b).shape != Config::SHAPE_TERRAIN) {
+                            if (BLOCKS.at(b).shape == Config::SHAPE_DOOR) {
+                                uint8_t rot = world.get_rotation(bx, by, bz);
+                                if (rot & 4) return false; // Puerta abierta: paso libre
+                            }
                             return true; // Colisión cúbica para bloques de construcción
                         }
                         return sample_density(x, y, z) >= Config::ISO_SURFACE;
@@ -1287,18 +1335,33 @@ int main() {
                 // === SLOTS 1-9: COLOCAR BLOQUES O INTERACTUAR ===
                 else if (ui.selected_slot != 0) {
                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
-                        if (ui.slots[ui.selected_slot].count > 0 && ui.slots[ui.selected_slot].id != 254) {
+                        uint8_t held_id = ui.slots[ui.selected_slot].id;
+                        if (ui.slots[ui.selected_slot].count > 0 && held_id != 254 && held_id != Config::AIR && Config::BLOCKS.find(held_id) != Config::BLOCKS.end()) {
                             uint8_t rot = 0;
                             if (std::abs(forward.z) >= std::abs(forward.x)) {
                                 rot = (forward.z > 0.0f) ? 2 : 0; // Si el player mira al Sur (+Z), el bloque mira al Norte (2) hacia el player. Si mira al Norte (-Z), el bloque mira al Sur (0).
                             } else {
                                 rot = (forward.x > 0.0f) ? 1 : 3; // Si el player mira al Este (+X), el bloque mira al Oeste (1) hacia el player. Si mira al Oeste (-X), el bloque mira al Este (3).
                             }
-                            world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id, rot);
-                            ui.slots[ui.selected_slot].count--;
-                            if (ui.slots[ui.selected_slot].count <= 0) {
-                                ui.slots[ui.selected_slot].id = AIR;
-                                ui.slots[ui.selected_slot].name = "";
+                            if (ui.slots[ui.selected_slot].id == Config::DOOR_WOOD) {
+                                if (target_empty.y + 1 < Config::GRID_Y && world.get_block(target_empty.x, target_empty.y + 1, target_empty.z) == Config::AIR) {
+                                    world.set_block(target_empty.x, target_empty.y, target_empty.z, Config::DOOR_WOOD, rot);
+                                    world.set_block(target_empty.x, target_empty.y + 1, target_empty.z, Config::DOOR_WOOD, rot | 8);
+                                    ui.slots[ui.selected_slot].count--;
+                                    if (ui.slots[ui.selected_slot].count <= 0) {
+                                        ui.slots[ui.selected_slot].id = AIR;
+                                        ui.slots[ui.selected_slot].name = "";
+                                    }
+                                } else {
+                                    chat.add_message("[Puerta] Requiere 2 bloques de altura libre para colocarse.");
+                                }
+                            } else {
+                                world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id, rot);
+                                ui.slots[ui.selected_slot].count--;
+                                if (ui.slots[ui.selected_slot].count <= 0) {
+                                    ui.slots[ui.selected_slot].id = AIR;
+                                    ui.slots[ui.selected_slot].name = "";
+                                }
                             }
                         }
                     }
@@ -1318,47 +1381,22 @@ int main() {
                     }
 
                     if (look_b == Config::CHEST) {
-                        chat.add_message("[Cofre] Almacenamiento abierto (pulsa E para salir)");
-                        if (!ui.is_open) ui.toggle_inventory();
+                        ui.open_chest({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::CRAFTING_TABLE) {
-                        chat.add_message("[Mesa de Crafteo] Menu de creacion abierto");
-                        if (!ui.is_open) ui.toggle_inventory();
-                        ui.craft_category = 0;
+                        ui.open_crafting_table({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::FURNACE) {
-                        if (ui.has_item(Config::ITEM_COAL, 1)) {
-                            if (ui.count_block(Config::IRON_ORE) > 0) {
-                                ui.remove_block(Config::IRON_ORE, 1);
-                                ui.remove_item(Config::ITEM_COAL, 1);
-                                ui.add_item(Config::ITEM_IRON_INGOT, 1);
-                                chat.add_message("[Horno] Fundido: 1x Mineral de Hierro -> 1x Lingote de Hierro");
-                            } else if (ui.count_block(Config::GOLD_ORE) > 0) {
-                                ui.remove_block(Config::GOLD_ORE, 1);
-                                ui.remove_item(Config::ITEM_COAL, 1);
-                                ui.add_item(Config::ITEM_GOLD_INGOT, 1);
-                                chat.add_message("[Horno] Fundido: 1x Mineral de Oro -> 1x Lingote de Oro");
-                            } else if (ui.count_block(Config::SILVER_ORE) > 0) {
-                                ui.remove_block(Config::SILVER_ORE, 1);
-                                ui.remove_item(Config::ITEM_COAL, 1);
-                                ui.add_item(Config::ITEM_SILVER_INGOT, 1);
-                                chat.add_message("[Horno] Fundido: 1x Mineral de Plata -> 1x Lingote de Plata");
-                            } else if (ui.count_block(Config::SAND) > 0) {
-                                ui.remove_block(Config::SAND, 1);
-                                ui.remove_item(Config::ITEM_COAL, 1);
-                                ui.add_resource(Config::GLASS, 1);
-                                chat.add_message("[Horno] Fundido: 1x Arena -> 1x Cristal");
-                            } else if (ui.count_block(Config::COBBLESTONE) > 0) {
-                                ui.remove_block(Config::COBBLESTONE, 1);
-                                ui.remove_item(Config::ITEM_COAL, 1);
-                                ui.add_resource(Config::STONE, 1);
-                                chat.add_message("[Horno] Cocinado: 1x Adoquin -> 1x Piedra Lisa");
-                            } else {
-                                chat.add_message("[Horno] No tienes minerales, arena ni adoquin para fundir.");
-                            }
-                        } else {
-                            chat.add_message("[Horno] Requiere Carbon como combustible en el inventario.");
-                        }
+                        ui.open_furnace({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::DOOR_WOOD) {
-                        chat.add_message("[Puerta] *Click* (Abriendo / Cerrando puerta de madera)");
+                        uint8_t rot = world.get_rotation(bx, by, bz);
+                        uint8_t new_rot = rot ^ 4; // Toggle open/close bit
+                        world.set_block(bx, by, bz, Config::DOOR_WOOD, new_rot);
+                        if (by + 1 < Config::GRID_Y && world.get_block(bx, by + 1, bz) == Config::DOOR_WOOD) {
+                            uint8_t top_rot = world.get_rotation(bx, by + 1, bz);
+                            world.set_block(bx, by + 1, bz, Config::DOOR_WOOD, (top_rot & ~4) | (new_rot & 4));
+                        } else if (by > 0 && world.get_block(bx, by - 1, bz) == Config::DOOR_WOOD) {
+                            uint8_t bot_rot = world.get_rotation(bx, by - 1, bz);
+                            world.set_block(bx, by - 1, bz, Config::DOOR_WOOD, (bot_rot & ~4) | (new_rot & 4));
+                        }
                     } else if (look_b == Config::TORCH) {
                         chat.add_message("[Antorcha] Iluminando el entorno con calidez");
                     } else if (look_b == Config::FENCE_WOOD) {
@@ -1413,7 +1451,10 @@ int main() {
             // 2. Físicas y recolección de Item Drops
             item_drops.update(TICK_TIME, world, camera.position, ui);
 
-            // 3. Daño de minado exacto por tick
+            // 3. Procesamiento de hornos en tiempo real
+            ui.tick_furnaces();
+
+            // 4. Daño de minado exacto por tick
             if (is_mining && IsMouseButtonDown(MOUSE_LEFT_BUTTON) && ui.selected_slot == 0) {
                 uint8_t target_block = world.get_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z);
                 if (target_block != AIR && target_block != WATER) {
@@ -1479,6 +1520,16 @@ int main() {
                                     item_drops.spawn(drop_pos, bt.drop_id, bt.drop_is_item, 1, drop_vel, 0.1f);
                                 }
                                 world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
+                                if (target_block == Config::DOOR_WOOD) {
+                                    int mx = (int)mining_block.x;
+                                    int my = (int)mining_block.y;
+                                    int mz = (int)mining_block.z;
+                                    if (my + 1 < Config::GRID_Y && world.get_block(mx, my + 1, mz) == Config::DOOR_WOOD) {
+                                        world.set_block(mx, my + 1, mz, AIR);
+                                    } else if (my > 0 && world.get_block(mx, my - 1, mz) == Config::DOOR_WOOD) {
+                                        world.set_block(mx, my - 1, mz, AIR);
+                                    }
+                                }
                                 if (tool) {
                                     tool->durability_current--;
                                     if (tool->durability_current <= 0) ui.remove_active_tool();
@@ -1816,7 +1867,8 @@ int main() {
         if (ui.selected_slot == 0) {
             is_valid_tool = true;
         } else {
-            if (ui.slots[ui.selected_slot].id != Config::AIR && ui.slots[ui.selected_slot].count > 0) {
+            uint8_t held_id = ui.slots[ui.selected_slot].id;
+            if (held_id != Config::AIR && held_id != 254 && ui.slots[ui.selected_slot].count > 0 && Config::BLOCKS.find(held_id) != Config::BLOCKS.end()) {
                 is_valid_tool = true;
             }
         }
@@ -1854,7 +1906,7 @@ int main() {
             int size_y = is_hammer ? (h_area.max_h + 3) : 3;
             
             uint8_t held_b = (ui.selected_slot != 0) ? ui.slots[ui.selected_slot].id : Config::AIR;
-            bool is_construction_held = (ui.selected_slot != 0 && Config::BLOCKS.find(held_b) != Config::BLOCKS.end() && Config::BLOCKS.at(held_b).shape != Config::SHAPE_TERRAIN);
+            bool is_construction_held = (ui.selected_slot != 0 && held_b != Config::AIR && held_b != 254 && Config::BLOCKS.find(held_b) != Config::BLOCKS.end() && Config::BLOCKS.at(held_b).shape != Config::SHAPE_TERRAIN);
             
             uint8_t target_b = (ui.selected_slot == 0) ? world.get_block(bx, by, bz) : Config::AIR;
             bool is_construction_targeted = (ui.selected_slot == 0 && target_b != AIR && target_b != WATER && BLOCKS.count(target_b) && BLOCKS.at(target_b).shape != Config::SHAPE_TERRAIN);
@@ -1881,9 +1933,15 @@ int main() {
                 Color wire_col = Color{25, 255, 75, alpha};
                 Color solid_col = Color{0, 255, 0, 40};
                 
-                Vector3 c_pos = { (float)bx, (float)by, (float)bz };
-                DrawCubeWires(c_pos, 1.0f, 1.0f, 1.0f, wire_col);
-                DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
+                if (held_b == Config::DOOR_WOOD) {
+                    Vector3 c_pos = { (float)bx, (float)by + 0.5f, (float)bz };
+                    DrawCubeWires(c_pos, 1.002f, 2.002f, 1.002f, wire_col);
+                    DrawCube(c_pos, 1.0f, 2.0f, 1.0f, solid_col);
+                } else {
+                    Vector3 c_pos = { (float)bx, (float)by, (float)bz };
+                    DrawCubeWires(c_pos, 1.0f, 1.0f, 1.0f, wire_col);
+                    DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
+                }
             } else if (is_construction_targeted) {
                 float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
                 unsigned char alpha = (unsigned char)(pulse * 255);
@@ -1901,13 +1959,8 @@ int main() {
                     DrawCubeWires({(float)bx, (float)by, (float)bz}, 0.26f, 1.002f, 0.26f, wire_col);
                     DrawCube({(float)bx, (float)by, (float)bz}, 0.25f, 1.0f, 0.25f, solid_col);
                 } else if (shape == SHAPE_DOOR) {
-                    if (target_rot == 0 || target_rot == 2) {
-                        DrawCubeWires({(float)bx, (float)by + 0.5f, (float)bz}, 1.002f, 2.002f, 0.14f, wire_col);
-                        DrawCube({(float)bx, (float)by + 0.5f, (float)bz}, 1.0f, 2.0f, 0.12f, solid_col);
-                    } else {
-                        DrawCubeWires({(float)bx, (float)by + 0.5f, (float)bz}, 0.14f, 2.002f, 1.002f, wire_col);
-                        DrawCube({(float)bx, (float)by + 0.5f, (float)bz}, 0.12f, 2.0f, 1.0f, solid_col);
-                    }
+                    DrawCubeWires({(float)bx, (float)by, (float)bz}, 1.002f, 1.002f, 1.002f, wire_col);
+                    DrawCube({(float)bx, (float)by, (float)bz}, 1.0f, 1.0f, 1.0f, solid_col);
                 } else if (shape == SHAPE_STAIRS) {
                     DrawCubeWires({(float)bx, (float)by - 0.25f, (float)bz}, 1.002f, 0.502f, 1.002f, wire_col);
                     DrawCube({(float)bx, (float)by - 0.25f, (float)bz}, 1.0f, 0.5f, 1.0f, solid_col);
@@ -2191,6 +2244,39 @@ int main() {
     {
         extern sqlite3* db;
         if (db) {
+            // Guardar todos los cofres
+            for (const auto& [pos, cd] : ui.world_chests) {
+                json j;
+                j["slots"] = json::array();
+                for (const auto& cs : cd.slots) {
+                    json sj;
+                    sj["is_tool"] = cs.is_tool;
+                    if (cs.is_tool) {
+                        sj["tool_type"] = (int)cs.tool.type;
+                        sj["tool_tier"] = (int)cs.tool.tier;
+                        sj["dur_cur"] = cs.tool.durability_current;
+                        sj["dur_max"] = cs.tool.durability_max;
+                        sj["active"] = cs.tool.active;
+                    } else {
+                        sj["id"] = cs.item.id;
+                        sj["count"] = cs.item.count;
+                        sj["name"] = cs.item.name;
+                    }
+                    j["slots"].push_back(sj);
+                }
+                std::string json_str = j.dump();
+                sqlite3_stmt* stmt;
+                if (sqlite3_prepare_v2(db, "INSERT OR REPLACE INTO chests (x, y, z, data) VALUES (?, ?, ?, ?)", -1, &stmt, 0) == SQLITE_OK) {
+                    auto [cx, cy, cz] = pos;
+                    sqlite3_bind_int(stmt, 1, cx);
+                    sqlite3_bind_int(stmt, 2, cy);
+                    sqlite3_bind_int(stmt, 3, cz);
+                    sqlite3_bind_text(stmt, 4, json_str.c_str(), -1, SQLITE_TRANSIENT);
+                    sqlite3_step(stmt);
+                    sqlite3_finalize(stmt);
+                }
+            }
+
             sqlite3_close(db);
             db = nullptr;
         }

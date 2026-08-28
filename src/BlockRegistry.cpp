@@ -349,6 +349,19 @@ bool load_recipes(const std::string& recipes_dir) {
                 }
             }
 
+            bool req_table = j.value("requires_crafting_table", false);
+            if (rec.result_is_tool) {
+                req_table = true;
+            } else if (rec.result_is_block) {
+                if (rec.result_id == Config::CHEST || rec.result_id == Config::FURNACE || 
+                    rec.result_id == Config::DOOR_WOOD || rec.result_id == Config::STAIRS_WOOD || 
+                    rec.result_id == Config::STAIRS_STONE || rec.result_id == Config::FENCE_WOOD || 
+                    rec.result_id == Config::STONE_BRICK) {
+                    req_table = true;
+                }
+            }
+            rec.requires_table = req_table;
+
             loaded_recipes.push_back(rec);
         } catch (const std::exception& e) {
             std::cerr << "[BlockRegistry] Error loading recipe JSON (" << entry.path() << "): " << e.what() << std::endl;

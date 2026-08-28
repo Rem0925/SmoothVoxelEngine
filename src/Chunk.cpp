@@ -1126,19 +1126,52 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                         break;
                     }
                     case Config::SHAPE_DOOR: {
-                        if (rot == 0 || rot == 2) {
-                            add_box(lx, ly, lz,
-                                    gx, gy, gz + 0.44f, gx + 1.0f, gy + 2.0f, gz + 0.56f,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty);
-                        } else {
-                            add_box(lx, ly, lz,
-                                    gx + 0.44f, gy, gz, gx + 0.56f, gy + 2.0f, gz + 1.0f,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty);
+                        int facing = rot & 3;
+                        bool is_open = (rot & 4) != 0;
+                        float T = 0.1875f; // Door thickness (3/16 block)
+                        
+                        float x0 = gx, x1 = gx + 1.0f;
+                        float z0 = gz, z1 = gz + 1.0f;
+                        
+                        if (facing == 0) { // Facing North (-Z)
+                            if (!is_open) {
+                                z0 = gz;
+                                z1 = gz + T;
+                            } else {
+                                x0 = gx;
+                                x1 = gx + T;
+                            }
+                        } else if (facing == 1) { // Facing East (+X)
+                            if (!is_open) {
+                                x0 = gx + 1.0f - T;
+                                x1 = gx + 1.0f;
+                            } else {
+                                z0 = gz;
+                                z1 = gz + T;
+                            }
+                        } else if (facing == 2) { // Facing South (+Z)
+                            if (!is_open) {
+                                z0 = gz + 1.0f - T;
+                                z1 = gz + 1.0f;
+                            } else {
+                                x0 = gx + 1.0f - T;
+                                x1 = gx + 1.0f;
+                            }
+                        } else { // Facing West (-X)
+                            if (!is_open) {
+                                x0 = gx;
+                                x1 = gx + T;
+                            } else {
+                                z0 = gz + 1.0f - T;
+                                z1 = gz + 1.0f;
+                            }
                         }
+                        
+                        add_box(lx, ly, lz,
+                                x0, gy, z0, x1, gy + 1.0f, z1,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty,
+                                def_tx, def_ty, def_tx, def_ty);
                         break;
                     }
                     case Config::SHAPE_FENCE: {
@@ -1846,4 +1879,11 @@ void Chunk::set_water_node(int x, int y, int z, uint8_t level) {
     
     is_dirty = true;
     water_only_rebuild = true;
+}
+
+uint8_t Chunk::get_rotation(int x, int y, int z) {
+    if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return 0;
+    std::lock_guard<std::mutex> lock(chunk_mutex);
+    if (voxels.empty()) return 0;
+    return voxels[get_idx(x, y, z)].rotation;
 }

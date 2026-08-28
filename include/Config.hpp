@@ -209,6 +209,7 @@ namespace Config {
         ToolTier result_tool_tier;     // si result_is_tool
         bool result_is_block;          // true = BlockID, false = ItemID
         uint8_t result_id;             // BlockID o ItemID
+        bool requires_table = false;   // true = solo disponible en Mesa de Crafteo 3x3
         std::vector<RecipeIngredient> ingredients;
     };
 

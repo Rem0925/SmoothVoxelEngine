@@ -45,6 +45,7 @@ public:
     void stop_simulation();
 
     uint8_t get_block(int wx, int wy, int wz);
+    uint8_t get_rotation(int wx, int wy, int wz);
     uint8_t get_light(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
     void set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation = 0);

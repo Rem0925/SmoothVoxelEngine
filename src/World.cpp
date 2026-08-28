@@ -467,6 +467,20 @@ uint8_t World::get_block(int wx, int wy, int wz) {
     return AIR;
 }
 
+uint8_t World::get_rotation(int wx, int wy, int wz) {
+    if (wy < 0 || wy >= GRID_Y) return 0;
+    int cx = std::floor((float)wx / CHUNK_SIZE);
+    int cz = std::floor((float)wz / CHUNK_SIZE);
+    
+    Chunk* chunk = get_chunk(cx, cz);
+    if (chunk) {
+        int lx = wx - cx * CHUNK_SIZE;
+        int lz = wz - cz * CHUNK_SIZE;
+        return chunk->get_rotation(lx, wy, lz);
+    }
+    return 0;
+}
+
 void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     if (wy < 0 || wy >= GRID_Y) return;
     

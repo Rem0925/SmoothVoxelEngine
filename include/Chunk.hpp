@@ -101,6 +101,7 @@ public:
     }
 
     void set_block(int x, int y, int z, uint8_t type, uint8_t rotation = 0);
+    uint8_t get_rotation(int x, int y, int z);
     void set_water_node(int x, int y, int z, uint8_t level);
     void rebuild_mesh(bool water_only = false, uint8_t sub_mask = 0xFF);
     void save_to_disk();
