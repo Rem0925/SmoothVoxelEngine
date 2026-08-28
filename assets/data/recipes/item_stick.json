@@ -1,5 +1,5 @@
 {
-  "name": "Palitos",
+  "name": "Palos",
   "result": {
     "type": "item",
     "id": 0,
@@ -7,8 +7,8 @@
   },
   "ingredients": [
     {
-      "type": "item",
-      "id": 2,
+      "type": "block",
+      "id": 22,
       "count": 2
     }
   ]

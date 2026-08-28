@@ -7,8 +7,8 @@
   },
   "ingredients": [
     {
-      "type": "item",
-      "id": 2,
+      "type": "block",
+      "id": 22,
       "count": 6
     }
   ]

@@ -915,89 +915,113 @@ int main() {
 
     std::ifstream file(save_dir + "/player.json");
     if (file.is_open()) {
-        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        auto get_val = [&](std::string key, float def) -> float {
-            size_t pos = content.find("\"" + key + "\"");
-            if (pos != std::string::npos) {
-                size_t colon = content.find(":", pos);
-                try {
-                    return std::stof(content.substr(colon + 1));
-                } catch (const std::exception& e) {
-                    return def;
-                }
-            }
-            return def;
-        };
-        camera.position.x = get_val("pos_x", 0.0f);
-        camera.position.y = get_val("pos_y", 100.0f);
-        camera.position.z = get_val("pos_z", 0.0f);
-        
-        camera.target.x = get_val("target_x", camera.position.x);
-        camera.target.y = get_val("target_y", camera.position.y);
-        camera.target.z = get_val("target_z", camera.position.z + 1.0f);
-        
-        day_time = get_val("day_time", 1.5f);
-        
-        for (size_t i = 0; i < ui.slots.size(); i++) {
-            size_t slot_pos = content.find("\"slot_" + std::to_string(i) + "_id\"");
-            if (slot_pos != std::string::npos) {
-                ui.slots[i].id = (uint8_t)get_val("slot_" + std::to_string(i) + "_id", Config::AIR);
-                ui.slots[i].count = (int)get_val("slot_" + std::to_string(i) + "_count", 0);
-                if (ui.slots[i].id == 254) {
-                    size_t name_pos = content.find("\"slot_" + std::to_string(i) + "_name\"");
-                    if (name_pos != std::string::npos) {
-                        size_t q1 = content.find("\"", name_pos + 10);
-                        size_t q2 = content.find("\"", q1 + 1);
-                        if (q1 != std::string::npos && q2 != std::string::npos) {
-                            ui.slots[i].name = content.substr(q1 + 1, q2 - q1 - 1);
-                        }
+        try {
+            json pj = json::parse(file);
+            camera.position.x = pj.value("pos_x", 0.0f);
+            camera.position.y = pj.value("pos_y", 100.0f);
+            camera.position.z = pj.value("pos_z", 0.0f);
+            
+            camera.target.x = pj.value("target_x", camera.position.x);
+            camera.target.y = pj.value("target_y", camera.position.y);
+            camera.target.z = pj.value("target_z", camera.position.z + 1.0f);
+            
+            day_time = pj.value("day_time", 1.5f);
+            
+            for (size_t i = 0; i < ui.slots.size(); i++) {
+                std::string k_id = "slot_" + std::to_string(i) + "_id";
+                std::string k_cnt = "slot_" + std::to_string(i) + "_count";
+                std::string k_nm = "slot_" + std::to_string(i) + "_name";
+                if (pj.contains(k_id)) {
+                    ui.slots[i].id = (uint8_t)pj[k_id].get<int>();
+                    ui.slots[i].count = pj.value(k_cnt, 0);
+                    if (pj.contains(k_nm)) {
+                        ui.slots[i].name = pj[k_nm].get<std::string>();
+                    } else if (Config::BLOCKS.count(ui.slots[i].id)) {
+                        ui.slots[i].name = Config::BLOCKS.at(ui.slots[i].id).name;
                     }
-                } else if (Config::BLOCKS.count(ui.slots[i].id)) {
-                    ui.slots[i].name = Config::BLOCKS.at(ui.slots[i].id).name;
                 }
             }
-        }
-        
-        // Load tools
-        int num_tools = (int)get_val("tool_count", 0);
-        for (int t = 0; t < num_tools && t < 18; t++) {
-            int ttype = (int)get_val("tool_" + std::to_string(t) + "_type", 0);
-            int ttier = (int)get_val("tool_" + std::to_string(t) + "_tier", 0);
-            int tdur = (int)get_val("tool_" + std::to_string(t) + "_dur", 100);
-            if (ttype >= 0 && ttype < (int)Config::TOOL_COUNT && ttier >= 0 && ttier < (int)Config::TIER_COUNT) {
-                Config::ToolType type = (Config::ToolType)ttype;
-                Config::ToolTier tier = (Config::ToolTier)ttier;
-                int max_dur = 100;
-                for (auto& ti : Config::TOOLS) {
-                    if (ti.type == type && ti.tier == tier) { max_dur = ti.durability; break; }
-                }
-                ui.tool_inventory.push_back({type, tier, tdur, max_dur, false});
-            }
-        }
-        ui.selected_tool_idx = (int)get_val("selected_tool", 0);
-        
-        // Load storage
-        for (size_t i = 0; i < ui.storage.size(); i++) {
-            size_t st_pos = content.find("\"storage_" + std::to_string(i) + "_id\"");
-            if (st_pos != std::string::npos) {
-                ui.storage[i].id = (uint8_t)get_val("storage_" + std::to_string(i) + "_id", Config::AIR);
-                ui.storage[i].count = (int)get_val("storage_" + std::to_string(i) + "_count", 0);
-                if (ui.storage[i].id == 254) {
-                    // Item: name is stored separately
-                    size_t name_pos = content.find("\"storage_" + std::to_string(i) + "_name\"");
-                    if (name_pos != std::string::npos) {
-                        size_t q1 = content.find("\"", name_pos + 10);
-                        size_t q2 = content.find("\"", q1 + 1);
-                        if (q1 != std::string::npos && q2 != std::string::npos) {
-                            ui.storage[i].name = content.substr(q1 + 1, q2 - q1 - 1);
+            
+            // Load tools
+            ui.tool_inventory.clear();
+            int num_tools = pj.value("tool_count", 0);
+            for (int t = 0; t < num_tools && t < 18; t++) {
+                std::string k_type = "tool_" + std::to_string(t) + "_type";
+                std::string k_tier = "tool_" + std::to_string(t) + "_tier";
+                std::string k_dur = "tool_" + std::to_string(t) + "_dur";
+                if (pj.contains(k_type) && pj.contains(k_tier)) {
+                    int ttype = pj[k_type].get<int>();
+                    int ttier = pj[k_tier].get<int>();
+                    int tdur = pj.value(k_dur, 100);
+                    if (ttype >= 0 && ttype < (int)Config::TOOL_COUNT && ttier >= 0 && ttier < (int)Config::TIER_COUNT) {
+                        Config::ToolType type = (Config::ToolType)ttype;
+                        Config::ToolTier tier = (Config::ToolTier)ttier;
+                        int max_dur = 100;
+                        for (auto& ti : Config::TOOLS) {
+                            if (ti.type == type && ti.tier == tier) { max_dur = ti.durability; break; }
                         }
+                        ui.tool_inventory.push_back({type, tier, tdur, max_dur, false});
                     }
-                } else if (Config::BLOCKS.count(ui.storage[i].id)) {
-                    ui.storage[i].name = Config::BLOCKS.at(ui.storage[i].id).name;
                 }
             }
+            ui.selected_tool_idx = pj.value("selected_tool", 0);
+            
+            // Load storage (mochila)
+            for (size_t i = 0; i < ui.storage.size(); i++) {
+                std::string k_id = "storage_" + std::to_string(i) + "_id";
+                std::string k_cnt = "storage_" + std::to_string(i) + "_count";
+                std::string k_nm = "storage_" + std::to_string(i) + "_name";
+                if (pj.contains(k_id)) {
+                    ui.storage[i].id = (uint8_t)pj[k_id].get<int>();
+                    ui.storage[i].count = pj.value(k_cnt, 0);
+                    if (pj.contains(k_nm)) {
+                        ui.storage[i].name = pj[k_nm].get<std::string>();
+                    } else if (Config::BLOCKS.count(ui.storage[i].id)) {
+                        ui.storage[i].name = Config::BLOCKS.at(ui.storage[i].id).name;
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[SaveSystem] Error parsing player.json: " << e.what() << std::endl;
         }
     }
+
+    auto save_player_data = [&]() {
+        std::ofstream out(save_dir + "/player.json");
+        if (out.is_open()) {
+            json pj;
+            pj["pos_x"] = camera.position.x;
+            pj["pos_y"] = camera.position.y;
+            pj["pos_z"] = camera.position.z;
+            pj["target_x"] = camera.target.x;
+            pj["target_y"] = camera.target.y;
+            pj["target_z"] = camera.target.z;
+            pj["day_time"] = day_time;
+
+            for (size_t i = 0; i < ui.slots.size(); i++) {
+                pj["slot_" + std::to_string(i) + "_id"] = (int)ui.slots[i].id;
+                pj["slot_" + std::to_string(i) + "_count"] = ui.slots[i].count;
+                pj["slot_" + std::to_string(i) + "_name"] = ui.slots[i].name;
+            }
+
+            pj["tool_count"] = ui.tool_inventory.size();
+            for (size_t t = 0; t < ui.tool_inventory.size(); t++) {
+                pj["tool_" + std::to_string(t) + "_type"] = (int)ui.tool_inventory[t].type;
+                pj["tool_" + std::to_string(t) + "_tier"] = (int)ui.tool_inventory[t].tier;
+                pj["tool_" + std::to_string(t) + "_dur"] = ui.tool_inventory[t].durability_current;
+            }
+            pj["selected_tool"] = ui.selected_tool_idx;
+
+            for (size_t i = 0; i < ui.storage.size(); i++) {
+                pj["storage_" + std::to_string(i) + "_id"] = (int)ui.storage[i].id;
+                pj["storage_" + std::to_string(i) + "_count"] = ui.storage[i].count;
+                pj["storage_" + std::to_string(i) + "_name"] = ui.storage[i].name;
+            }
+
+            out << pj.dump(2) << std::endl;
+            out.close();
+        }
+    };
 
     while (!WindowShouldClose()) {
         bool ray_hit_valid = false;
@@ -1020,6 +1044,7 @@ int main() {
         if (autosave_timer >= 5.0f) {
             autosave_timer = 0.0f;
             world.save_all();
+            save_player_data();
         }
 
         if (!ui.is_open && !chat.is_open) {
@@ -2200,40 +2225,7 @@ int main() {
         camera.target.y -= smooth_step_offset;
     }
     
-    std::ofstream out(save_dir + "/player.json");
-    if (out.is_open()) {
-        out << "{\n";
-        out << "  \"pos_x\": " << camera.position.x << ",\n";
-        out << "  \"pos_y\": " << camera.position.y << ",\n";
-        out << "  \"pos_z\": " << camera.position.z << ",\n";
-        out << "  \"target_x\": " << camera.target.x << ",\n";
-        out << "  \"target_y\": " << camera.target.y << ",\n";
-        out << "  \"target_z\": " << camera.target.z << ",\n";
-        out << "  \"day_time\": " << day_time << ",\n";
-        for (size_t i=0; i<ui.slots.size(); i++) {
-            out << "  \"slot_" << i << "_id\": " << (int)ui.slots[i].id << ",\n";
-            out << "  \"slot_" << i << "_count\": " << ui.slots[i].count << ",\n";
-            out << "  \"slot_" << i << "_name\": \"" << ui.slots[i].name << "\",\n";
-        }
-        // Save tools
-        out << "  \"tool_count\": " << ui.tool_inventory.size() << ",\n";
-        for (size_t t=0; t<ui.tool_inventory.size(); t++) {
-            out << "  \"tool_" << t << "_type\": " << (int)ui.tool_inventory[t].type << ",\n";
-            out << "  \"tool_" << t << "_tier\": " << (int)ui.tool_inventory[t].tier << ",\n";
-            out << "  \"tool_" << t << "_dur\": " << ui.tool_inventory[t].durability_current;
-            out << (t == ui.tool_inventory.size()-1 ? "\n" : ",\n");
-        }
-        out << "  \"selected_tool\": " << ui.selected_tool_idx << ",\n";
-        // Save storage
-        for (size_t i=0; i<ui.storage.size(); i++) {
-            out << "  \"storage_" << i << "_id\": " << (int)ui.storage[i].id << ",\n";
-            out << "  \"storage_" << i << "_count\": " << ui.storage[i].count << ",\n";
-            out << "  \"storage_" << i << "_name\": \"" << ui.storage[i].name << "\"";
-            out << (i == ui.storage.size()-1 ? "\n" : ",\n");
-        }
-        out << "}\n";
-        out.close();
-    }
+    save_player_data();
     
     world.stop_simulation();
     global_thread_pool.clear_queue();

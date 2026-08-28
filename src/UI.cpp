@@ -122,20 +122,22 @@ void UI::select_slot(int index) {
 
 void UI::tick_furnaces() {
     auto get_smelt_result = [](uint8_t in_id, const std::string& name) -> std::pair<uint8_t, bool> {
-        if (in_id == Config::IRON_ORE) return { Config::ITEM_IRON_INGOT, true };
-        if (in_id == Config::GOLD_ORE) return { Config::ITEM_GOLD_INGOT, true };
-        if (in_id == Config::SILVER_ORE) return { Config::ITEM_SILVER_INGOT, true };
-        if (in_id == Config::SAND) return { Config::GLASS, false };
-        if (in_id == Config::COBBLESTONE) return { Config::STONE, false };
-        if (in_id == Config::WOOD || in_id == Config::BIRCH_WOOD) return { Config::ITEM_COAL, true };
+        if (in_id == Config::IRON_ORE || name == "Mineral de Hierro") return { Config::ITEM_IRON_INGOT, true };
+        if (in_id == Config::GOLD_ORE || name == "Mineral de Oro") return { Config::ITEM_GOLD_INGOT, true };
+        if (in_id == Config::SILVER_ORE || name == "Mineral de Plata") return { Config::ITEM_SILVER_INGOT, true };
+        if (in_id == Config::DIAMOND_ORE || name == "Mineral de Diamante") return { Config::ITEM_DIAMOND_INGOT, true };
+        if (in_id == Config::SAND || name == "Arena") return { Config::GLASS, false };
+        if (in_id == Config::COBBLESTONE || name == "Adoquin" || name == "Cobblestone") return { Config::STONE, false };
+        if (in_id == Config::WOOD || in_id == Config::BIRCH_WOOD || name == "Madera Roble" || name == "Madera Abedul") return { Config::ITEM_COAL, true };
         return { 0, false };
     };
 
     auto get_fuel_time = [](uint8_t f_id, const std::string& name) -> int {
-        if (f_id == 254 && name == "Carbón") return 1600;
+        if (f_id == 254 && (name == "Carbon" || name == "Carbón")) return 1600;
         if (f_id == Config::ITEM_COAL) return 1600;
-        if (f_id == Config::WOOD || f_id == Config::BIRCH_WOOD || f_id == Config::PLANKS_CUBE) return 300;
-        if (f_id == 254 && name == "Palo") return 100;
+        if (f_id == Config::COAL_ORE || name == "Mineral de Carbon" || name == "Mineral de Carbón") return 1600;
+        if (f_id == Config::WOOD || f_id == Config::BIRCH_WOOD || f_id == Config::PLANKS_CUBE || name == "Madera Roble" || name == "Madera Abedul" || name == "Tablas de Madera") return 300;
+        if (f_id == 254 && (name == "Palo" || name == "Palos")) return 100;
         if (f_id == Config::ITEM_STICK) return 100;
         return 0;
     };
@@ -411,9 +413,7 @@ void UI::draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y,
     
     // 1. Herramientas
     if (show_tools) {
-        DrawText("Herramientas:", px, cur_y + 12, 12, Color{200, 210, 225, 255});
-        
-        int hx = px + 95;
+        int hx = px + slot_total;
         int hy = cur_y;
         bool hover_mano = (mouse_x >= hx && mouse_x <= hx + slot_size && mouse_y >= hy && mouse_y <= hy + slot_size);
         DrawRectangle(hx, hy, slot_size, slot_size, hover_mano ? Color{60, 75, 95, 255} : Color{35, 42, 52, 255});
@@ -503,8 +503,7 @@ void UI::draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y,
     }
 
     // 2. Almacenamiento Principal (27 slots: 9x3)
-    DrawText("Mochila (27 casillas):", px, cur_y + 2, 12, Color{200, 210, 225, 255});
-    int st_y = cur_y + 18;
+    int st_y = cur_y;
     for (int i = 0; i < 27; i++) {
         int col = i % 9;
         int row = i / 9;
@@ -629,8 +628,8 @@ void UI::draw_player_inventory_section(int px, int py, int mouse_x, int mouse_y,
     }
 
     // 3. Barra Rápida (Hotbar: slots 1..9)
-    int hb_y = st_y + 3 * slot_total + 12;
-    DrawText("Barra Rapida:", px, hb_y - 18, 12, Color{200, 210, 225, 255});
+    int hb_y = st_y + 3 * slot_total + 8;
+    DrawLine(px, hb_y - 4, px + 9 * slot_total - slot_pad, hb_y - 4, Color{55, 68, 85, 255});
     for (int i = 1; i < 10; i++) {
         int sx = px + (i - 1) * slot_total;
         int sy = hb_y;
@@ -751,14 +750,14 @@ void UI::draw_chest_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
     int panel_w = 436;
-    int panel_h = 500;
+    int panel_h = 440;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
     DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
     DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
     
-    DrawText("Cofre de Almacenamiento", px + 20, py + 15, 16, Color{255, 215, 0, 255});
+    DrawText("Cofre", px + 20, py + 15, 16, Color{255, 215, 0, 255});
     
     Vector2 m = GetMousePosition();
     bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -781,7 +780,7 @@ void UI::draw_chest_panel() {
     int slot_pad = 4;
     int slot_total = slot_size + slot_pad;
     int chest_x = px + 20;
-    int chest_y = py + 45;
+    int chest_y = py + 42;
     
     for (int i = 0; i < 27; i++) {
         int col = i % 9;
@@ -919,22 +918,22 @@ void UI::draw_chest_panel() {
         }
     }
     
-    DrawLine(px + 20, py + 185, px + panel_w - 20, py + 185, Color{60, 75, 95, 255});
-    draw_player_inventory_section(px + 20, py + 195, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
+    DrawLine(px + 20, py + 180, px + panel_w - 20, py + 180, Color{60, 75, 95, 255});
+    draw_player_inventory_section(px + 20, py + 190, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
 }
 
 void UI::draw_furnace_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
     int panel_w = 436;
-    int panel_h = 440;
+    int panel_h = 380;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
     DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
     DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
     
-    DrawText("Horno de Fundicion", px + 20, py + 15, 16, Color{255, 160, 40, 255});
+    DrawText("Horno", px + 20, py + 15, 16, Color{255, 160, 40, 255});
     
     Vector2 m = GetMousePosition();
     bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -954,19 +953,24 @@ void UI::draw_furnace_panel() {
     auto& furnace = world_furnaces[key];
     
     int slot_size = 40;
-    int in_x = px + 110;
-    int in_y = py + 45;
+    int in_x = px + 120;
+    int in_y = py + 42;
     int fuel_x = in_x;
-    int fuel_y = py + 115;
+    int fuel_y = py + 106;
     int out_x = px + 260;
-    int out_y = py + 75;
+    int out_y = py + 70;
     
-    DrawText("Mineral:", in_x - 65, in_y + 14, 11, Color{190, 200, 215, 255});
     bool hover_in = (m.x >= in_x && m.x <= in_x + slot_size && m.y >= in_y && m.y <= in_y + slot_size);
     DrawRectangle(in_x, in_y, slot_size, slot_size, hover_in ? Color{65, 80, 105, 255} : Color{30, 36, 46, 255});
     DrawRectangleLines(in_x, in_y, slot_size, slot_size, Color{85, 100, 125, 255});
     if (furnace.input.count > 0) {
-        draw_block_icon(furnace.input.id, in_x + 4, in_y + 4, slot_size - 8);
+        if (furnace.input.id == 254) {
+            for (auto& [iid, itype] : Config::ITEMS) {
+                if (itype.name == furnace.input.name) { draw_item_icon(iid, in_x + 4, in_y + 4, slot_size - 8); break; }
+            }
+        } else {
+            draw_block_icon(furnace.input.id, in_x + 4, in_y + 4, slot_size - 8);
+        }
         DrawText(TextFormat("%d", furnace.input.count), in_x + slot_size - 18, in_y + slot_size - 13, 11, WHITE);
     }
     if (hover_in) {
@@ -977,28 +981,45 @@ void UI::draw_furnace_panel() {
                     furnace.input = drag_item;
                     is_dragging = false;
                 } else if (furnace.input.id == drag_item.id && furnace.input.name == drag_item.name) {
-                    furnace.input.count += drag_item.count;
-                    is_dragging = false;
+                    int space = 64 - furnace.input.count;
+                    int add = std::min(space, drag_item.count);
+                    furnace.input.count += add;
+                    drag_item.count -= add;
+                    if (drag_item.count <= 0) is_dragging = false;
+                } else {
+                    InventorySlot temp = furnace.input;
+                    furnace.input = drag_item;
+                    drag_item = temp;
                 }
             } else if (!is_dragging && furnace.input.count > 0) {
                 drag_item = furnace.input;
                 furnace.input = { AIR, "", 0 };
                 is_dragging = true;
+                dragging_tool = false;
+            }
+        } else if (is_r_click && is_dragging && !dragging_tool && drag_item.count > 0) {
+            if (furnace.input.count == 0) {
+                furnace.input = { drag_item.id, drag_item.name, 1 };
+                drag_item.count--;
+                if (drag_item.count <= 0) is_dragging = false;
+            } else if (furnace.input.id == drag_item.id && furnace.input.name == drag_item.name && furnace.input.count < 64) {
+                furnace.input.count++;
+                drag_item.count--;
+                if (drag_item.count <= 0) is_dragging = false;
             }
         }
     }
     
     int fire_x = in_x + 12;
-    int fire_y = in_y + 45;
+    int fire_y = in_y + 43;
     float fire_pct = (furnace.max_burn_ticks > 0) ? ((float)furnace.burn_ticks / (float)furnace.max_burn_ticks) : 0.0f;
-    DrawRectangle(fire_x, fire_y, 16, 20, Color{40, 40, 40, 255});
+    DrawRectangle(fire_x, fire_y, 16, 18, Color{40, 40, 40, 255});
     if (fire_pct > 0.0f) {
-        int fh = (int)(20.0f * fire_pct);
-        DrawRectangle(fire_x, fire_y + (20 - fh), 16, fh, ORANGE);
-        DrawRectangle(fire_x + 3, fire_y + (20 - fh) + 3, 10, fh - 3, YELLOW);
+        int fh = (int)(18.0f * fire_pct);
+        DrawRectangle(fire_x, fire_y + (18 - fh), 16, fh, ORANGE);
+        DrawRectangle(fire_x + 3, fire_y + (18 - fh) + 3, 10, fh - 3, YELLOW);
     }
     
-    DrawText("Carbon:", fuel_x - 65, fuel_y + 14, 11, Color{190, 200, 215, 255});
     bool hover_fuel = (m.x >= fuel_x && m.x <= fuel_x + slot_size && m.y >= fuel_y && m.y <= fuel_y + slot_size);
     DrawRectangle(fuel_x, fuel_y, slot_size, slot_size, hover_fuel ? Color{65, 80, 105, 255} : Color{30, 36, 46, 255});
     DrawRectangleLines(fuel_x, fuel_y, slot_size, slot_size, Color{85, 100, 125, 255});
@@ -1020,26 +1041,43 @@ void UI::draw_furnace_panel() {
                     furnace.fuel = drag_item;
                     is_dragging = false;
                 } else if (furnace.fuel.id == drag_item.id && furnace.fuel.name == drag_item.name) {
-                    furnace.fuel.count += drag_item.count;
-                    is_dragging = false;
+                    int space = 64 - furnace.fuel.count;
+                    int add = std::min(space, drag_item.count);
+                    furnace.fuel.count += add;
+                    drag_item.count -= add;
+                    if (drag_item.count <= 0) is_dragging = false;
+                } else {
+                    InventorySlot temp = furnace.fuel;
+                    furnace.fuel = drag_item;
+                    drag_item = temp;
                 }
             } else if (!is_dragging && furnace.fuel.count > 0) {
                 drag_item = furnace.fuel;
                 furnace.fuel = { AIR, "", 0 };
                 is_dragging = true;
+                dragging_tool = false;
+            }
+        } else if (is_r_click && is_dragging && !dragging_tool && drag_item.count > 0) {
+            if (furnace.fuel.count == 0) {
+                furnace.fuel = { drag_item.id, drag_item.name, 1 };
+                drag_item.count--;
+                if (drag_item.count <= 0) is_dragging = false;
+            } else if (furnace.fuel.id == drag_item.id && furnace.fuel.name == drag_item.name && furnace.fuel.count < 64) {
+                furnace.fuel.count++;
+                drag_item.count--;
+                if (drag_item.count <= 0) is_dragging = false;
             }
         }
     }
     
     int arrow_x = in_x + 55;
-    int arrow_y = py + 83;
+    int arrow_y = py + 78;
     float cook_pct = (float)furnace.cook_ticks / 200.0f;
     DrawRectangle(arrow_x, arrow_y, 45, 14, Color{45, 52, 65, 255});
     DrawRectangle(arrow_x, arrow_y, (int)(45.0f * cook_pct), 14, Color{255, 215, 0, 255});
     DrawRectangleLines(arrow_x, arrow_y, 45, 14, Color{80, 95, 120, 255});
     DrawText(">>>", arrow_x + 12, arrow_y + 1, 12, WHITE);
     
-    DrawText("Salida:", out_x + 52, out_y + 16, 11, Color{190, 200, 215, 255});
     bool hover_out = (m.x >= out_x && m.x <= out_x + slot_size + 6 && m.y >= out_y && m.y <= out_y + slot_size + 6);
     DrawRectangle(out_x, out_y, slot_size + 6, slot_size + 6, hover_out ? Color{70, 90, 115, 255} : Color{35, 42, 55, 255});
     DrawRectangleLines(out_x, out_y, slot_size + 6, slot_size + 6, GOLD);
@@ -1056,10 +1094,24 @@ void UI::draw_furnace_panel() {
     if (hover_out) {
         if (furnace.output.count > 0) tooltip_text = furnace.output.name + " (x" + std::to_string(furnace.output.count) + ")";
         if (is_l_click && furnace.output.count > 0) {
-            if (!is_dragging) {
+            if (is_shift) {
+                // Shift+Click furnace output into player inventory
+                if (furnace.output.id == 254) {
+                    for (auto& [iid, itype] : Config::ITEMS) {
+                        if (itype.name == furnace.output.name) {
+                            add_item(iid, furnace.output.count);
+                            break;
+                        }
+                    }
+                } else {
+                    add_resource(furnace.output.id, furnace.output.count);
+                }
+                furnace.output = { AIR, "", 0 };
+            } else if (!is_dragging) {
                 drag_item = furnace.output;
                 furnace.output = { AIR, "", 0 };
                 is_dragging = true;
+                dragging_tool = false;
             } else if (!dragging_tool && drag_item.id == furnace.output.id && drag_item.name == furnace.output.name) {
                 drag_item.count += furnace.output.count;
                 furnace.output = { AIR, "", 0 };
@@ -1067,22 +1119,22 @@ void UI::draw_furnace_panel() {
         }
     }
     
-    DrawLine(px + 20, py + 168, px + panel_w - 20, py + 168, Color{60, 75, 95, 255});
-    draw_player_inventory_section(px + 20, py + 178, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, false /* NO tools in furnace */);
+    DrawLine(px + 20, py + 155, px + panel_w - 20, py + 155, Color{60, 75, 95, 255});
+    draw_player_inventory_section(px + 20, py + 165, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, false /* NO tools in furnace */);
 }
 
 void UI::draw_inventory_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
     int panel_w = 436;
-    int panel_h = 320;
+    int panel_h = 350;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
     DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
     DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
     
-    DrawText("Inventario del Jugador", px + 20, py + 15, 16, Color{200, 220, 255, 255});
+    DrawText("Inventario", px + 20, py + 15, 16, Color{200, 220, 255, 255});
     
     Vector2 m = GetMousePosition();
     bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -1098,21 +1150,81 @@ void UI::draw_inventory_panel() {
         DrawText("X", px + panel_w - 28, py + 14, 14, WHITE);
     }
     
-    draw_player_inventory_section(px + 20, py + 48, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
+    // Crafteo Básico (Centrado y limpio)
+    int slot_size = 40;
+    int slot_pad = 4;
+    int slot_total = slot_size + slot_pad;
+    int craft_y = py + 42;
+    
+    std::vector<int> basic_recipes;
+    for (size_t i = 0; i < Config::RECIPES.size(); i++) {
+        if (!Config::RECIPES[i].requires_table) {
+            basic_recipes.push_back(i);
+        }
+    }
+    
+    int total_craft_w = (int)basic_recipes.size() * slot_total - slot_pad;
+    int c_start_x = px + (panel_w - total_craft_w) / 2;
+    
+    for (size_t k = 0; k < basic_recipes.size(); k++) {
+        int r_idx = basic_recipes[k];
+        const auto& rec = Config::RECIPES[r_idx];
+        int sx = c_start_x + k * slot_total;
+        int sy = craft_y;
+        
+        bool craftable = can_craft(r_idx);
+        bool hover = (m.x >= sx && m.x <= sx + slot_size && m.y >= sy && m.y <= sy + slot_size);
+        
+        DrawRectangle(sx, sy, slot_size, slot_size, craftable ? (hover ? Color{50, 80, 65, 255} : Color{30, 48, 40, 255}) : (hover ? Color{45, 55, 70, 255} : Color{28, 34, 44, 255}));
+        DrawRectangleLines(sx, sy, slot_size, slot_size, craftable ? (hover ? GREEN : Color{80, 160, 90, 255}) : Color{60, 70, 85, 255});
+        
+        if (rec.result_is_tool) {
+            draw_tool_icon(rec.result_tool_type, rec.result_tool_tier, sx + 4, sy + 4, slot_size - 8);
+        } else if (rec.result_is_block) {
+            draw_block_icon(rec.result_id, sx + 4, sy + 4, slot_size - 8);
+        } else {
+            draw_item_icon(rec.result_id, sx + 4, sy + 4, slot_size - 8);
+        }
+        
+        if (rec.result_count > 1) {
+            DrawText(TextFormat("%d", rec.result_count), sx + slot_size - 16, sy + slot_size - 13, 11, WHITE);
+        }
+        
+        if (hover) {
+            std::string ttip = rec.result_name;
+            if (rec.result_count > 1) ttip += " (x" + std::to_string(rec.result_count) + ")";
+            ttip += "\nMateriales: ";
+            for (size_t j = 0; j < rec.ingredients.size(); j++) {
+                if (j > 0) ttip += ", ";
+                std::string iname = rec.ingredients[j].is_item ? Config::ITEMS.at(rec.ingredients[j].id).name : Config::BLOCKS.at(rec.ingredients[j].id).name;
+                int player_has = rec.ingredients[j].is_item ? (has_item(rec.ingredients[j].id, 1) ? 1 : 0) : count_block(rec.ingredients[j].id);
+                ttip += std::to_string(rec.ingredients[j].count) + " " + iname + " (" + std::to_string(player_has) + "/" + std::to_string(rec.ingredients[j].count) + ")";
+            }
+            if (craftable) ttip += "\n[Clic: Craftear x1 | Shift+Clic: Craftear x5]";
+            tooltip_text = ttip;
+            
+            if (is_l_click && craftable && !is_dragging) {
+                craft(r_idx, is_shift ? 5 : 1);
+            }
+        }
+    }
+    
+    DrawLine(px + 20, py + 90, px + panel_w - 20, py + 90, Color{60, 75, 95, 255});
+    draw_player_inventory_section(px + 20, py + 98, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
 }
 
 void UI::draw_crafting_table_panel() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();
     int panel_w = 920;
-    int panel_h = 380;
+    int panel_h = 360;
     int px = (sw - panel_w) / 2;
     int py = (sh - panel_h) / 2;
     
     DrawRectangle(px, py, panel_w, panel_h, Color{22, 26, 33, 250});
     DrawRectangleLines(px, py, panel_w, panel_h, Color{70, 85, 110, 255});
     
-    DrawText("Mesa de Crafteo (Recetario Avanzado)", px + 20, py + 15, 16, GOLD);
+    DrawText("Mesa de Crafteo", px + 20, py + 15, 16, GOLD);
     
     Vector2 m = GetMousePosition();
     bool is_l_click = IsMouseButtonPressed(MOUSE_LEFT_BUTTON);
@@ -1129,21 +1241,21 @@ void UI::draw_crafting_table_panel() {
     }
     
     // Left: Player Inventory with tools
-    draw_player_inventory_section(px + 20, py + 48, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
+    draw_player_inventory_section(px + 20, py + 45, (int)m.x, (int)m.y, is_l_click, is_r_click, is_shift, true /* show_tools */);
     
     // Vertical separator
-    DrawLine(px + 430, py + 45, px + 430, py + panel_h - 20, Color{60, 75, 95, 255});
+    DrawLine(px + 430, py + 40, px + 430, py + panel_h - 20, Color{60, 75, 95, 255});
     
     // Right: Recipe Catalog
     int craft_x = px + 445;
-    int craft_y = py + 85;
+    int craft_y = py + 80;
     int craft_w = panel_w - 465;
-    int craft_h = panel_h - 105;
+    int craft_h = panel_h - 100;
     
     static const char* CAT_NAMES[] = { "Todos", "Herramientas", "Bloques", "Listos" };
     for (int t = 0; t < 4; t++) {
         int tx = craft_x + t * 110;
-        int ty = py + 48;
+        int ty = py + 45;
         bool active = (craft_category == t);
         bool hover = (m.x >= tx && m.x <= tx + 105 && m.y >= ty && m.y <= ty + 28);
         DrawRectangle(tx, ty, 105, 28, active ? Color{70, 95, 130, 255} : (hover ? Color{50, 60, 75, 255} : Color{32, 38, 48, 255}));
