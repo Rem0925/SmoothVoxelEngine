@@ -326,32 +326,71 @@ void World::set_water_node(const std::vector<std::pair<std::pair<int,int>, std::
     if (lx == 0 && lz == 0) apply(cx - 1, cz - 1, CHUNK_SIZE, CHUNK_SIZE);
 }
 
+struct FrustumPlane {
+    float a, b, c, d;
+    void normalize() {
+        float mag = std::sqrt(a * a + b * b + c * c);
+        if (mag > 0.000001f) {
+            a /= mag;
+            b /= mag;
+            c /= mag;
+            d /= mag;
+        }
+    }
+};
+
+struct Frustum {
+    FrustumPlane planes[6];
+};
+
+static Frustum extract_camera_frustum(Camera3D camera) {
+    Matrix view = MatrixLookAt(camera.position, camera.target, camera.up);
+    float aspect = (float)GetScreenWidth() / (float)GetScreenHeight();
+    if (aspect <= 0.0f) aspect = 16.0f / 9.0f;
+    Matrix proj = MatrixPerspective(camera.fovy * DEG2RAD, aspect, 0.05f, Config::FOG_END + 16.0f);
+    Matrix m = MatrixMultiply(view, proj);
+
+    Frustum f;
+    // Left
+    f.planes[0] = { m.m3 + m.m0, m.m7 + m.m4, m.m11 + m.m8, m.m15 + m.m12 };
+    // Right
+    f.planes[1] = { m.m3 - m.m0, m.m7 - m.m4, m.m11 - m.m8, m.m15 - m.m12 };
+    // Bottom
+    f.planes[2] = { m.m3 + m.m1, m.m7 + m.m5, m.m11 + m.m9, m.m15 + m.m13 };
+    // Top
+    f.planes[3] = { m.m3 - m.m1, m.m7 - m.m5, m.m11 - m.m9, m.m15 - m.m13 };
+    // Near
+    f.planes[4] = { m.m3 + m.m2, m.m7 + m.m6, m.m11 + m.m10, m.m15 + m.m14 };
+    // Far
+    f.planes[5] = { m.m3 - m.m2, m.m7 - m.m6, m.m11 - m.m10, m.m15 - m.m14 };
+
+    for (int i = 0; i < 6; ++i) f.planes[i].normalize();
+    return f;
+}
+
+static bool is_chunk_in_frustum(const Frustum& f, int cx, int cz) {
+    Vector3 min_pt = { (float)(cx * Config::CHUNK_SIZE), 0.0f, (float)(cz * Config::CHUNK_SIZE) };
+    Vector3 max_pt = { (float)((cx + 1) * Config::CHUNK_SIZE), (float)Config::GRID_Y, (float)((cz + 1) * Config::CHUNK_SIZE) };
+    for (int i = 0; i < 6; ++i) {
+        Vector3 p;
+        p.x = (f.planes[i].a >= 0.0f) ? max_pt.x : min_pt.x;
+        p.y = (f.planes[i].b >= 0.0f) ? max_pt.y : min_pt.y;
+        p.z = (f.planes[i].c >= 0.0f) ? max_pt.z : min_pt.z;
+        if (f.planes[i].a * p.x + f.planes[i].b * p.y + f.planes[i].c * p.z + f.planes[i].d < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void World::draw(Camera3D camera) {
-    Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
-    float half_w = Config::CHUNK_SIZE / 2.0f;
-    float half_h = Config::GRID_Y / 2.0f;
-    float radius = std::sqrt(half_w * half_w * 2 + half_h * half_h);
-    
-    auto is_visible = [&](Chunk* c) {
-        Vector3 center = { c->cx * Config::CHUNK_SIZE + half_w, half_h, c->cz * Config::CHUNK_SIZE + half_w };
-        Vector3 d = Vector3Subtract(center, camera.position);
-        float dist = Vector3Length(d);
-        if (dist <= radius) return true;
-        
-        Vector3 dir = Vector3Scale(d, 1.0f / dist);
-        float dot = Vector3DotProduct(forward, dir);
-        
-        float angle = std::acos(std::clamp(dot, -1.0f, 1.0f));
-        float sphere_angle = std::asin(std::clamp(radius / dist, 0.0f, 1.0f));
-        float max_angle = 1.2f + sphere_angle;
-        
-        return angle <= max_angle;
-    };
+    Frustum frustum = extract_camera_frustum(camera);
 
     // Pass 1: Opaque geometry (Solid and Plants)
     for (auto& pair : chunks) {
-        if (is_visible(pair.second.get())) {
-            pair.second->draw_solid(mat_solid, mat_plants, camera.position);
+        Chunk* c = pair.second.get();
+        if (c && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            c->draw_solid(mat_solid, mat_plants, camera.position);
         }
     }
     
@@ -365,8 +404,9 @@ void World::draw(Camera3D camera) {
     rlSetCullFace(is_underwater ? RL_CULL_FACE_BACK : RL_CULL_FACE_FRONT);
 
     for (auto& pair : chunks) {
-        if (is_visible(pair.second.get())) {
-            pair.second->draw_water(mat_water, camera.position);
+        Chunk* c = pair.second.get();
+        if (c && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            c->draw_water(mat_water, camera.position);
         }
     }
 

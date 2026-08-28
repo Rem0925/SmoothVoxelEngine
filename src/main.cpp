@@ -950,10 +950,6 @@ int main() {
         bool ray_hit_valid = false;
         Vector3 hit = {0}, target_solid = {0}, target_empty = {0};
 
-        // Ciclo completo (2*PI) en 20 minutos (1200 segundos) como en Minecraft
-        // Velocidad = 2*PI / 1200 = PI / 600
-        day_time += GetFrameTime() * (PI / 600.0f);
-        
         if (IsKeyPressed(KEY_ESCAPE)) {
             if (chat.is_open) {
                 chat.toggle();
@@ -1248,8 +1244,6 @@ int main() {
             if (ray_hit_valid) {
                 // === SLOT 0: HERRAMIENTAS ===
                 if (ui.selected_slot == 0) {
-                    ToolSlot* tool = ui.get_active_tool();
-                    
                     // Iniciar minado al presionar click
                     if (IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
                         uint8_t target_block = world.get_block(target_solid.x, target_solid.y, target_solid.z);
@@ -1261,94 +1255,6 @@ int main() {
                             mining_block.y = (float)(int)target_solid.y;
                             mining_block.z = (float)(int)target_solid.z;
                             is_mining = true;
-                        }
-                    }
-                    
-                    // Acumular progreso mientras se mantiene el click
-                    if (is_mining && IsMouseButtonDown(MOUSE_LEFT_BUTTON)) {
-                        uint8_t target_block = world.get_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z);
-                        if (target_block != AIR && target_block != WATER) {
-                            const BlockType& bt = BLOCKS.at(target_block);
-                            
-                            // Paso 1: Verificar si se puede romper
-                            bool can_break = (bt.require_tier != 255);
-                            bool can_harvest = true;
-                            if (can_break && bt.require_tool != 255) {
-                                if (!tool || (int)tool->type != (int)bt.require_tool || (int)tool->tier < (int)bt.require_tier) {
-                                    can_harvest = false;
-                                }
-                            }
-                            
-                            if (can_break) {
-                                // Paso 2: Calcular velocidad de la herramienta
-                                float tool_speed = 1.0f; // mano
-                                if (tool) {
-                                    tool_speed = tool->type == TOOL_PICKAXE ? 2.0f :
-                                                 tool->type == TOOL_SHOVEL ? 2.0f :
-                                                 tool->type == TOOL_AXE ? 2.0f :
-                                                 tool->type == TOOL_SWORD ? 1.5f :
-                                                 tool->type == TOOL_FLAIL ? 0.8f :
-                                                 tool->type == TOOL_HAMMER ? 1.2f : 1.0f;
-                                    
-                                    float tier_mult = tool->tier == TIER_WOOD ? 1.0f :
-                                                      tool->tier == TIER_STONE ? 2.0f :
-                                                      tool->tier == TIER_IRON ? 3.0f :
-                                                      tool->tier == TIER_SILVER ? 4.0f :
-                                                      tool->tier == TIER_GOLD ? 6.0f :
-                                                      tool->tier == TIER_DIAMOND ? 5.0f : 1.0f;
-                                    tool_speed *= tier_mult;
-                                }
-                                
-                                // Bonus si tiene la herramienta ideal
-                                if (tool && bt.ideal_tool != 255 && (int)tool->type == (int)bt.ideal_tool) {
-                                    tool_speed *= 1.5f;
-                                }
-                                
-                                // Dureza: si es martillo, calcular la dureza acumulativa de los bloques a podar
-                                float hardness = bt.hardness;
-                                HammerArea hammer_area;
-                                if (tool && tool->type == TOOL_HAMMER) {
-                                    hammer_area = get_hammer_area((int)tool->tier, hit, (int)mining_block.x, (int)mining_block.z);
-                                    hardness = world.get_hammer_mining_hardness((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier);
-                                }
-                                
-                                float divisor = can_harvest ? 30.0f : 100.0f;
-                                float damage = tool_speed / std::max(hardness, 0.1f) / divisor * 20.0f;
-                                
-                                mining_progress += GetFrameTime() * damage;
-                            
-                                if (mining_progress >= 1.0f) {
-                                    if (tool && tool->type == TOOL_HAMMER) {
-                                        int broken = world.flatten_terrain((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier, &item_drops);
-                                        int uses = std::max(1, broken);
-                                        tool->durability_current -= uses;
-                                        if (tool->durability_current <= 0) ui.remove_active_tool();
-                                    } else {
-                                        if (bt.drop_id != 255) {
-                                            Vector3 drop_pos = { (float)mining_block.x + 0.5f, (float)mining_block.y + 0.5f, (float)mining_block.z + 0.5f };
-                                            Vector3 drop_vel = {
-                                                ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f,
-                                                2.5f + (float)(rand() % 50) / 100.0f,
-                                                ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f
-                                            };
-                                            item_drops.spawn(drop_pos, bt.drop_id, bt.drop_is_item, 1, drop_vel, 0.1f);
-                                        }
-                                        world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
-                                        if (tool) {
-                                            tool->durability_current--;
-                                            if (tool->durability_current <= 0) ui.remove_active_tool();
-                                        }
-                                    }
-                                    mining_progress = 0.0f;
-                                    is_mining = false;
-                                }
-                            } else {
-                                mining_progress = 0.0f;
-                                is_mining = false;
-                            }
-                        } else {
-                            mining_progress = 0.0f;
-                            is_mining = false;
                         }
                     }
                     
@@ -1481,7 +1387,107 @@ int main() {
         
         CommandHandler::process(chat, day_time, camera, spectator_mode, player_vel_y, ui, show_chunks);
         world.update(camera.position);
-        item_drops.update(GetFrameTime(), world, camera.position, ui);
+
+        // ==================== 20 TPS FIXED TIMESTEP (Estilo Minecraft) ====================
+        constexpr float TICK_TIME = 1.0f / 20.0f; // 0.05s por tick (20 TPS)
+        static float tick_accumulator = 0.0f;
+        float frame_dt = std::min(GetFrameTime(), 0.1f);
+        tick_accumulator += frame_dt;
+
+        while (tick_accumulator >= TICK_TIME) {
+            tick_accumulator -= TICK_TIME;
+
+            // 1. Progresión del ciclo día/noche en ticks (24000 ticks = 20 minutos de día completo)
+            day_time += (PI / 12000.0f);
+            if (day_time >= 2.0f * PI) day_time -= 2.0f * PI;
+
+            // 2. Físicas y recolección de Item Drops
+            item_drops.update(TICK_TIME, world, camera.position, ui);
+
+            // 3. Daño de minado exacto por tick
+            if (is_mining && IsMouseButtonDown(MOUSE_LEFT_BUTTON) && ui.selected_slot == 0) {
+                uint8_t target_block = world.get_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z);
+                if (target_block != AIR && target_block != WATER) {
+                    const BlockType& bt = BLOCKS.at(target_block);
+                    ToolSlot* tool = ui.get_active_tool();
+                    bool can_break = (bt.require_tier != 255);
+                    bool can_harvest = true;
+                    if (can_break && bt.require_tool != 255) {
+                        if (!tool || (int)tool->type != (int)bt.require_tool || (int)tool->tier < (int)bt.require_tier) {
+                            can_harvest = false;
+                        }
+                    }
+
+                    if (can_break) {
+                        float tool_speed = 1.0f;
+                        if (tool) {
+                            tool_speed = tool->type == TOOL_PICKAXE ? 2.0f :
+                                         tool->type == TOOL_SHOVEL ? 2.0f :
+                                         tool->type == TOOL_AXE ? 2.0f :
+                                         tool->type == TOOL_SWORD ? 1.5f :
+                                         tool->type == TOOL_FLAIL ? 0.8f :
+                                         tool->type == TOOL_HAMMER ? 1.2f : 1.0f;
+                            
+                            float tier_mult = tool->tier == TIER_WOOD ? 1.0f :
+                                              tool->tier == TIER_STONE ? 2.0f :
+                                              tool->tier == TIER_IRON ? 3.0f :
+                                              tool->tier == TIER_SILVER ? 4.0f :
+                                              tool->tier == TIER_GOLD ? 6.0f :
+                                              tool->tier == TIER_DIAMOND ? 5.0f : 1.0f;
+                            tool_speed *= tier_mult;
+                        }
+
+                        if (tool && bt.ideal_tool != 255 && (int)tool->type == (int)bt.ideal_tool) {
+                            tool_speed *= 1.5f;
+                        }
+
+                        float hardness = bt.hardness;
+                        HammerArea hammer_area;
+                        if (tool && tool->type == TOOL_HAMMER) {
+                            hammer_area = get_hammer_area((int)tool->tier, hit, (int)mining_block.x, (int)mining_block.z);
+                            hardness = world.get_hammer_mining_hardness((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier);
+                        }
+
+                        float divisor = can_harvest ? 30.0f : 100.0f;
+                        float damage_per_tick = tool_speed / std::max(hardness, 0.1f) / divisor;
+
+                        mining_progress += damage_per_tick;
+
+                        if (mining_progress >= 1.0f) {
+                            if (tool && tool->type == TOOL_HAMMER) {
+                                int broken = world.flatten_terrain((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, hammer_area, (int)tool->tier, &item_drops);
+                                int uses = std::max(1, broken);
+                                tool->durability_current -= uses;
+                                if (tool->durability_current <= 0) ui.remove_active_tool();
+                            } else {
+                                if (bt.drop_id != 255) {
+                                    Vector3 drop_pos = { (float)mining_block.x + 0.5f, (float)mining_block.y + 0.5f, (float)mining_block.z + 0.5f };
+                                    Vector3 drop_vel = {
+                                        ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f,
+                                        2.5f + (float)(rand() % 50) / 100.0f,
+                                        ((float)(rand() % 100) - 50.0f) / 100.0f * 2.0f
+                                    };
+                                    item_drops.spawn(drop_pos, bt.drop_id, bt.drop_is_item, 1, drop_vel, 0.1f);
+                                }
+                                world.set_block((int)mining_block.x, (int)mining_block.y, (int)mining_block.z, AIR);
+                                if (tool) {
+                                    tool->durability_current--;
+                                    if (tool->durability_current <= 0) ui.remove_active_tool();
+                                }
+                            }
+                            mining_progress = 0.0f;
+                            is_mining = false;
+                        }
+                    } else {
+                        mining_progress = 0.0f;
+                        is_mining = false;
+                    }
+                } else {
+                    mining_progress = 0.0f;
+                    is_mining = false;
+                }
+            }
+        }
 
         float shaderTime = GetTime();
         SetShaderValue(world.mat_solid.shader, timeLocSolid, &shaderTime, SHADER_UNIFORM_FLOAT);
