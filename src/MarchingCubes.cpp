@@ -311,7 +311,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
               std::vector<Color>& colors,
               float origin_x, float origin_z, int seed_offset, int lod,
               const Color* grass_tint_cache, const Color* foliage_tint_cache,
-              const uint8_t* light_grid) 
+              const uint8_t* light_grid,
+              int min_y, int max_y) 
 {
     vertices.reserve(vertices.size() + 2048);
     normals.reserve(normals.size() + 2048);
@@ -343,7 +344,10 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
     float light_len = std::sqrt(light_dir.x*light_dir.x + light_dir.y*light_dir.y + light_dir.z*light_dir.z);
     light_dir.x /= light_len; light_dir.y /= light_len; light_dir.z /= light_len;
 
-    for (int y = 0; y < size_y - lod; y += lod) {
+    int start_y = std::max(0, min_y);
+    int end_y = (max_y > 0) ? std::min(size_y - lod, max_y) : (size_y - lod);
+
+    for (int y = start_y; y < end_y; y += lod) {
         for (int z = 0; z < size_z - lod; z += lod) {
             for (int x = 0; x < size_x - lod; x += lod) {
                 

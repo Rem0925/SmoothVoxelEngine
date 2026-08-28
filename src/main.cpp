@@ -49,19 +49,28 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
         };
         if (!GetRayCollisionBox(ray, box).hit) continue;
 
-        if (c->solid_mesh.vertexCount > 0) {
-            RayCollision mesh_hit = GetRayCollisionMesh(ray, c->solid_mesh, MatrixIdentity());
-            if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
-                closest_hit = mesh_hit;
-                hit_is_build = false;
-            }
-        }
+        for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+            auto& sc = c->subchunks[s];
+            BoundingBox sbox = { 
+                { (float)(c->cx * Config::CHUNK_SIZE) - 0.5f, (float)(s * Config::SUBCHUNK_SIZE) - 0.5f, (float)(c->cz * Config::CHUNK_SIZE) - 0.5f },
+                { (float)((c->cx + 1) * Config::CHUNK_SIZE) + 0.5f, (float)((s + 1) * Config::SUBCHUNK_SIZE) + 0.5f, (float)((c->cz + 1) * Config::CHUNK_SIZE) + 0.5f }
+            };
+            if (!GetRayCollisionBox(ray, sbox).hit) continue;
 
-        if (c->build_mesh.vertexCount > 0) {
-            RayCollision build_hit = GetRayCollisionMesh(ray, c->build_mesh, MatrixIdentity());
-            if (build_hit.hit && build_hit.distance < closest_hit.distance) {
-                closest_hit = build_hit;
-                hit_is_build = true;
+            if (sc.solid_mesh.vertexCount > 0) {
+                RayCollision mesh_hit = GetRayCollisionMesh(ray, sc.solid_mesh, MatrixIdentity());
+                if (mesh_hit.hit && mesh_hit.distance < closest_hit.distance) {
+                    closest_hit = mesh_hit;
+                    hit_is_build = false;
+                }
+            }
+
+            if (sc.build_mesh.vertexCount > 0) {
+                RayCollision build_hit = GetRayCollisionMesh(ray, sc.build_mesh, MatrixIdentity());
+                if (build_hit.hit && build_hit.distance < closest_hit.distance) {
+                    closest_hit = build_hit;
+                    hit_is_build = true;
+                }
             }
         }
     }
@@ -1678,21 +1687,23 @@ int main() {
         world.draw(camera);
         item_drops.draw(spritesheet, spritesheet_items, light_intensity);
         
-        // Minecraft-style Chunk Boundaries (F3+G)
+        // Minecraft-style Chunk & Sub-chunk Boundaries (F3+G)
         if (show_chunks) {
             float CS = (float)Config::CHUNK_SIZE;
+            float SCS = (float)Config::SUBCHUNK_SIZE;
             float GY = (float)Config::GRID_Y;
             
             int p_cx = (int)std::floor(camera.position.x / CS);
             int p_cz = (int)std::floor(camera.position.z / CS);
+            int p_sub_idx = std::clamp((int)std::floor(camera.position.y / SCS), 0, Config::NUM_SUBCHUNKS - 1);
             
             rlDisableDepthTest();
             rlDisableBackfaceCulling();
             rlBegin(RL_LINES);
             
-            // 1. Chunks vecinos (Radio 1 alrededor del jugador) - Marco tenue azul
+            // 1. Chunks vecinos (Radio 1 alrededor del jugador) - Marcos y sub-chunks
             Color neighbor_col = Fade(BLUE, 0.35f);
-            rlColor4ub(neighbor_col.r, neighbor_col.g, neighbor_col.b, neighbor_col.a);
+            Color neighbor_sub_col = Fade(BLUE, 0.18f);
             for (int dx = -1; dx <= 1; ++dx) {
                 for (int dz = -1; dz <= 1; ++dz) {
                     if (dx == 0 && dz == 0) continue; // Saltar chunk actual
@@ -1702,21 +1713,21 @@ int main() {
                     float nz1 = nz0 + CS;
                     
                     // Esquinas verticales
+                    rlColor4ub(neighbor_col.r, neighbor_col.g, neighbor_col.b, neighbor_col.a);
                     rlVertex3f(nx0, 0, nz0); rlVertex3f(nx0, GY, nz0);
                     rlVertex3f(nx1, 0, nz0); rlVertex3f(nx1, GY, nz0);
                     rlVertex3f(nx1, 0, nz1); rlVertex3f(nx1, GY, nz1);
                     rlVertex3f(nx0, 0, nz1); rlVertex3f(nx0, GY, nz1);
                     
-                    // Borde inferior y superior
-                    rlVertex3f(nx0, 0, nz0); rlVertex3f(nx1, 0, nz0);
-                    rlVertex3f(nx1, 0, nz0); rlVertex3f(nx1, 0, nz1);
-                    rlVertex3f(nx1, 0, nz1); rlVertex3f(nx0, 0, nz1);
-                    rlVertex3f(nx0, 0, nz1); rlVertex3f(nx0, 0, nz0);
-                    
-                    rlVertex3f(nx0, GY, nz0); rlVertex3f(nx1, GY, nz0);
-                    rlVertex3f(nx1, GY, nz0); rlVertex3f(nx1, GY, nz1);
-                    rlVertex3f(nx1, GY, nz1); rlVertex3f(nx0, GY, nz1);
-                    rlVertex3f(nx0, GY, nz1); rlVertex3f(nx0, GY, nz0);
+                    // Divisiones horizontales de Sub-chunks en vecinos
+                    rlColor4ub(neighbor_sub_col.r, neighbor_sub_col.g, neighbor_sub_col.b, neighbor_sub_col.a);
+                    for (int s = 0; s <= Config::NUM_SUBCHUNKS; ++s) {
+                        float sy = s * SCS;
+                        rlVertex3f(nx0, sy, nz0); rlVertex3f(nx1, sy, nz0);
+                        rlVertex3f(nx1, sy, nz0); rlVertex3f(nx1, sy, nz1);
+                        rlVertex3f(nx1, sy, nz1); rlVertex3f(nx0, sy, nz1);
+                        rlVertex3f(nx0, sy, nz1); rlVertex3f(nx0, sy, nz0);
+                    }
                 }
             }
             
@@ -1726,8 +1737,8 @@ int main() {
             float x1 = x0 + CS;
             float z1 = z0 + CS;
             
-            // A. Rejilla vertical por bloque (X=1..15, Z=1..15) en las 4 paredes exteriores (Amarillo)
-            Color wall_grid_col = Color{ 255, 220, 0, 160 };
+            // A. Rejilla vertical por bloque (X=1..15, Z=1..15) en las 4 paredes exteriores (Amarillo tenue)
+            Color wall_grid_col = Color{ 255, 220, 0, 100 };
             rlColor4ub(wall_grid_col.r, wall_grid_col.g, wall_grid_col.b, wall_grid_col.a);
             for (int i = 1; i < Config::CHUNK_SIZE; ++i) {
                 float ox = x0 + (float)i;
@@ -1742,22 +1753,43 @@ int main() {
                 rlVertex3f(x1, 0, oz); rlVertex3f(x1, GY, oz);
             }
             
-            // B. Líneas horizontales de subdivisiones de Sub-chunk (cada 16 bloques de altura en Y: 0, 16, 32... 128)
+            // B. Líneas de todas las secciones de Sub-chunk (cada 16 bloques de altura en Y: 0, 16, 32... 128)
             Color section_col = Color{ 255, 230, 0, 240 };
             rlColor4ub(section_col.r, section_col.g, section_col.b, section_col.a);
-            for (int y = 0; y <= Config::GRID_Y; y += 16) {
-                float fy = (float)y;
+            for (int s = 0; s <= Config::NUM_SUBCHUNKS; ++s) {
+                float fy = (float)(s * SCS);
                 rlVertex3f(x0, fy, z0); rlVertex3f(x1, fy, z0);
                 rlVertex3f(x1, fy, z0); rlVertex3f(x1, fy, z1);
                 rlVertex3f(x1, fy, z1); rlVertex3f(x0, fy, z1);
                 rlVertex3f(x0, fy, z1); rlVertex3f(x0, fy, z0);
             }
             
-            // C. Rejilla horizontal detallada en el sub-chunk actual del jugador (cada 2 bloques de altura)
-            int p_sub_y = std::clamp((int)std::floor(camera.position.y / 16.0f) * 16, 0, Config::GRID_Y - 16);
-            Color sub_detail_col = Color{ 0, 210, 255, 180 };
+            // C. Caja cúbica completa (16x16x16) del SUB-CHUNK ACTUAL DEL JUGADOR (Cian brillante)
+            float sub_y0 = p_sub_idx * SCS;
+            float sub_y1 = (p_sub_idx + 1) * SCS;
+            Color active_sub_col = Color{ 0, 240, 255, 255 };
+            rlColor4ub(active_sub_col.r, active_sub_col.g, active_sub_col.b, active_sub_col.a);
+            
+            // Marco inferior
+            rlVertex3f(x0, sub_y0, z0); rlVertex3f(x1, sub_y0, z0);
+            rlVertex3f(x1, sub_y0, z0); rlVertex3f(x1, sub_y0, z1);
+            rlVertex3f(x1, sub_y0, z1); rlVertex3f(x0, sub_y0, z1);
+            rlVertex3f(x0, sub_y0, z1); rlVertex3f(x0, sub_y0, z0);
+            // Marco superior
+            rlVertex3f(x0, sub_y1, z0); rlVertex3f(x1, sub_y1, z0);
+            rlVertex3f(x1, sub_y1, z0); rlVertex3f(x1, sub_y1, z1);
+            rlVertex3f(x1, sub_y1, z1); rlVertex3f(x0, sub_y1, z1);
+            rlVertex3f(x0, sub_y1, z1); rlVertex3f(x0, sub_y1, z0);
+            // 4 Columnas del subchunk
+            rlVertex3f(x0, sub_y0, z0); rlVertex3f(x0, sub_y1, z0);
+            rlVertex3f(x1, sub_y0, z0); rlVertex3f(x1, sub_y1, z0);
+            rlVertex3f(x1, sub_y0, z1); rlVertex3f(x1, sub_y1, z1);
+            rlVertex3f(x0, sub_y0, z1); rlVertex3f(x0, sub_y1, z1);
+            
+            // Rejilla interna del subchunk activo (cada 2 bloques)
+            Color sub_detail_col = Color{ 0, 210, 255, 120 };
             rlColor4ub(sub_detail_col.r, sub_detail_col.g, sub_detail_col.b, sub_detail_col.a);
-            for (int y = p_sub_y + 2; y < p_sub_y + 16; y += 2) {
+            for (int y = (int)sub_y0 + 2; y < (int)sub_y1; y += 2) {
                 float fy = (float)y;
                 rlVertex3f(x0, fy, z0); rlVertex3f(x1, fy, z0);
                 rlVertex3f(x1, fy, z0); rlVertex3f(x1, fy, z1);
@@ -1765,7 +1797,7 @@ int main() {
                 rlVertex3f(x0, fy, z1); rlVertex3f(x0, fy, z0);
             }
             
-            // D. 4 Esquinas principales en Rojo Intenso (desde Y=0 hasta Y=GRID_Y)
+            // D. 4 Esquinas principales de la columna de chunk en Rojo Intenso (desde Y=0 hasta Y=GRID_Y)
             Color corner_col = Color{ 255, 30, 30, 255 };
             rlColor4ub(corner_col.r, corner_col.g, corner_col.b, corner_col.a);
             rlVertex3f(x0, 0, z0); rlVertex3f(x0, GY, z0);
@@ -2064,8 +2096,9 @@ int main() {
             std::vector<std::pair<std::string, Color>> lines;
             lines.push_back({ TextFormat("SmoothVoxelEngine C++ | %d FPS", fps), fps_color });
             lines.push_back({ TextFormat("XYZ: %.2f / %.2f / %.2f", camera.position.x, camera.position.y, camera.position.z), WHITE });
-            lines.push_back({ TextFormat("Bloque: %d, %d, %d", cam_x, feet_y, cam_z), Color{220, 225, 235, 255} });
-            lines.push_back({ TextFormat("Chunk: %d, %d  [En chunk: %d, %d, %d]", p_cx, p_cz, in_cx, feet_y, in_cz), Color{220, 225, 235, 255} });
+            int sub_y_idx = std::clamp((int)std::floor(camera.position.y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            int in_sub_y = ((feet_y % Config::SUBCHUNK_SIZE) + Config::SUBCHUNK_SIZE) % Config::SUBCHUNK_SIZE;
+            lines.push_back({ TextFormat("Chunk: %d, %d (Sub-chunk %d/%d)  [En sub-chunk: %d, %d, %d]", p_cx, p_cz, sub_y_idx, Config::NUM_SUBCHUNKS - 1, in_cx, in_sub_y, in_cz), Color{220, 225, 235, 255} });
             lines.push_back({ TextFormat("Orientacion: %s", facing), Color{200, 215, 235, 255} });
             lines.push_back({ TextFormat("Bioma: %s", biome_name), Color{140, 230, 160, 255} });
             

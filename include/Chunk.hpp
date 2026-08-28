@@ -1,11 +1,40 @@
 #pragma once
 #include <raylib.h>
 #include <vector>
+#include <array>
 #include <atomic>
 #include <thread>
 #include <mutex>
 #include <future>
 #include "Config.hpp"
+
+struct SubChunk {
+    Mesh solid_mesh = { 0 };
+    Mesh build_mesh = { 0 };
+    Mesh water_mesh = { 0 };
+    Mesh plants_mesh = { 0 };
+
+    Mesh next_solid_mesh = { 0 };
+    Mesh next_build_mesh = { 0 };
+    Mesh next_water_mesh = { 0 };
+    Mesh next_plants_mesh = { 0 };
+
+    std::vector<Vector3> s_vertices, s_normals;
+    std::vector<Vector2> s_uvs, s_uvs2;
+    std::vector<Color> s_colors;
+
+    std::vector<Vector3> b_vertices, b_normals;
+    std::vector<Vector2> b_uvs;
+    std::vector<Color> b_colors;
+
+    std::vector<Vector3> w_vertices, w_normals;
+    std::vector<Vector2> w_uvs, w_uvs2;
+    std::vector<Color> w_colors;
+
+    std::vector<Vector3> p_vertices, p_normals;
+    std::vector<Vector2> p_uvs;
+    std::vector<Color> p_colors;
+};
 
 class Chunk : public std::enable_shared_from_this<Chunk> {
 public:
@@ -28,31 +57,7 @@ public:
     std::vector<Config::VoxelData> voxels;
     std::vector<uint8_t> light_grid;
 
-    Mesh solid_mesh = { 0 };
-    Mesh build_mesh = { 0 }; // For construction blocks, stairs, fences, props
-    Mesh water_mesh = { 0 };
-    Mesh plants_mesh = { 0 }; // For tall grass
-
-    Mesh next_solid_mesh = { 0 };
-    Mesh next_build_mesh = { 0 };
-    Mesh next_water_mesh = { 0 };
-    Mesh next_plants_mesh = { 0 };
-
-    std::vector<Vector3> s_vertices, s_normals;
-    std::vector<Vector2> s_uvs, s_uvs2;
-    std::vector<Color> s_colors;
-
-    std::vector<Vector3> b_vertices, b_normals;
-    std::vector<Vector2> b_uvs;
-    std::vector<Color> b_colors;
-
-    std::vector<Vector3> w_vertices, w_normals;
-    std::vector<Vector2> w_uvs, w_uvs2;
-    std::vector<Color> w_colors;
-
-    std::vector<Vector3> p_vertices, p_normals;
-    std::vector<Vector2> p_uvs;
-    std::vector<Color> p_colors;
+    std::array<SubChunk, Config::NUM_SUBCHUNKS> subchunks;
 
     Chunk(int x, int z);
     ~Chunk();
@@ -63,6 +68,8 @@ public:
     void update_logic(int& upload_budget);
     void draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos);
     void draw_water(Material& mat_water, Vector3 camera_pos);
+    void draw_subchunk_solid(int s, Material& mat_solid, Material& mat_plants, Vector3 camera_pos);
+    void draw_subchunk_water(int s, Material& mat_water, Vector3 camera_pos);
 
     inline int get_idx(int x, int y, int z) const {
         return y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + z * (Config::CHUNK_SIZE + 1) + x;

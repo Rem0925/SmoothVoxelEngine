@@ -11,6 +11,8 @@ namespace Config {
     constexpr int GRID_Y = 128;
     constexpr int GRID_Z = 64;
     constexpr int CHUNK_SIZE = 16;
+    constexpr int SUBCHUNK_SIZE = 16;
+    constexpr int NUM_SUBCHUNKS = GRID_Y / SUBCHUNK_SIZE; // 8 secciones verticales de 16x16x16
     constexpr float ISO_SURFACE = 0.0f;
 
     inline const std::string WORLD_NAME = "world_1";

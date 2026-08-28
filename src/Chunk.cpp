@@ -37,10 +37,16 @@ Chunk::~Chunk() {
         }
         m = { 0 };
     };
-    free_if_packed(solid_mesh);
-    free_if_packed(build_mesh);
-    free_if_packed(water_mesh);
-    free_if_packed(plants_mesh);
+    for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        free_if_packed(subchunks[s].solid_mesh);
+        free_if_packed(subchunks[s].build_mesh);
+        free_if_packed(subchunks[s].water_mesh);
+        free_if_packed(subchunks[s].plants_mesh);
+        free_if_packed(subchunks[s].next_solid_mesh);
+        free_if_packed(subchunks[s].next_build_mesh);
+        free_if_packed(subchunks[s].next_water_mesh);
+        free_if_packed(subchunks[s].next_plants_mesh);
+    }
 }
 
 void Chunk::flush_gl_delete_queue() {
@@ -753,17 +759,65 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod) {
 
     {
         std::lock_guard<std::mutex> lock(mesh_mutex);
-        s_vertices = std::move(ls_vertices);
-        s_normals = std::move(ls_normals);
-        s_uvs = std::move(ls_uvs);
-        s_uvs2 = std::move(ls_uvs2);
-        s_colors = std::move(ls_colors);
+        for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+            subchunks[s].s_vertices.clear();
+            subchunks[s].s_normals.clear();
+            subchunks[s].s_uvs.clear();
+            subchunks[s].s_uvs2.clear();
+            subchunks[s].s_colors.clear();
 
-        p_vertices = std::move(lp_vertices);
-        p_normals = std::move(lp_normals);
-        p_uvs = std::move(lp_uvs);
-        p_colors = std::move(lp_colors);
+            subchunks[s].p_vertices.clear();
+            subchunks[s].p_normals.clear();
+            subchunks[s].p_uvs.clear();
+            subchunks[s].p_colors.clear();
+        }
         light_grid = local_light_grid;
+
+        for (size_t i = 0; i < ls_vertices.size(); i += 3) {
+            float avg_y = (ls_vertices[i].y + ls_vertices[i+1].y + ls_vertices[i+2].y) / 3.0f;
+            int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            
+            subchunks[s].s_vertices.push_back(ls_vertices[i]);
+            subchunks[s].s_vertices.push_back(ls_vertices[i+1]);
+            subchunks[s].s_vertices.push_back(ls_vertices[i+2]);
+
+            subchunks[s].s_normals.push_back(ls_normals[i]);
+            subchunks[s].s_normals.push_back(ls_normals[i+1]);
+            subchunks[s].s_normals.push_back(ls_normals[i+2]);
+
+            subchunks[s].s_uvs.push_back(ls_uvs[i]);
+            subchunks[s].s_uvs.push_back(ls_uvs[i+1]);
+            subchunks[s].s_uvs.push_back(ls_uvs[i+2]);
+
+            subchunks[s].s_uvs2.push_back(ls_uvs2[i]);
+            subchunks[s].s_uvs2.push_back(ls_uvs2[i+1]);
+            subchunks[s].s_uvs2.push_back(ls_uvs2[i+2]);
+
+            subchunks[s].s_colors.push_back(ls_colors[i]);
+            subchunks[s].s_colors.push_back(ls_colors[i+1]);
+            subchunks[s].s_colors.push_back(ls_colors[i+2]);
+        }
+
+        for (size_t i = 0; i < lp_vertices.size(); i += 3) {
+            float avg_y = (lp_vertices[i].y + lp_vertices[i+1].y + lp_vertices[i+2].y) / 3.0f;
+            int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+
+            subchunks[s].p_vertices.push_back(lp_vertices[i]);
+            subchunks[s].p_vertices.push_back(lp_vertices[i+1]);
+            subchunks[s].p_vertices.push_back(lp_vertices[i+2]);
+
+            subchunks[s].p_normals.push_back(lp_normals[i]);
+            subchunks[s].p_normals.push_back(lp_normals[i+1]);
+            subchunks[s].p_normals.push_back(lp_normals[i+2]);
+
+            subchunks[s].p_uvs.push_back(lp_uvs[i]);
+            subchunks[s].p_uvs.push_back(lp_uvs[i+1]);
+            subchunks[s].p_uvs.push_back(lp_uvs[i+2]);
+
+            subchunks[s].p_colors.push_back(lp_colors[i]);
+            subchunks[s].p_colors.push_back(lp_colors[i+1]);
+            subchunks[s].p_colors.push_back(lp_colors[i+2]);
+        }
     }
 
     build_construction_mesh(voxels_ptr, local_light_grid.data());
@@ -1115,10 +1169,33 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
 
     {
         std::lock_guard<std::mutex> lock(mesh_mutex);
-        b_vertices = std::move(lb_vertices);
-        b_normals = std::move(lb_normals);
-        b_uvs = std::move(lb_uvs);
-        b_colors = std::move(lb_colors);
+        for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+            subchunks[s].b_vertices.clear();
+            subchunks[s].b_normals.clear();
+            subchunks[s].b_uvs.clear();
+            subchunks[s].b_colors.clear();
+        }
+
+        for (size_t i = 0; i < lb_vertices.size(); i += 3) {
+            float avg_y = (lb_vertices[i].y + lb_vertices[i+1].y + lb_vertices[i+2].y) / 3.0f;
+            int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+
+            subchunks[s].b_vertices.push_back(lb_vertices[i]);
+            subchunks[s].b_vertices.push_back(lb_vertices[i+1]);
+            subchunks[s].b_vertices.push_back(lb_vertices[i+2]);
+
+            subchunks[s].b_normals.push_back(lb_normals[i]);
+            subchunks[s].b_normals.push_back(lb_normals[i+1]);
+            subchunks[s].b_normals.push_back(lb_normals[i+2]);
+
+            subchunks[s].b_uvs.push_back(lb_uvs[i]);
+            subchunks[s].b_uvs.push_back(lb_uvs[i+1]);
+            subchunks[s].b_uvs.push_back(lb_uvs[i+2]);
+
+            subchunks[s].b_colors.push_back(lb_colors[i]);
+            subchunks[s].b_colors.push_back(lb_colors[i+1]);
+            subchunks[s].b_colors.push_back(lb_colors[i+2]);
+        }
     }
 }
 
@@ -1309,11 +1386,38 @@ void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod) {
 
     {
         std::lock_guard<std::mutex> lock(mesh_mutex);
-        w_vertices = std::move(fw_vertices);
-        w_normals = std::move(fw_normals);
-        w_uvs = std::move(fw_uvs);
-        w_uvs2 = std::move(fw_uvs2);
-        w_colors = std::move(fw_colors);
+        for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+            subchunks[s].w_vertices.clear();
+            subchunks[s].w_normals.clear();
+            subchunks[s].w_uvs.clear();
+            subchunks[s].w_uvs2.clear();
+            subchunks[s].w_colors.clear();
+        }
+
+        for (size_t i = 0; i < fw_vertices.size(); i += 3) {
+            float avg_y = (fw_vertices[i].y + fw_vertices[i+1].y + fw_vertices[i+2].y) / 3.0f;
+            int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+
+            subchunks[s].w_vertices.push_back(fw_vertices[i]);
+            subchunks[s].w_vertices.push_back(fw_vertices[i+1]);
+            subchunks[s].w_vertices.push_back(fw_vertices[i+2]);
+
+            subchunks[s].w_normals.push_back(fw_normals[i]);
+            subchunks[s].w_normals.push_back(fw_normals[i+1]);
+            subchunks[s].w_normals.push_back(fw_normals[i+2]);
+
+            subchunks[s].w_uvs.push_back(fw_uvs[i]);
+            subchunks[s].w_uvs.push_back(fw_uvs[i+1]);
+            subchunks[s].w_uvs.push_back(fw_uvs[i+2]);
+
+            subchunks[s].w_uvs2.push_back(fw_uvs2[i]);
+            subchunks[s].w_uvs2.push_back(fw_uvs2[i+1]);
+            subchunks[s].w_uvs2.push_back(fw_uvs2[i+2]);
+
+            subchunks[s].w_colors.push_back(fw_colors[i]);
+            subchunks[s].w_colors.push_back(fw_colors[i+1]);
+            subchunks[s].w_colors.push_back(fw_colors[i+2]);
+        }
     }
 }
 
@@ -1328,161 +1432,165 @@ void Chunk::pack_meshes(int mask) {
         if (m.colors) { MemFree(m.colors); m.colors = nullptr; }
     };
 
-    if ((mask & 2) != 0) {
-        free_arrays(next_solid_mesh);
-        next_solid_mesh = {0};
-        
-        if (!s_vertices.empty()) {
-            next_solid_mesh.vertexCount = s_vertices.size();
-            next_solid_mesh.triangleCount = s_vertices.size() / 3;
+    for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        auto& sc = subchunks[s];
 
-            next_solid_mesh.vertices = (float*)MemAlloc(s_vertices.size() * 3 * sizeof(float));
-            next_solid_mesh.normals = (float*)MemAlloc(s_normals.size() * 3 * sizeof(float));
-            next_solid_mesh.texcoords = (float*)MemAlloc(s_uvs.size() * 2 * sizeof(float));
-            next_solid_mesh.texcoords2 = (float*)MemAlloc(s_uvs2.size() * 2 * sizeof(float));
-            next_solid_mesh.colors = (unsigned char*)MemAlloc(s_colors.size() * 4 * sizeof(unsigned char));
+        if ((mask & 2) != 0) {
+            free_arrays(sc.next_solid_mesh);
+            sc.next_solid_mesh = {0};
+            
+            if (!sc.s_vertices.empty()) {
+                sc.next_solid_mesh.vertexCount = sc.s_vertices.size();
+                sc.next_solid_mesh.triangleCount = sc.s_vertices.size() / 3;
 
-            for (size_t i = 0; i < s_vertices.size(); i++) {
-                next_solid_mesh.vertices[i*3] = s_vertices[i].x;
-                next_solid_mesh.vertices[i*3+1] = s_vertices[i].y;
-                next_solid_mesh.vertices[i*3+2] = s_vertices[i].z;
+                sc.next_solid_mesh.vertices = (float*)MemAlloc(sc.s_vertices.size() * 3 * sizeof(float));
+                sc.next_solid_mesh.normals = (float*)MemAlloc(sc.s_normals.size() * 3 * sizeof(float));
+                sc.next_solid_mesh.texcoords = (float*)MemAlloc(sc.s_uvs.size() * 2 * sizeof(float));
+                sc.next_solid_mesh.texcoords2 = (float*)MemAlloc(sc.s_uvs2.size() * 2 * sizeof(float));
+                sc.next_solid_mesh.colors = (unsigned char*)MemAlloc(sc.s_colors.size() * 4 * sizeof(unsigned char));
 
-                next_solid_mesh.normals[i*3] = s_normals[i].x;
-                next_solid_mesh.normals[i*3+1] = s_normals[i].y;
-                next_solid_mesh.normals[i*3+2] = s_normals[i].z;
+                for (size_t i = 0; i < sc.s_vertices.size(); i++) {
+                    sc.next_solid_mesh.vertices[i*3] = sc.s_vertices[i].x;
+                    sc.next_solid_mesh.vertices[i*3+1] = sc.s_vertices[i].y;
+                    sc.next_solid_mesh.vertices[i*3+2] = sc.s_vertices[i].z;
 
-                next_solid_mesh.texcoords[i*2] = s_uvs[i].x;
-                next_solid_mesh.texcoords[i*2+1] = s_uvs[i].y;
+                    sc.next_solid_mesh.normals[i*3] = sc.s_normals[i].x;
+                    sc.next_solid_mesh.normals[i*3+1] = sc.s_normals[i].y;
+                    sc.next_solid_mesh.normals[i*3+2] = sc.s_normals[i].z;
 
-                next_solid_mesh.texcoords2[i*2] = s_uvs2[i].x;
-                next_solid_mesh.texcoords2[i*2+1] = s_uvs2[i].y;
+                    sc.next_solid_mesh.texcoords[i*2] = sc.s_uvs[i].x;
+                    sc.next_solid_mesh.texcoords[i*2+1] = sc.s_uvs[i].y;
 
-                next_solid_mesh.colors[i*4] = s_colors[i].r;
-                next_solid_mesh.colors[i*4+1] = s_colors[i].g;
-                next_solid_mesh.colors[i*4+2] = s_colors[i].b;
-                next_solid_mesh.colors[i*4+3] = s_colors[i].a;
+                    sc.next_solid_mesh.texcoords2[i*2] = sc.s_uvs2[i].x;
+                    sc.next_solid_mesh.texcoords2[i*2+1] = sc.s_uvs2[i].y;
+
+                    sc.next_solid_mesh.colors[i*4] = sc.s_colors[i].r;
+                    sc.next_solid_mesh.colors[i*4+1] = sc.s_colors[i].g;
+                    sc.next_solid_mesh.colors[i*4+2] = sc.s_colors[i].b;
+                    sc.next_solid_mesh.colors[i*4+3] = sc.s_colors[i].a;
+                }
+
+                std::vector<Vector3>().swap(sc.s_vertices);
+                std::vector<Vector3>().swap(sc.s_normals);
+                std::vector<Vector2>().swap(sc.s_uvs);
+                std::vector<Vector2>().swap(sc.s_uvs2);
+                std::vector<Color>().swap(sc.s_colors);
             }
 
-            std::vector<Vector3>().swap(s_vertices);
-            std::vector<Vector3>().swap(s_normals);
-            std::vector<Vector2>().swap(s_uvs);
-            std::vector<Vector2>().swap(s_uvs2);
-            std::vector<Color>().swap(s_colors);
+            free_arrays(sc.next_build_mesh);
+            sc.next_build_mesh = {0};
+
+            if (!sc.b_vertices.empty()) {
+                sc.next_build_mesh.vertexCount = sc.b_vertices.size();
+                sc.next_build_mesh.triangleCount = sc.b_vertices.size() / 3;
+
+                sc.next_build_mesh.vertices = (float*)MemAlloc(sc.b_vertices.size() * 3 * sizeof(float));
+                sc.next_build_mesh.normals = (float*)MemAlloc(sc.b_normals.size() * 3 * sizeof(float));
+                sc.next_build_mesh.texcoords = (float*)MemAlloc(sc.b_uvs.size() * 2 * sizeof(float));
+                sc.next_build_mesh.colors = (unsigned char*)MemAlloc(sc.b_colors.size() * 4 * sizeof(unsigned char));
+
+                for (size_t i = 0; i < sc.b_vertices.size(); i++) {
+                    sc.next_build_mesh.vertices[i*3] = sc.b_vertices[i].x;
+                    sc.next_build_mesh.vertices[i*3+1] = sc.b_vertices[i].y;
+                    sc.next_build_mesh.vertices[i*3+2] = sc.b_vertices[i].z;
+
+                    sc.next_build_mesh.normals[i*3] = sc.b_normals[i].x;
+                    sc.next_build_mesh.normals[i*3+1] = sc.b_normals[i].y;
+                    sc.next_build_mesh.normals[i*3+2] = sc.b_normals[i].z;
+
+                    sc.next_build_mesh.texcoords[i*2] = sc.b_uvs[i].x;
+                    sc.next_build_mesh.texcoords[i*2+1] = sc.b_uvs[i].y;
+
+                    sc.next_build_mesh.colors[i*4] = sc.b_colors[i].r;
+                    sc.next_build_mesh.colors[i*4+1] = sc.b_colors[i].g;
+                    sc.next_build_mesh.colors[i*4+2] = sc.b_colors[i].b;
+                    sc.next_build_mesh.colors[i*4+3] = sc.b_colors[i].a;
+                }
+
+                std::vector<Vector3>().swap(sc.b_vertices);
+                std::vector<Vector3>().swap(sc.b_normals);
+                std::vector<Vector2>().swap(sc.b_uvs);
+                std::vector<Color>().swap(sc.b_colors);
+            }
+
+            free_arrays(sc.next_plants_mesh);
+            sc.next_plants_mesh = {0};
+
+            if (!sc.p_vertices.empty()) {
+                sc.next_plants_mesh.vertexCount = sc.p_vertices.size();
+                sc.next_plants_mesh.triangleCount = sc.p_vertices.size() / 3;
+
+                sc.next_plants_mesh.vertices = (float*)MemAlloc(sc.p_vertices.size() * 3 * sizeof(float));
+                sc.next_plants_mesh.normals = (float*)MemAlloc(sc.p_normals.size() * 3 * sizeof(float));
+                sc.next_plants_mesh.texcoords = (float*)MemAlloc(sc.p_uvs.size() * 2 * sizeof(float));
+                sc.next_plants_mesh.colors = (unsigned char*)MemAlloc(sc.p_colors.size() * 4 * sizeof(unsigned char));
+
+                for (size_t i = 0; i < sc.p_vertices.size(); i++) {
+                    sc.next_plants_mesh.vertices[i*3] = sc.p_vertices[i].x;
+                    sc.next_plants_mesh.vertices[i*3+1] = sc.p_vertices[i].y;
+                    sc.next_plants_mesh.vertices[i*3+2] = sc.p_vertices[i].z;
+
+                    sc.next_plants_mesh.normals[i*3] = sc.p_normals[i].x;
+                    sc.next_plants_mesh.normals[i*3+1] = sc.p_normals[i].y;
+                    sc.next_plants_mesh.normals[i*3+2] = sc.p_normals[i].z;
+
+                    sc.next_plants_mesh.texcoords[i*2] = sc.p_uvs[i].x;
+                    sc.next_plants_mesh.texcoords[i*2+1] = sc.p_uvs[i].y;
+
+                    sc.next_plants_mesh.colors[i*4] = sc.p_colors[i].r;
+                    sc.next_plants_mesh.colors[i*4+1] = sc.p_colors[i].g;
+                    sc.next_plants_mesh.colors[i*4+2] = sc.p_colors[i].b;
+                    sc.next_plants_mesh.colors[i*4+3] = sc.p_colors[i].a;
+                }
+
+                std::vector<Vector3>().swap(sc.p_vertices);
+                std::vector<Vector3>().swap(sc.p_normals);
+                std::vector<Vector2>().swap(sc.p_uvs);
+                std::vector<Color>().swap(sc.p_colors);
+            }
         }
 
-        free_arrays(next_build_mesh);
-        next_build_mesh = {0};
+        if ((mask & 1) != 0) {
+            free_arrays(sc.next_water_mesh);
+            sc.next_water_mesh = {0};
 
-        if (!b_vertices.empty()) {
-            next_build_mesh.vertexCount = b_vertices.size();
-            next_build_mesh.triangleCount = b_vertices.size() / 3;
+            if (!sc.w_vertices.empty()) {
+                sc.next_water_mesh.vertexCount = sc.w_vertices.size();
+                sc.next_water_mesh.triangleCount = sc.w_vertices.size() / 3;
 
-            next_build_mesh.vertices = (float*)MemAlloc(b_vertices.size() * 3 * sizeof(float));
-            next_build_mesh.normals = (float*)MemAlloc(b_normals.size() * 3 * sizeof(float));
-            next_build_mesh.texcoords = (float*)MemAlloc(b_uvs.size() * 2 * sizeof(float));
-            next_build_mesh.colors = (unsigned char*)MemAlloc(b_colors.size() * 4 * sizeof(unsigned char));
+                sc.next_water_mesh.vertices = (float*)MemAlloc(sc.w_vertices.size() * 3 * sizeof(float));
+                sc.next_water_mesh.normals = (float*)MemAlloc(sc.w_normals.size() * 3 * sizeof(float));
+                sc.next_water_mesh.texcoords = (float*)MemAlloc(sc.w_uvs.size() * 2 * sizeof(float));
+                sc.next_water_mesh.texcoords2 = (float*)MemAlloc(sc.w_uvs2.size() * 2 * sizeof(float));
+                sc.next_water_mesh.colors = (unsigned char*)MemAlloc(sc.w_colors.size() * 4 * sizeof(unsigned char));
 
-            for (size_t i = 0; i < b_vertices.size(); i++) {
-                next_build_mesh.vertices[i*3] = b_vertices[i].x;
-                next_build_mesh.vertices[i*3+1] = b_vertices[i].y;
-                next_build_mesh.vertices[i*3+2] = b_vertices[i].z;
+                for (size_t i = 0; i < sc.w_vertices.size(); i++) {
+                    sc.next_water_mesh.vertices[i*3] = sc.w_vertices[i].x;
+                    sc.next_water_mesh.vertices[i*3+1] = sc.w_vertices[i].y;
+                    sc.next_water_mesh.vertices[i*3+2] = sc.w_vertices[i].z;
 
-                next_build_mesh.normals[i*3] = b_normals[i].x;
-                next_build_mesh.normals[i*3+1] = b_normals[i].y;
-                next_build_mesh.normals[i*3+2] = b_normals[i].z;
+                    sc.next_water_mesh.normals[i*3] = sc.w_normals[i].x;
+                    sc.next_water_mesh.normals[i*3+1] = sc.w_normals[i].y;
+                    sc.next_water_mesh.normals[i*3+2] = sc.w_normals[i].z;
 
-                next_build_mesh.texcoords[i*2] = b_uvs[i].x;
-                next_build_mesh.texcoords[i*2+1] = b_uvs[i].y;
+                    sc.next_water_mesh.texcoords[i*2] = sc.w_uvs[i].x;
+                    sc.next_water_mesh.texcoords[i*2+1] = sc.w_uvs[i].y;
 
-                next_build_mesh.colors[i*4] = b_colors[i].r;
-                next_build_mesh.colors[i*4+1] = b_colors[i].g;
-                next_build_mesh.colors[i*4+2] = b_colors[i].b;
-                next_build_mesh.colors[i*4+3] = b_colors[i].a;
+                    sc.next_water_mesh.texcoords2[i*2] = sc.w_uvs2[i].x;
+                    sc.next_water_mesh.texcoords2[i*2+1] = sc.w_uvs2[i].y;
+
+                    sc.next_water_mesh.colors[i*4] = sc.w_colors[i].r;
+                    sc.next_water_mesh.colors[i*4+1] = sc.w_colors[i].g;
+                    sc.next_water_mesh.colors[i*4+2] = sc.w_colors[i].b;
+                    sc.next_water_mesh.colors[i*4+3] = sc.w_colors[i].a;
+                }
+
+                std::vector<Vector3>().swap(sc.w_vertices);
+                std::vector<Vector3>().swap(sc.w_normals);
+                std::vector<Vector2>().swap(sc.w_uvs);
+                std::vector<Vector2>().swap(sc.w_uvs2);
+                std::vector<Color>().swap(sc.w_colors);
             }
-
-            std::vector<Vector3>().swap(b_vertices);
-            std::vector<Vector3>().swap(b_normals);
-            std::vector<Vector2>().swap(b_uvs);
-            std::vector<Color>().swap(b_colors);
-        }
-
-        free_arrays(next_plants_mesh);
-        next_plants_mesh = {0};
-
-        if (!p_vertices.empty()) {
-            next_plants_mesh.vertexCount = p_vertices.size();
-            next_plants_mesh.triangleCount = p_vertices.size() / 3;
-
-            next_plants_mesh.vertices = (float*)MemAlloc(p_vertices.size() * 3 * sizeof(float));
-            next_plants_mesh.normals = (float*)MemAlloc(p_normals.size() * 3 * sizeof(float));
-            next_plants_mesh.texcoords = (float*)MemAlloc(p_uvs.size() * 2 * sizeof(float));
-            next_plants_mesh.colors = (unsigned char*)MemAlloc(p_colors.size() * 4 * sizeof(unsigned char));
-
-            for (size_t i = 0; i < p_vertices.size(); i++) {
-                next_plants_mesh.vertices[i*3] = p_vertices[i].x;
-                next_plants_mesh.vertices[i*3+1] = p_vertices[i].y;
-                next_plants_mesh.vertices[i*3+2] = p_vertices[i].z;
-
-                next_plants_mesh.normals[i*3] = p_normals[i].x;
-                next_plants_mesh.normals[i*3+1] = p_normals[i].y;
-                next_plants_mesh.normals[i*3+2] = p_normals[i].z;
-
-                next_plants_mesh.texcoords[i*2] = p_uvs[i].x;
-                next_plants_mesh.texcoords[i*2+1] = p_uvs[i].y;
-
-                next_plants_mesh.colors[i*4] = p_colors[i].r;
-                next_plants_mesh.colors[i*4+1] = p_colors[i].g;
-                next_plants_mesh.colors[i*4+2] = p_colors[i].b;
-                next_plants_mesh.colors[i*4+3] = p_colors[i].a;
-            }
-
-            std::vector<Vector3>().swap(p_vertices);
-            std::vector<Vector3>().swap(p_normals);
-            std::vector<Vector2>().swap(p_uvs);
-            std::vector<Color>().swap(p_colors);
-        }
-    }
-
-    if ((mask & 1) != 0) {
-        free_arrays(next_water_mesh);
-        next_water_mesh = {0};
-
-        if (!w_vertices.empty()) {
-            next_water_mesh.vertexCount = w_vertices.size();
-            next_water_mesh.triangleCount = w_vertices.size() / 3;
-
-            next_water_mesh.vertices = (float*)MemAlloc(w_vertices.size() * 3 * sizeof(float));
-            next_water_mesh.normals = (float*)MemAlloc(w_normals.size() * 3 * sizeof(float));
-            next_water_mesh.texcoords = (float*)MemAlloc(w_uvs.size() * 2 * sizeof(float));
-            next_water_mesh.texcoords2 = (float*)MemAlloc(w_uvs2.size() * 2 * sizeof(float));
-            next_water_mesh.colors = (unsigned char*)MemAlloc(w_colors.size() * 4 * sizeof(unsigned char));
-
-            for (size_t i = 0; i < w_vertices.size(); i++) {
-                next_water_mesh.vertices[i*3] = w_vertices[i].x;
-                next_water_mesh.vertices[i*3+1] = w_vertices[i].y;
-                next_water_mesh.vertices[i*3+2] = w_vertices[i].z;
-
-                next_water_mesh.normals[i*3] = w_normals[i].x;
-                next_water_mesh.normals[i*3+1] = w_normals[i].y;
-                next_water_mesh.normals[i*3+2] = w_normals[i].z;
-
-                next_water_mesh.texcoords[i*2] = w_uvs[i].x;
-                next_water_mesh.texcoords[i*2+1] = w_uvs[i].y;
-
-                next_water_mesh.texcoords2[i*2] = w_uvs2[i].x;
-                next_water_mesh.texcoords2[i*2+1] = w_uvs2[i].y;
-
-                next_water_mesh.colors[i*4] = w_colors[i].r;
-                next_water_mesh.colors[i*4+1] = w_colors[i].g;
-                next_water_mesh.colors[i*4+2] = w_colors[i].b;
-                next_water_mesh.colors[i*4+3] = w_colors[i].a;
-            }
-
-            std::vector<Vector3>().swap(w_vertices);
-            std::vector<Vector3>().swap(w_normals);
-            std::vector<Vector2>().swap(w_uvs);
-            std::vector<Vector2>().swap(w_uvs2);
-            std::vector<Color>().swap(w_colors);
         }
     }
 
@@ -1515,13 +1623,16 @@ void Chunk::upload_meshes() {
         }
     };
 
-    if ((mask & 2) != 0) {
-        upload_and_swap(solid_mesh, next_solid_mesh);
-        upload_and_swap(build_mesh, next_build_mesh);
-        upload_and_swap(plants_mesh, next_plants_mesh);
-    }
-    if ((mask & 1) != 0) {
-        upload_and_swap(water_mesh, next_water_mesh);
+    for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        auto& sc = subchunks[s];
+        if ((mask & 2) != 0) {
+            upload_and_swap(sc.solid_mesh, sc.next_solid_mesh);
+            upload_and_swap(sc.build_mesh, sc.next_build_mesh);
+            upload_and_swap(sc.plants_mesh, sc.next_plants_mesh);
+        }
+        if ((mask & 1) != 0) {
+            upload_and_swap(sc.water_mesh, sc.next_water_mesh);
+        }
     }
 }
 
@@ -1539,34 +1650,50 @@ void Chunk::update_logic(int& upload_budget) {
     }
 }
 
-void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos) {
-    if (!is_ready) return;
+void Chunk::draw_subchunk_solid(int s, Material& mat_solid, Material& mat_plants, Vector3 camera_pos) {
+    if (!is_ready || s < 0 || s >= Config::NUM_SUBCHUNKS) return;
+    auto& sc = subchunks[s];
     
-    if (solid_mesh.vboId) {
-        DrawMesh(solid_mesh, mat_solid, MatrixIdentity());
+    if (sc.solid_mesh.vboId) {
+        DrawMesh(sc.solid_mesh, mat_solid, MatrixIdentity());
     }
 
-    if (build_mesh.vboId) {
-        DrawMesh(build_mesh, mat_solid, MatrixIdentity());
+    if (sc.build_mesh.vboId) {
+        DrawMesh(sc.build_mesh, mat_solid, MatrixIdentity());
     }
     
-    if (plants_mesh.vboId) {
+    if (sc.plants_mesh.vboId) {
         float cx_center = cx * CHUNK_SIZE + CHUNK_SIZE / 2.0f;
         float cz_center = cz * CHUNK_SIZE + CHUNK_SIZE / 2.0f;
         
         if (std::abs(cx_center - camera_pos.x) <= 35.0f && std::abs(cz_center - camera_pos.z) <= 35.0f) {
             rlDisableBackfaceCulling();
-            DrawMesh(plants_mesh, mat_plants, MatrixIdentity());
+            DrawMesh(sc.plants_mesh, mat_plants, MatrixIdentity());
             rlEnableBackfaceCulling();
         }
     }
 }
 
+void Chunk::draw_subchunk_water(int s, Material& mat_water, Vector3 camera_pos) {
+    if (!is_ready || s < 0 || s >= Config::NUM_SUBCHUNKS) return;
+    auto& sc = subchunks[s];
+    
+    if (sc.water_mesh.vboId) {
+        DrawMesh(sc.water_mesh, mat_water, MatrixIdentity());
+    }
+}
+
+void Chunk::draw_solid(Material& mat_solid, Material& mat_plants, Vector3 camera_pos) {
+    if (!is_ready) return;
+    for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        draw_subchunk_solid(s, mat_solid, mat_plants, camera_pos);
+    }
+}
+
 void Chunk::draw_water(Material& mat_water, Vector3 camera_pos) {
     if (!is_ready) return;
-    
-    if (water_mesh.vboId) {
-        DrawMesh(water_mesh, mat_water, MatrixIdentity());
+    for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        draw_subchunk_water(s, mat_water, camera_pos);
     }
 }
 

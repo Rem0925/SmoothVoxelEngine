@@ -15,5 +15,6 @@ namespace mc {
                   std::vector<Color>& colors,
                   float origin_x = 0.0f, float origin_z = 0.0f, int seed_offset = 0, int lod = 1,
                   const Color* grass_tint_cache = nullptr, const Color* foliage_tint_cache = nullptr,
-                  const uint8_t* light_grid = nullptr);
+                  const uint8_t* light_grid = nullptr,
+                  int min_y = 0, int max_y = -1);
 }

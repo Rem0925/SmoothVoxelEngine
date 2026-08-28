@@ -383,14 +383,33 @@ static bool is_chunk_in_frustum(const Frustum& f, int cx, int cz) {
     return true;
 }
 
+static bool is_subchunk_in_frustum(const Frustum& f, int cx, int sy, int cz) {
+    Vector3 min_pt = { (float)(cx * Config::CHUNK_SIZE), (float)(sy * Config::SUBCHUNK_SIZE), (float)(cz * Config::CHUNK_SIZE) };
+    Vector3 max_pt = { (float)((cx + 1) * Config::CHUNK_SIZE), (float)((sy + 1) * Config::SUBCHUNK_SIZE), (float)((cz + 1) * Config::CHUNK_SIZE) };
+    for (int i = 0; i < 6; ++i) {
+        Vector3 p;
+        p.x = (f.planes[i].a >= 0.0f) ? max_pt.x : min_pt.x;
+        p.y = (f.planes[i].b >= 0.0f) ? max_pt.y : min_pt.y;
+        p.z = (f.planes[i].c >= 0.0f) ? max_pt.z : min_pt.z;
+        if (f.planes[i].a * p.x + f.planes[i].b * p.y + f.planes[i].c * p.z + f.planes[i].d < 0.0f) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void World::draw(Camera3D camera) {
     Frustum frustum = extract_camera_frustum(camera);
 
     // Pass 1: Opaque geometry (Solid and Plants)
     for (auto& pair : chunks) {
         Chunk* c = pair.second.get();
-        if (c && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
-            c->draw_solid(mat_solid, mat_plants, camera.position);
+        if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+                if (is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
+                    c->draw_subchunk_solid(s, mat_solid, mat_plants, camera.position);
+                }
+            }
         }
     }
     
@@ -405,8 +424,12 @@ void World::draw(Camera3D camera) {
 
     for (auto& pair : chunks) {
         Chunk* c = pair.second.get();
-        if (c && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
-            c->draw_water(mat_water, camera.position);
+        if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+                if (is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
+                    c->draw_subchunk_water(s, mat_water, camera.position);
+                }
+            }
         }
     }
 
