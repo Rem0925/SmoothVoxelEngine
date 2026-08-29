@@ -33,16 +33,26 @@
       "name": "body",
       "from": [1.0, 0.0, 1.0],
       "to": [15.0, 14.0, 15.0],
-      "textures": {
-        "all": [1, 9]
+      "faces": {
+        "down":  { "texture": "#default" },
+        "up":    { "texture": "#default" },
+        "north": { "texture": "#default" },
+        "south": { "texture": "#default" },
+        "west":  { "texture": "#default" },
+        "east":  { "texture": "#default" }
       }
     },
     {
       "name": "latch",
       "from": [7.0, 7.0, 15.0],
       "to": [9.0, 10.0, 16.0],
-      "textures": {
-        "all": [0, 8]
+      "faces": {
+        "down":  { "texture": "#latch" },
+        "up":    { "texture": "#latch" },
+        "north": { "texture": "#latch" },
+        "south": { "texture": "#latch" },
+        "west":  { "texture": "#latch" },
+        "east":  { "texture": "#latch" }
       }
     }
   ]

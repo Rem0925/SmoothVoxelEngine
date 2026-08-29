@@ -17,29 +17,34 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      2,
-      6
-    ]
+    "default": [1, 9],
+    "flame": [5, 7]
   },
   "elements": [
     {
       "name": "stick",
-      "from": [
-        -0.08,
-        -0.35,
-        -0.08
-      ],
-      "to": [
-        0.08,
-        0.35,
-        0.08
-      ],
-      "textures": {
-        "all": [
-          2,
-          6
-        ]
+      "from": [-0.06, -0.5, -0.06],
+      "to": [0.06, 0.25, 0.06],
+      "faces": {
+        "down":  { "texture": "#default" },
+        "up":    { "texture": "#default" },
+        "north": { "texture": "#default" },
+        "south": { "texture": "#default" },
+        "west":  { "texture": "#default" },
+        "east":  { "texture": "#default" }
+      }
+    },
+    {
+      "name": "flame",
+      "from": [-0.08, 0.25, -0.08],
+      "to": [0.08, 0.5, 0.08],
+      "faces": {
+        "down":  { "texture": "#flame" },
+        "up":    { "texture": "#flame" },
+        "north": { "texture": "#flame" },
+        "south": { "texture": "#flame" },
+        "west":  { "texture": "#flame" },
+        "east":  { "texture": "#flame" }
       }
     }
   ]

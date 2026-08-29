@@ -476,33 +476,21 @@ void DrawFirstPersonViewmodel(
             rlSetTexture(0);
         };
 
+        // === ITEM/HERRAMIENTA/BLOQUE 3D EN LA MANO (UNIVERSAL) ===
+        // Editar estos valores para ajustar posición, rotación y tamaño
+        Vector3 held_pos = { -0.015f, -0.01f, -0.01f };
+        Vector3 held_rot = { -40.0f, -80.0f, 0.0f };
+        Vector3 held_scale = { 0.30f, 0.30f, 0.30f };
+
         if (holding_tool) {
-            // === HERRAMIENTA 3D EN LA MANO DERECHA (Minecraft Pose) ===
             unsigned char c_tool = (unsigned char)(255 * light);
             Color tint = { c_tool, c_tool, c_tool, 255 };
-
-            Vector3 pos = { -0.01f, 0.01f, 0.04f };
-            Vector3 rot = { -15.0f, -42.0f, 6.0f };
-            Vector3 scale = { 0.32f, 0.32f, 0.32f };
-
-            ItemModel3D::get().draw_tool(held_tool_type, held_tool_tier, pos, rot, scale, tint);
+            ItemModel3D::get().draw_tool(held_tool_type, held_tool_tier, held_pos, held_rot, held_scale, tint);
         }
         else if (holding_item && held_item != 255 && Config::ITEMS.count(held_item)) {
-            // === ÍTEM 3D EN LA MANO DERECHA ===
             unsigned char c_item = (unsigned char)(255 * light);
             Color tint = { c_item, c_item, c_item, 255 };
-
-            if (held_item == Config::ITEM_STICK) {
-                Vector3 pos = { -0.01f, 0.01f, 0.04f };
-                Vector3 rot = { -15.0f, -42.0f, 6.0f };
-                Vector3 scale = { 0.30f, 0.30f, 0.30f };
-                ItemModel3D::get().draw_item(held_item, pos, rot, scale, tint);
-            } else {
-                Vector3 pos = { 0.01f, 0.04f, 0.05f };
-                Vector3 rot = { -15.0f, -25.0f, 0.0f };
-                Vector3 scale = { 0.22f, 0.22f, 0.22f };
-                ItemModel3D::get().draw_item(held_item, pos, rot, scale, tint);
-            }
+            ItemModel3D::get().draw_item(held_item, held_pos, held_rot, held_scale, tint);
         }
         else if (holding_block && held_block != AIR && Config::BLOCKS.count(held_block)) {
             const auto& bt = Config::BLOCKS.at(held_block);

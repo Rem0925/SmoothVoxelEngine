@@ -1052,212 +1052,107 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                 float gz = (float)(cz * Config::CHUNK_SIZE + lz) - 0.5f;
 
                 int def_tx = bt.tex_x, def_ty = bt.tex_y;
-                int top_tx = bt.tex_top_x >= 0 ? bt.tex_top_x : def_tx, top_ty = bt.tex_top_y >= 0 ? bt.tex_top_y : def_ty;
-                int bot_tx = bt.tex_bottom_x >= 0 ? bt.tex_bottom_x : def_tx, bot_ty = bt.tex_bottom_y >= 0 ? bt.tex_bottom_y : def_ty;
-                int front_tx = bt.tex_front_x >= 0 ? bt.tex_front_x : def_tx, front_ty = bt.tex_front_y >= 0 ? bt.tex_front_y : def_ty;
                 uint8_t rot = voxels_ptr[idx].rotation;
 
                 if (!bt.elements.empty()) {
-                    // Custom 3D Model Elements (Modelos 3D por JSON)
-                    for (const auto& elem : bt.elements) {
-                        float ex0 = gx + elem.from.x / 16.0f;
-                        float ey0 = gy + elem.from.y / 16.0f;
-                        float ez0 = gz + elem.from.z / 16.0f;
-                        float ex1 = gx + elem.to.x / 16.0f;
-                        float ey1 = gy + elem.to.y / 16.0f;
-                        float ez1 = gz + elem.to.z / 16.0f;
+                    // Modelos 3D por JSON con rotacion automatica
+                    uint8_t elem_rot = rot & 3;
 
-                        // UP (+Y)
-                        if (elem.faces[Config::FACE_UP].enabled) {
-                            const auto& f = elem.faces[Config::FACE_UP];
-                            bool cull = (f.cullface == "up") && is_opaque_cube(lx, ly + 1, lz);
-                            if (!cull) {
-                                auto ls = sample_face_light(lx, ly, lz, lx, ly + 1, lz);
-                                add_quad_sub({ex0, ey1, ez1}, {ex1, ey1, ez1}, {ex1, ey1, ez0}, {ex0, ey1, ez0},
-                                             1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
-                            }
+                    // Tabla de remapeo de caras: face_remap[rot][element_face] = world_face
+                    static const int face_remap[4][6] = {
+                        {0, 1, 2, 3, 4, 5},  // rot=0: sin cambio
+                        {0, 1, 5, 4, 2, 3},  // rot=1: 90 CW - N→E, S→E->W, W→N, E→S
+                        {0, 1, 3, 2, 5, 4},  // rot=2: 180° - N↔S, W↔E
+                        {0, 1, 4, 5, 3, 2}   // rot=3: 270 CW - N→W, S→E, W→S, E→N
+                    };
+
+                    for (const auto& elem : bt.elements) {
+                        // Rotar coordenadas from/to alrededor del eje Y (centro = 8 en espacio 0..16)
+                        float fx0 = elem.from.x, fz0 = elem.from.z;
+                        float fx1 = elem.to.x,   fz1 = elem.to.z;
+                        switch (elem_rot) {
+                            case 1: { float t = fx0; fx0 = 16.0f - fz0; fz0 = t; t = fx1; fx1 = 16.0f - fz1; fz1 = t; break; }
+                            case 2: fx0 = 16.0f - fx0; fz0 = 16.0f - fz0; fx1 = 16.0f - fx1; fz1 = 16.0f - fz1; break;
+                            case 3: { float t = fx0; fx0 = fz0; fz0 = 16.0f - t; t = fx1; fx1 = fz1; fz1 = 16.0f - t; break; }
+                            default: break;
                         }
-                        // DOWN (-Y)
-                        if (elem.faces[Config::FACE_DOWN].enabled) {
-                            const auto& f = elem.faces[Config::FACE_DOWN];
-                            bool cull = (f.cullface == "down") && is_opaque_cube(lx, ly - 1, lz);
-                            if (!cull) {
-                                auto ls = sample_face_light(lx, ly, lz, lx, ly - 1, lz);
-                                add_quad_sub({ex0, ey0, ez0}, {ex1, ey0, ez0}, {ex1, ey0, ez1}, {ex0, ey0, ez1},
-                                             1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                        // Calcular bounding box rotado (Y no rota)
+                        float rx0 = fx0 < fx1 ? fx0 : fx1, rx1 = fx0 < fx1 ? fx1 : fx0;
+                        float ry0 = elem.from.y, ry1 = elem.to.y;
+                        float rz0 = fz0 < fz1 ? fz0 : fz1, rz1 = fz0 < fz1 ? fz1 : fz0;
+                        // Coordenadas world-space
+                        float ex0 = gx + rx0 / 16.0f, ey0 = gy + ry0 / 16.0f, ez0 = gz + rz0 / 16.0f;
+                        float ex1 = gx + rx1 / 16.0f, ey1 = gy + ry1 / 16.0f, ez1 = gz + rz1 / 16.0f;
+
+                        // Renderizar cada cara del elemento con remapeo de rotacion
+                        for (int ef = 0; ef < 6; ef++) {
+                            if (!elem.faces[ef].enabled) continue;
+                            const auto& f = elem.faces[ef];
+                            int wf = face_remap[elem_rot][ef]; // Direccion world de esta cara
+
+                            // Culling: si cullface esta definido, verificar vecino en la direccion world
+                            bool cull = false;
+                            if (!f.cullface.empty()) {
+                                switch (wf) {
+                                    case 1: cull = is_opaque_cube(lx, ly + 1, lz); break;
+                                    case 0: cull = is_opaque_cube(lx, ly - 1, lz); break;
+                                    case 2: cull = is_opaque_cube(lx, ly, lz - 1); break;
+                                    case 3: cull = is_opaque_cube(lx, ly, lz + 1); break;
+                                    case 4: cull = is_opaque_cube(lx - 1, ly, lz); break;
+                                    case 5: cull = is_opaque_cube(lx + 1, ly, lz); break;
+                                }
                             }
-                        }
-                        // NORTH (-Z)
-                        if (elem.faces[Config::FACE_NORTH].enabled) {
-                            const auto& f = elem.faces[Config::FACE_NORTH];
-                            bool cull = (f.cullface == "north") && is_opaque_cube(lx, ly, lz - 1);
-                            if (!cull) {
-                                auto ls = sample_face_light(lx, ly, lz, lx, ly, lz - 1);
-                                add_quad_sub({ex1, ey0, ez0}, {ex0, ey0, ez0}, {ex0, ey1, ez0}, {ex1, ey1, ez0},
-                                             1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                            if (cull) continue;
+
+                            // Muestreo de luz segun la direccion world de la cara
+                            int nx = lx, ny = ly, nz = lz;
+                            switch (wf) {
+                                case 1: ny++; break;
+                                case 0: ny--; break;
+                                case 2: nz--; break;
+                                case 3: nz++; break;
+                                case 4: nx--; break;
+                                case 5: nx++; break;
                             }
-                        }
-                        // SOUTH (+Z)
-                        if (elem.faces[Config::FACE_SOUTH].enabled) {
-                            const auto& f = elem.faces[Config::FACE_SOUTH];
-                            bool cull = (f.cullface == "south") && is_opaque_cube(lx, ly, lz + 1);
-                            if (!cull) {
-                                auto ls = sample_face_light(lx, ly, lz, lx, ly, lz + 1);
-                                add_quad_sub({ex0, ey0, ez1}, {ex1, ey0, ez1}, {ex1, ey1, ez1}, {ex0, ey1, ez1},
-                                             1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
-                            }
-                        }
-                        // WEST (-X)
-                        if (elem.faces[Config::FACE_WEST].enabled) {
-                            const auto& f = elem.faces[Config::FACE_WEST];
-                            bool cull = (f.cullface == "west") && is_opaque_cube(lx - 1, ly, lz);
-                            if (!cull) {
-                                auto ls = sample_face_light(lx, ly, lz, lx - 1, ly, lz);
-                                add_quad_sub({ex0, ey0, ez0}, {ex0, ey0, ez1}, {ex0, ey1, ez1}, {ex0, ey1, ez0},
-                                             1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
-                            }
-                        }
-                        // EAST (+X)
-                        if (elem.faces[Config::FACE_EAST].enabled) {
-                            const auto& f = elem.faces[Config::FACE_EAST];
-                            bool cull = (f.cullface == "east") && is_opaque_cube(lx + 1, ly, lz);
-                            if (!cull) {
-                                auto ls = sample_face_light(lx, ly, lz, lx + 1, ly, lz);
-                                add_quad_sub({ex1, ey0, ez1}, {ex1, ey0, ez0}, {ex1, ey1, ez0}, {ex1, ey1, ez1},
-                                             1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                            auto ls = sample_face_light(lx, ly, lz, nx, ny, nz);
+
+                            // Renderizar cara segun su direccion world
+                            switch (wf) {
+                                case 1: // UP (+Y)
+                                    add_quad_sub({ex0, ey1, ez1}, {ex1, ey1, ez1}, {ex1, ey1, ez0}, {ex0, ey1, ez0},
+                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    break;
+                                case 0: // DOWN (-Y)
+                                    add_quad_sub({ex0, ey0, ez0}, {ex1, ey0, ez0}, {ex1, ey0, ez1}, {ex0, ey0, ez1},
+                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    break;
+                                case 2: // NORTH (-Z)
+                                    add_quad_sub({ex1, ey0, ez0}, {ex0, ey0, ez0}, {ex0, ey1, ez0}, {ex1, ey1, ez0},
+                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    break;
+                                case 3: // SOUTH (+Z)
+                                    add_quad_sub({ex0, ey0, ez1}, {ex1, ey0, ez1}, {ex1, ey1, ez1}, {ex0, ey1, ez1},
+                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    break;
+                                case 4: // WEST (-X)
+                                    add_quad_sub({ex0, ey0, ez0}, {ex0, ey0, ez1}, {ex0, ey1, ez1}, {ex0, ey1, ez0},
+                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    break;
+                                case 5: // EAST (+X)
+                                    add_quad_sub({ex1, ey0, ez1}, {ex1, ey0, ez0}, {ex1, ey1, ez0}, {ex1, ey1, ez1},
+                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    break;
                             }
                         }
                     }
                 } else {
                     switch (bt.shape) {
-                    case Config::SHAPE_CUBE:
-                    case Config::SHAPE_GLASS:
-                    case Config::SHAPE_CRAFTING_TABLE: {
-                        bool cull_top = is_opaque_cube(lx, ly + 1, lz);
-                        bool cull_bot = is_opaque_cube(lx, ly - 1, lz);
-                        bool cull_right = is_opaque_cube(lx + 1, ly, lz);
-                        bool cull_left = is_opaque_cube(lx - 1, ly, lz);
-                        bool cull_front = is_opaque_cube(lx, ly, lz + 1);
-                        bool cull_back = is_opaque_cube(lx, ly, lz - 1);
-                        add_box(lx, ly, lz,
-                                gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
-                                top_tx, top_ty, bot_tx, bot_ty,
-                                front_tx, front_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                cull_top, cull_bot, cull_front, cull_back, cull_left, cull_right);
-                        break;
-                    }
-                    case Config::SHAPE_FURNACE: {
-                        bool cull_top = is_opaque_cube(lx, ly + 1, lz);
-                        bool cull_bot = is_opaque_cube(lx, ly - 1, lz);
-                        bool cull_right = is_opaque_cube(lx + 1, ly, lz);
-                        bool cull_left = is_opaque_cube(lx - 1, ly, lz);
-                        bool cull_front = is_opaque_cube(lx, ly, lz + 1);
-                        bool cull_back = is_opaque_cube(lx, ly, lz - 1);
-
-                        int f_front_x = def_tx, f_front_y = def_ty;
-                        int f_back_x = def_tx, f_back_y = def_ty;
-                        int f_left_x = def_tx, f_left_y = def_ty;
-                        int f_right_x = def_tx, f_right_y = def_ty;
-
-                        if (rot == 0) { // Front on +Z
-                            f_front_x = front_tx; f_front_y = front_ty;
-                        } else if (rot == 1) { // Front on -X
-                            f_left_x = front_tx; f_left_y = front_ty;
-                        } else if (rot == 2) { // Front on -Z
-                            f_back_x = front_tx; f_back_y = front_ty;
-                        } else if (rot == 3) { // Front on +X
-                            f_right_x = front_tx; f_right_y = front_ty;
-                        }
-
-                        add_box(lx, ly, lz,
-                                gx, gy, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
-                                top_tx, top_ty, bot_tx, bot_ty,
-                                f_front_x, f_front_y, f_back_x, f_back_y,
-                                f_left_x, f_left_y, f_right_x, f_right_y,
-                                cull_top, cull_bot, cull_front, cull_back, cull_left, cull_right);
-                        break;
-                    }
-                    case Config::SHAPE_CHEST: {
-                        // Cuerpo
-                        add_box(lx, ly, lz,
-                                gx + 0.06f, gy, gz + 0.06f, gx + 0.94f, gy + 0.88f, gz + 0.94f,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                false, false, false, false, false, false, true);
-                        int latch_tx = bt.tex_latch_x >= 0 ? bt.tex_latch_x : 2;
-                        int latch_ty = bt.tex_latch_y >= 0 ? bt.tex_latch_y : 3;
-                        // Cerrojo orientado
-                        if (rot == 0) { // South (+Z)
-                            add_box(lx, ly, lz,
-                                    gx + 0.44f, gy + 0.42f, gz + 0.94f, gx + 0.56f, gy + 0.62f, gz + 0.99f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
-                                    false, false, false, false, false, false, true);
-                        } else if (rot == 1) { // West (-X)
-                            add_box(lx, ly, lz,
-                                    gx + 0.01f, gy + 0.42f, gz + 0.44f, gx + 0.06f, gy + 0.62f, gz + 0.56f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
-                                    false, false, false, false, false, false, true);
-                        } else if (rot == 2) { // North (-Z)
-                            add_box(lx, ly, lz,
-                                    gx + 0.44f, gy + 0.42f, gz + 0.01f, gx + 0.56f, gy + 0.62f, gz + 0.06f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
-                                    false, false, false, false, false, false, true);
-                        } else if (rot == 3) { // East (+X)
-                            add_box(lx, ly, lz,
-                                    gx + 0.94f, gy + 0.42f, gz + 0.44f, gx + 0.99f, gy + 0.62f, gz + 0.56f,
-                                    latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty, latch_tx, latch_ty,
-                                    false, false, false, false, false, false, true);
-                        }
-                        break;
-                    }
-                    case Config::SHAPE_STAIRS: {
-                        // Base (inferior completa)
-                        add_box(lx, ly, lz,
-                                gx, gy, gz, gx + 1.0f, gy + 0.5f, gz + 1.0f,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                false, false, false, false, false, false, true);
-                        // Peldaño superior segun direccion opuesta al jugador
-                        if (rot == 0) { // Step on North (-Z)
-                            add_box(lx, ly, lz,
-                                    gx, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 0.5f,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    false, false, false, false, false, false, true);
-                        } else if (rot == 1) { // Step on East (+X)
-                            add_box(lx, ly, lz,
-                                    gx + 0.5f, gy + 0.5f, gz, gx + 1.0f, gy + 1.0f, gz + 1.0f,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    false, false, false, false, false, false, true);
-                        } else if (rot == 2) { // Step on South (+Z)
-                            add_box(lx, ly, lz,
-                                    gx, gy + 0.5f, gz + 0.5f, gx + 1.0f, gy + 1.0f, gz + 1.0f,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    false, false, false, false, false, false, true);
-                        } else if (rot == 3) { // Step on West (-X)
-                            add_box(lx, ly, lz,
-                                    gx, gy + 0.5f, gz, gx + 0.5f, gy + 1.0f, gz + 1.0f,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    def_tx, def_ty, def_tx, def_ty,
-                                    false, false, false, false, false, false, true);
-                        }
-                        break;
-                    }
                     case Config::SHAPE_DOOR: {
                         int facing = rot & 3;
                         bool is_open = (rot & 4) != 0;
@@ -1342,23 +1237,6 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                             add_box(lx, ly, lz, gx + 0.44f, gy + 0.2f, gz, gx + 0.56f, gy + 0.38f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
                             add_box(lx, ly, lz, gx + 0.44f, gy + 0.65f, gz, gx + 0.56f, gy + 0.83f, gz + 0.375f, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, def_tx, def_ty, false, false, false, false, false, false, true);
                         }
-                        break;
-                    }
-                    case Config::SHAPE_TORCH: {
-                        // Palo
-                        add_box(lx, ly, lz,
-                                gx + 0.44f, gy, gz + 0.44f, gx + 0.56f, gy + 0.65f, gz + 0.56f,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                false, false, false, false, false, false, true);
-                        // Cabeza con fuego
-                        add_box(lx, ly, lz,
-                                gx + 0.40f, gy + 0.55f, gz + 0.40f, gx + 0.60f, gy + 0.75f, gz + 0.60f,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                def_tx, def_ty, def_tx, def_ty,
-                                false, false, false, false, false, false, true);
                         break;
                     }
                     default:

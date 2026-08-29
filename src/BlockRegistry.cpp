@@ -276,41 +276,12 @@ bool load_blocks(const std::string& blocks_dir) {
                         parse_face("west", Config::FACE_WEST);
                         parse_face("east", Config::FACE_EAST);
                     } else {
-                        // Legacy format: enable all 6 faces
-                        int def_x = bt.tex_x, def_y = bt.tex_y;
-                        int top_x = bt.tex_top_x >= 0 ? bt.tex_top_x : def_x;
-                        int top_y = bt.tex_top_y >= 0 ? bt.tex_top_y : def_y;
-                        int bot_x = bt.tex_bottom_x >= 0 ? bt.tex_bottom_x : def_x;
-                        int bot_y = bt.tex_bottom_y >= 0 ? bt.tex_bottom_y : def_y;
-                        int front_x = bt.tex_front_x >= 0 ? bt.tex_front_x : def_x;
-                        int front_y = bt.tex_front_y >= 0 ? bt.tex_front_y : def_y;
-
-                        if (ej.contains("textures")) {
-                            const auto& etj = ej["textures"];
-                            if (etj.contains("all") && etj["all"].is_array() && etj["all"].size() >= 2) {
-                                def_x = top_x = bot_x = front_x = etj["all"][0].get<int>();
-                                def_y = top_y = bot_y = front_y = etj["all"][1].get<int>();
-                            }
-                            if (etj.contains("top") && etj["top"].is_array() && etj["top"].size() >= 2) {
-                                top_x = etj["top"][0].get<int>();
-                                top_y = etj["top"][1].get<int>();
-                            }
-                            if (etj.contains("bottom") && etj["bottom"].is_array() && etj["bottom"].size() >= 2) {
-                                bot_x = etj["bottom"][0].get<int>();
-                                bot_y = etj["bottom"][1].get<int>();
-                            }
-                            if (etj.contains("front") && etj["front"].is_array() && etj["front"].size() >= 2) {
-                                front_x = etj["front"][0].get<int>();
-                                front_y = etj["front"][1].get<int>();
-                            }
+                        // Sin faces: habilitar 6 caras con textura default del bloque
+                        for (int d = 0; d < 6; d++) {
+                            elem.faces[d].enabled = true;
+                            elem.faces[d].tex_x = bt.tex_x;
+                            elem.faces[d].tex_y = bt.tex_y;
                         }
-
-                        elem.faces[Config::FACE_DOWN]  = { true, {0,0,16,16}, bot_x, bot_y, "" };
-                        elem.faces[Config::FACE_UP]    = { true, {0,0,16,16}, top_x, top_y, "" };
-                        elem.faces[Config::FACE_NORTH] = { true, {0,0,16,16}, def_x, def_y, "" };
-                        elem.faces[Config::FACE_SOUTH] = { true, {0,0,16,16}, front_x, front_y, "" };
-                        elem.faces[Config::FACE_WEST]  = { true, {0,0,16,16}, def_x, def_y, "" };
-                        elem.faces[Config::FACE_EAST]  = { true, {0,0,16,16}, def_x, def_y, "" };
                     }
 
                     bt.elements.push_back(elem);
