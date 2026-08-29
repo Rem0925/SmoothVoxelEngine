@@ -187,21 +187,21 @@ void ItemDropManager::update(float dt, World& world, Vector3 player_pos, UI& ui)
 void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_items, float light) {
     if (drops.empty()) return;
 
-    float tw = 1.0f / 9.0f;
-    float th = 1.0f / 10.0f;
+    float tw = 1.0f / (float)Config::TILES_ATLAS_COLS;
+    float th = 1.0f / (float)Config::TILES_ATLAS_ROWS;
     auto get_tile_uv = [&](int tx, int ty) -> std::array<Vector2, 4> {
         float u0 = (float)tx * tw;
-        float v0 = (10.0f - 1.0f - (float)ty) * th;
+        float v0 = ((float)Config::TILES_ATLAS_ROWS - 1.0f - (float)ty) * th;
         float u1 = u0 + tw;
         float v1 = v0 + th;
         return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
     };
 
-    float itw = 1.0f / 7.0f;
-    float ith = 1.0f / 8.0f;
+    float itw = 1.0f / (float)Config::ITEMS_ATLAS_COLS;
+    float ith = 1.0f / (float)Config::ITEMS_ATLAS_ROWS;
     auto get_item_uv = [&](int ix, int iy) -> std::array<Vector2, 4> {
         float u0 = (float)ix * itw;
-        float v0 = (8.0f - 1.0f - (float)iy) * ith;
+        float v0 = ((float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)iy) * ith;
         float u1 = u0 + itw;
         float v1 = v0 + ith;
         return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
@@ -299,7 +299,32 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_it
                 int front_tx = (bt.tex_front_x >= 0) ? bt.tex_front_x : def_tx;
                 int front_ty = (bt.tex_front_y >= 0) ? bt.tex_front_y : def_ty;
 
-                if (bt.shape == Config::SHAPE_TERRAIN) {
+                if (!bt.elements.empty()) {
+                    float unit = 0.20f / 16.0f;
+                    for (const auto& elem : bt.elements) {
+                        float x0 = (elem.from.x - 8.0f) * unit;
+                        float y0 = (elem.from.y - 8.0f) * unit;
+                        float z0 = (elem.from.z - 8.0f) * unit;
+                        float x1 = (elem.to.x - 8.0f) * unit;
+                        float y1 = (elem.to.y - 8.0f) * unit;
+                        float z1 = (elem.to.z - 8.0f) * unit;
+
+                        int top_x = elem.faces[Config::FACE_UP].tex_x >= 0 ? elem.faces[Config::FACE_UP].tex_x : def_tx;
+                        int top_y = elem.faces[Config::FACE_UP].tex_y >= 0 ? elem.faces[Config::FACE_UP].tex_y : def_ty;
+                        int bot_x = elem.faces[Config::FACE_DOWN].tex_x >= 0 ? elem.faces[Config::FACE_DOWN].tex_x : def_tx;
+                        int bot_y = elem.faces[Config::FACE_DOWN].tex_y >= 0 ? elem.faces[Config::FACE_DOWN].tex_y : def_ty;
+                        int front_x_e = elem.faces[Config::FACE_SOUTH].tex_x >= 0 ? elem.faces[Config::FACE_SOUTH].tex_x : def_tx;
+                        int front_y_e = elem.faces[Config::FACE_SOUTH].tex_y >= 0 ? elem.faces[Config::FACE_SOUTH].tex_y : def_ty;
+                        int back_x = elem.faces[Config::FACE_NORTH].tex_x >= 0 ? elem.faces[Config::FACE_NORTH].tex_x : def_tx;
+                        int back_y = elem.faces[Config::FACE_NORTH].tex_y >= 0 ? elem.faces[Config::FACE_NORTH].tex_y : def_ty;
+                        int left_x = elem.faces[Config::FACE_WEST].tex_x >= 0 ? elem.faces[Config::FACE_WEST].tex_x : def_tx;
+                        int left_y = elem.faces[Config::FACE_WEST].tex_y >= 0 ? elem.faces[Config::FACE_WEST].tex_y : def_ty;
+                        int right_x = elem.faces[Config::FACE_EAST].tex_x >= 0 ? elem.faces[Config::FACE_EAST].tex_x : def_tx;
+                        int right_y = elem.faces[Config::FACE_EAST].tex_y >= 0 ? elem.faces[Config::FACE_EAST].tex_y : def_ty;
+
+                        draw_tex_box(x0, y0, z0, x1, y1, z1, top_x, top_y, bot_x, bot_y, front_x_e, front_y_e, back_x, back_y, right_x, right_y, left_x, left_y);
+                    }
+                } else if (bt.shape == Config::SHAPE_TERRAIN) {
                     // === BLOQUE NATURAL: ROCA FACETADA 8 LADOS ===
                     if (d.id == Config::GRASS) {
                         top_tx = 6; top_ty = 8;

@@ -1,0 +1,10 @@
+{
+  "tiles": {
+    "columns": 9,
+    "rows": 10
+  },
+  "items": {
+    "columns": 7,
+    "rows": 8
+  }
+}

@@ -22,14 +22,14 @@ void ItemModel3D::init(Texture2D items_texture) {
         return;
     }
 
-    int cols = 7;
-    int rows = 8;
+    int cols = Config::ITEMS_ATLAS_COLS;
+    int rows = Config::ITEMS_ATLAS_ROWS;
     float thickness = 0.0625f; // Standard Minecraft 1/16 voxel thickness
 
     // 1. Generate 3D models for all Tools
     for (const auto& ti : Config::TOOLS) {
         int ix = ti.item_tex_x;
-        int iy = 8 - 1 - ti.item_tex_y;
+        int iy = Config::ITEMS_ATLAS_ROWS - 1 - ti.item_tex_y;
 
         Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, false /* pivot at handle */);
         Model mdl = LoadModelFromMesh(m);
@@ -40,7 +40,7 @@ void ItemModel3D::init(Texture2D items_texture) {
     // 2. Generate 3D models for all Items
     for (const auto& [id, itype] : Config::ITEMS) {
         int ix = itype.item_tex_x;
-        int iy = 8 - 1 - itype.item_tex_y;
+        int iy = Config::ITEMS_ATLAS_ROWS - 1 - itype.item_tex_y;
 
         bool center = (id != Config::ITEM_STICK); // Sticks use handle pivot, other items center
         Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, center);

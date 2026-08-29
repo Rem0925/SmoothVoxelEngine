@@ -240,9 +240,9 @@ void UI::draw_block_icon(uint8_t block_id, int x, int y, int size) {
         ty = b.tex_top_y;
     }
 
-    float tw = (float)spritesheet.width / 9.0f;
-    float th = (float)spritesheet.height / 10.0f;
-    float correct_y = 10.0f - 1.0f - (float)ty;
+    float tw = (float)spritesheet.width / (float)Config::TILES_ATLAS_COLS;
+    float th = (float)spritesheet.height / (float)Config::TILES_ATLAS_ROWS;
+    float correct_y = (float)Config::TILES_ATLAS_ROWS - 1.0f - (float)ty;
     
     Rectangle src = { (float)tx * tw, correct_y * th, tw, th };
     Rectangle dst = { (float)x, (float)y, (float)size, (float)size };
@@ -252,9 +252,9 @@ void UI::draw_block_icon(uint8_t block_id, int x, int y, int size) {
 void UI::draw_tool_icon(Config::ToolType type, Config::ToolTier tier, int x, int y, int size) {
     for (const auto& t : Config::TOOLS) {
         if (t.type == type && t.tier == tier) {
-            float tw = (float)spritesheet_items.width / 7.0f;
-            float th = (float)spritesheet_items.height / 8.0f;
-            float correct_y = 8.0f - 1.0f - (float)t.item_tex_y;
+            float tw = (float)spritesheet_items.width / (float)Config::ITEMS_ATLAS_COLS;
+            float th = (float)spritesheet_items.height / (float)Config::ITEMS_ATLAS_ROWS;
+            float correct_y = (float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)t.item_tex_y;
             
             Rectangle src = { (float)t.item_tex_x * tw, correct_y * th, tw, th };
             Rectangle dst = { (float)x, (float)y, (float)size, (float)size };
@@ -268,9 +268,9 @@ void UI::draw_item_icon(uint8_t item_id, int x, int y, int size) {
     if (Config::ITEMS.find(item_id) == Config::ITEMS.end()) return;
     const auto& it = Config::ITEMS.at(item_id);
     
-    float tw = (float)spritesheet_items.width / 7.0f;
-    float th = (float)spritesheet_items.height / 8.0f;
-    float correct_y = 8.0f - 1.0f - (float)it.item_tex_y;
+    float tw = (float)spritesheet_items.width / (float)Config::ITEMS_ATLAS_COLS;
+    float th = (float)spritesheet_items.height / (float)Config::ITEMS_ATLAS_ROWS;
+    float correct_y = (float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)it.item_tex_y;
     
     Rectangle src = { (float)it.item_tex_x * tw, correct_y * th, tw, th };
     Rectangle dst = { (float)x, (float)y, (float)size, (float)size };

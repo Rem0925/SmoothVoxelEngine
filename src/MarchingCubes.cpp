@@ -607,12 +607,12 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         b_info_sec.is_waving = false;
                     }
 
-                    float tex_w = 1.0f / 9.0f;
-                    float tex_h = 1.0f / 10.0f;
+                    float tex_w = 1.0f / (float)Config::TILES_ATLAS_COLS;
+                    float tex_h = 1.0f / (float)Config::TILES_ATLAS_ROWS;
                     float offset_u_pri = b_info_pri.tex_x * tex_w;
-                    float offset_v_pri = (10 - 1 - b_info_pri.tex_y) * tex_h;
+                    float offset_v_pri = (Config::TILES_ATLAS_ROWS - 1 - b_info_pri.tex_y) * tex_h;
                     float offset_u_sec = b_info_sec.tex_x * tex_w;
-                    float offset_v_sec = (10 - 1 - b_info_sec.tex_y) * tex_h;
+                    float offset_v_sec = (Config::TILES_ATLAS_ROWS - 1 - b_info_sec.tex_y) * tex_h;
 
                     float min_x = std::min(v1.x, std::min(v2.x, v3.x));
                     float min_y = std::min(v1.y, std::min(v2.y, v3.y));

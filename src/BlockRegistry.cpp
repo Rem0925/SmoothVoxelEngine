@@ -43,6 +43,33 @@ static Config::BlockShape parse_block_shape(const std::string& str) {
     return Config::SHAPE_CUBE;
 }
 
+bool load_atlas_config(const std::string& config_file) {
+    if (!fs::exists(config_file)) return false;
+    try {
+        std::ifstream file(config_file);
+        if (!file.is_open()) return false;
+        json j;
+        file >> j;
+
+        if (j.contains("tiles") && j["tiles"].is_object()) {
+            Config::TILES_ATLAS_COLS = j["tiles"].value("columns", 9);
+            Config::TILES_ATLAS_ROWS = j["tiles"].value("rows", 10);
+        }
+        if (j.contains("items") && j["items"].is_object()) {
+            Config::ITEMS_ATLAS_COLS = j["items"].value("columns", 7);
+            Config::ITEMS_ATLAS_ROWS = j["items"].value("rows", 8);
+        }
+
+        std::cout << "[BlockRegistry] Atlas config: Tiles ("
+                  << Config::TILES_ATLAS_COLS << "x" << Config::TILES_ATLAS_ROWS << "), Items ("
+                  << Config::ITEMS_ATLAS_COLS << "x" << Config::ITEMS_ATLAS_ROWS << ")" << std::endl;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[BlockRegistry] Error reading atlas config: " << e.what() << std::endl;
+        return false;
+    }
+}
+
 bool load_blocks(const std::string& blocks_dir) {
     if (!fs::exists(blocks_dir)) {
         std::cerr << "[BlockRegistry] Error: Blocks directory not found: " << blocks_dir << std::endl;
@@ -117,35 +144,44 @@ bool load_blocks(const std::string& blocks_dir) {
                 bt.drop_is_item = false;
             }
 
+            // Textures dictionary map for this block
+            std::unordered_map<std::string, std::pair<int, int>> block_textures;
+
             // Textures
-            if (j.contains("textures")) {
+            if (j.contains("textures") && j["textures"].is_object()) {
                 const auto& tj = j["textures"];
-                if (tj.contains("default") && tj["default"].is_array() && tj["default"].size() >= 2) {
-                    bt.tex_x = tj["default"][0].get<int>();
-                    bt.tex_y = tj["default"][1].get<int>();
-                } else if (tj.contains("all") && tj["all"].is_array() && tj["all"].size() >= 2) {
-                    bt.tex_x = tj["all"][0].get<int>();
-                    bt.tex_y = tj["all"][1].get<int>();
+                for (auto& [key, val] : tj.items()) {
+                    if (val.is_array() && val.size() >= 2) {
+                        block_textures[key] = { val[0].get<int>(), val[1].get<int>() };
+                    }
+                }
+
+                if (block_textures.count("default")) {
+                    bt.tex_x = block_textures["default"].first;
+                    bt.tex_y = block_textures["default"].second;
+                } else if (block_textures.count("all")) {
+                    bt.tex_x = block_textures["all"].first;
+                    bt.tex_y = block_textures["all"].second;
                 } else {
                     bt.tex_x = 0;
                     bt.tex_y = 0;
                 }
 
-                if (tj.contains("top") && tj["top"].is_array() && tj["top"].size() >= 2) {
-                    bt.tex_top_x = tj["top"][0].get<int>();
-                    bt.tex_top_y = tj["top"][1].get<int>();
+                if (block_textures.count("top")) {
+                    bt.tex_top_x = block_textures["top"].first;
+                    bt.tex_top_y = block_textures["top"].second;
                 }
-                if (tj.contains("bottom") && tj["bottom"].is_array() && tj["bottom"].size() >= 2) {
-                    bt.tex_bottom_x = tj["bottom"][0].get<int>();
-                    bt.tex_bottom_y = tj["bottom"][1].get<int>();
+                if (block_textures.count("bottom")) {
+                    bt.tex_bottom_x = block_textures["bottom"].first;
+                    bt.tex_bottom_y = block_textures["bottom"].second;
                 }
-                if (tj.contains("front") && tj["front"].is_array() && tj["front"].size() >= 2) {
-                    bt.tex_front_x = tj["front"][0].get<int>();
-                    bt.tex_front_y = tj["front"][1].get<int>();
+                if (block_textures.count("front")) {
+                    bt.tex_front_x = block_textures["front"].first;
+                    bt.tex_front_y = block_textures["front"].second;
                 }
-                if (tj.contains("latch") && tj["latch"].is_array() && tj["latch"].size() >= 2) {
-                    bt.tex_latch_x = tj["latch"][0].get<int>();
-                    bt.tex_latch_y = tj["latch"][1].get<int>();
+                if (block_textures.count("latch")) {
+                    bt.tex_latch_x = block_textures["latch"].first;
+                    bt.tex_latch_y = block_textures["latch"].second;
                 }
             }
 
@@ -155,41 +191,128 @@ bool load_blocks(const std::string& blocks_dir) {
                 bt.tex_icon_y = j["icon"][1].get<int>();
             }
 
-            // 3D Cuboid Elements
+            // 3D Cuboid Elements (Solo para bloques tipo modelo)
             if (j.contains("elements") && j["elements"].is_array()) {
                 for (const auto& ej : j["elements"]) {
                     Config::CuboidElement elem;
                     elem.name = ej.value("name", "box");
+
                     if (ej.contains("from") && ej["from"].is_array() && ej["from"].size() >= 3) {
-                        elem.from = { ej["from"][0].get<float>(), ej["from"][1].get<float>(), ej["from"][2].get<float>() };
+                        float fx = ej["from"][0].get<float>();
+                        float fy = ej["from"][1].get<float>();
+                        float fz = ej["from"][2].get<float>();
+                        // Convert -0.5..0.5 or 0..1 to 0..16 if needed
+                        if (ej["to"].is_array() && ej["to"][0].get<float>() <= 1.0f) {
+                            if (fx < 0.0f) { // -0.5..0.5
+                                fx = (fx + 0.5f) * 16.0f;
+                                fy = (fy + 0.5f) * 16.0f;
+                                fz = (fz + 0.5f) * 16.0f;
+                            } else { // 0..1
+                                fx *= 16.0f;
+                                fy *= 16.0f;
+                                fz *= 16.0f;
+                            }
+                        }
+                        elem.from = { fx, fy, fz };
                     }
                     if (ej.contains("to") && ej["to"].is_array() && ej["to"].size() >= 3) {
-                        elem.to = { ej["to"][0].get<float>(), ej["to"][1].get<float>(), ej["to"][2].get<float>() };
+                        float tx = ej["to"][0].get<float>();
+                        float ty = ej["to"][1].get<float>();
+                        float tz = ej["to"][2].get<float>();
+                        if (tx <= 1.0f) {
+                            if (tx <= 0.5f && elem.from.x < 8.0f) {
+                                tx = (tx + 0.5f) * 16.0f;
+                                ty = (ty + 0.5f) * 16.0f;
+                                tz = (tz + 0.5f) * 16.0f;
+                            } else {
+                                tx *= 16.0f;
+                                ty *= 16.0f;
+                                tz *= 16.0f;
+                            }
+                        }
+                        elem.to = { tx, ty, tz };
                     }
 
-                    if (ej.contains("textures")) {
-                        const auto& etj = ej["textures"];
-                        if (etj.contains("all") && etj["all"].is_array() && etj["all"].size() >= 2) {
-                            elem.tex_top_x = elem.tex_bottom_x = elem.tex_front_x = elem.tex_back_x = elem.tex_left_x = elem.tex_right_x = etj["all"][0].get<int>();
-                            elem.tex_top_y = elem.tex_bottom_y = elem.tex_front_y = elem.tex_back_y = elem.tex_left_y = elem.tex_right_y = etj["all"][1].get<int>();
+                    // Parse faces if present (Minecraft format)
+                    if (ej.contains("faces") && ej["faces"].is_object()) {
+                        const auto& fj = ej["faces"];
+                        auto parse_face = [&](const std::string& face_name, Config::BlockFaceDirection dir) {
+                            if (fj.contains(face_name)) {
+                                const auto& face_obj = fj[face_name];
+                                elem.faces[dir].enabled = true;
+                                if (face_obj.contains("uv") && face_obj["uv"].is_array() && face_obj["uv"].size() >= 4) {
+                                    elem.faces[dir].uv[0] = face_obj["uv"][0].get<float>();
+                                    elem.faces[dir].uv[1] = face_obj["uv"][1].get<float>();
+                                    elem.faces[dir].uv[2] = face_obj["uv"][2].get<float>();
+                                    elem.faces[dir].uv[3] = face_obj["uv"][3].get<float>();
+                                }
+                                if (face_obj.contains("cullface")) {
+                                    elem.faces[dir].cullface = face_obj["cullface"].get<std::string>();
+                                }
+                                // Texture
+                                if (face_obj.contains("texture")) {
+                                    if (face_obj["texture"].is_array() && face_obj["texture"].size() >= 2) {
+                                        elem.faces[dir].tex_x = face_obj["texture"][0].get<int>();
+                                        elem.faces[dir].tex_y = face_obj["texture"][1].get<int>();
+                                    } else if (face_obj["texture"].is_string()) {
+                                        std::string tname = face_obj["texture"].get<std::string>();
+                                        if (!tname.empty() && tname[0] == '#') tname = tname.substr(1);
+                                        if (block_textures.count(tname)) {
+                                            elem.faces[dir].tex_x = block_textures[tname].first;
+                                            elem.faces[dir].tex_y = block_textures[tname].second;
+                                        }
+                                    }
+                                }
+                                if (elem.faces[dir].tex_x < 0) {
+                                    elem.faces[dir].tex_x = bt.tex_x;
+                                    elem.faces[dir].tex_y = bt.tex_y;
+                                }
+                            }
+                        };
+                        parse_face("down", Config::FACE_DOWN);
+                        parse_face("up", Config::FACE_UP);
+                        parse_face("north", Config::FACE_NORTH);
+                        parse_face("south", Config::FACE_SOUTH);
+                        parse_face("west", Config::FACE_WEST);
+                        parse_face("east", Config::FACE_EAST);
+                    } else {
+                        // Legacy format: enable all 6 faces
+                        int def_x = bt.tex_x, def_y = bt.tex_y;
+                        int top_x = bt.tex_top_x >= 0 ? bt.tex_top_x : def_x;
+                        int top_y = bt.tex_top_y >= 0 ? bt.tex_top_y : def_y;
+                        int bot_x = bt.tex_bottom_x >= 0 ? bt.tex_bottom_x : def_x;
+                        int bot_y = bt.tex_bottom_y >= 0 ? bt.tex_bottom_y : def_y;
+                        int front_x = bt.tex_front_x >= 0 ? bt.tex_front_x : def_x;
+                        int front_y = bt.tex_front_y >= 0 ? bt.tex_front_y : def_y;
+
+                        if (ej.contains("textures")) {
+                            const auto& etj = ej["textures"];
+                            if (etj.contains("all") && etj["all"].is_array() && etj["all"].size() >= 2) {
+                                def_x = top_x = bot_x = front_x = etj["all"][0].get<int>();
+                                def_y = top_y = bot_y = front_y = etj["all"][1].get<int>();
+                            }
+                            if (etj.contains("top") && etj["top"].is_array() && etj["top"].size() >= 2) {
+                                top_x = etj["top"][0].get<int>();
+                                top_y = etj["top"][1].get<int>();
+                            }
+                            if (etj.contains("bottom") && etj["bottom"].is_array() && etj["bottom"].size() >= 2) {
+                                bot_x = etj["bottom"][0].get<int>();
+                                bot_y = etj["bottom"][1].get<int>();
+                            }
+                            if (etj.contains("front") && etj["front"].is_array() && etj["front"].size() >= 2) {
+                                front_x = etj["front"][0].get<int>();
+                                front_y = etj["front"][1].get<int>();
+                            }
                         }
-                        if (etj.contains("top") && etj["top"].is_array() && etj["top"].size() >= 2) {
-                            elem.tex_top_x = etj["top"][0].get<int>();
-                            elem.tex_top_y = etj["top"][1].get<int>();
-                        }
-                        if (etj.contains("bottom") && etj["bottom"].is_array() && etj["bottom"].size() >= 2) {
-                            elem.tex_bottom_x = etj["bottom"][0].get<int>();
-                            elem.tex_bottom_y = etj["bottom"][1].get<int>();
-                        }
-                        if (etj.contains("front") && etj["front"].is_array() && etj["front"].size() >= 2) {
-                            elem.tex_front_x = etj["front"][0].get<int>();
-                            elem.tex_front_y = etj["front"][1].get<int>();
-                        }
-                        if (etj.contains("sides") && etj["sides"].is_array() && etj["sides"].size() >= 2) {
-                            elem.tex_front_x = elem.tex_back_x = elem.tex_left_x = elem.tex_right_x = etj["sides"][0].get<int>();
-                            elem.tex_front_y = elem.tex_back_y = elem.tex_left_y = elem.tex_right_y = etj["sides"][1].get<int>();
-                        }
+
+                        elem.faces[Config::FACE_DOWN]  = { true, {0,0,16,16}, bot_x, bot_y, "" };
+                        elem.faces[Config::FACE_UP]    = { true, {0,0,16,16}, top_x, top_y, "" };
+                        elem.faces[Config::FACE_NORTH] = { true, {0,0,16,16}, def_x, def_y, "" };
+                        elem.faces[Config::FACE_SOUTH] = { true, {0,0,16,16}, front_x, front_y, "" };
+                        elem.faces[Config::FACE_WEST]  = { true, {0,0,16,16}, def_x, def_y, "" };
+                        elem.faces[Config::FACE_EAST]  = { true, {0,0,16,16}, def_x, def_y, "" };
                     }
+
                     bt.elements.push_back(elem);
                 }
             }
@@ -378,6 +501,7 @@ bool load_recipes(const std::string& recipes_dir) {
 
 bool load_all(const std::string& data_dir) {
     std::cout << "[BlockRegistry] Initializing data-driven registries from " << data_dir << "..." << std::endl;
+    load_atlas_config(data_dir + "/atlas.json");
     bool b1 = load_blocks(data_dir + "/blocks");
     bool b2 = load_items(data_dir + "/items");
     bool b3 = load_tools(data_dir + "/tools");

@@ -3,6 +3,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <array>
 #include <cstdint>
 #include <thread>
 
@@ -120,16 +121,62 @@ namespace Config {
         TIER_COUNT
     };
 
+    // ===================== ATLAS DE TEXTURAS (Configurable dinamicamente) =====================
+    inline int TILES_ATLAS_COLS = 9;
+    inline int TILES_ATLAS_ROWS = 10;
+    inline int ITEMS_ATLAS_COLS = 7;
+    inline int ITEMS_ATLAS_ROWS = 8;
+
+    inline std::array<Vector2, 4> get_tile_uv(int tx, int ty, float u0_sub = 0.0f, float v0_sub = 0.0f, float u1_sub = 1.0f, float v1_sub = 1.0f) {
+        float tw = 1.0f / (float)TILES_ATLAS_COLS;
+        float th = 1.0f / (float)TILES_ATLAS_ROWS;
+        float cell_u0 = (float)tx * tw;
+        float cell_v0 = (float)(TILES_ATLAS_ROWS - 1 - ty) * th;
+
+        float u0 = cell_u0 + u0_sub * tw;
+        float u1 = cell_u0 + u1_sub * tw;
+        float v0 = cell_v0 + (1.0f - v1_sub) * th;
+        float v1 = cell_v0 + (1.0f - v0_sub) * th;
+
+        return { Vector2{ u0, v1 }, Vector2{ u1, v1 }, Vector2{ u1, v0 }, Vector2{ u0, v0 } };
+    }
+
+    inline std::array<Vector2, 4> get_item_uv(int tx, int ty, float u0_sub = 0.0f, float v0_sub = 0.0f, float u1_sub = 1.0f, float v1_sub = 1.0f) {
+        float tw = 1.0f / (float)ITEMS_ATLAS_COLS;
+        float th = 1.0f / (float)ITEMS_ATLAS_ROWS;
+        float cell_u0 = (float)tx * tw;
+        float cell_v0 = (float)(ITEMS_ATLAS_ROWS - 1 - ty) * th;
+
+        float u0 = cell_u0 + u0_sub * tw;
+        float u1 = cell_u0 + u1_sub * tw;
+        float v0 = cell_v0 + (1.0f - v1_sub) * th;
+        float v1 = cell_v0 + (1.0f - v0_sub) * th;
+
+        return { Vector2{ u0, v1 }, Vector2{ u1, v1 }, Vector2{ u1, v0 }, Vector2{ u0, v0 } };
+    }
+
+    enum BlockFaceDirection {
+        FACE_DOWN = 0,  // -Y
+        FACE_UP = 1,    // +Y
+        FACE_NORTH = 2, // -Z
+        FACE_SOUTH = 3, // +Z
+        FACE_WEST = 4,  // -X
+        FACE_EAST = 5   // +X
+    };
+
+    struct CuboidFace {
+        bool enabled = false;
+        float uv[4] = {0.0f, 0.0f, 16.0f, 16.0f}; // [u0, v0, u1, v1] en 0..16
+        int tex_x = -1;
+        int tex_y = -1;
+        std::string cullface = "";
+    };
+
     struct CuboidElement {
         std::string name = "box";
-        Vector3 from = {-0.5f, -0.5f, -0.5f};
-        Vector3 to   = { 0.5f,  0.5f,  0.5f};
-        int tex_top_x = -1, tex_top_y = -1;
-        int tex_bottom_x = -1, tex_bottom_y = -1;
-        int tex_front_x = -1, tex_front_y = -1;
-        int tex_back_x = -1, tex_back_y = -1;
-        int tex_left_x = -1, tex_left_y = -1;
-        int tex_right_x = -1, tex_right_y = -1;
+        Vector3 from = {0.0f, 0.0f, 0.0f}; // Coordenadas 0..16
+        Vector3 to   = {16.0f, 16.0f, 16.0f};
+        CuboidFace faces[6];
     };
 
     struct BlockType {
