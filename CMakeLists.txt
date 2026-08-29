@@ -39,6 +39,7 @@ set(SOURCES
     src/Chunk.cpp
     src/DatabaseIO.cpp
     src/ItemDrop.cpp
+    src/ItemModel3D.cpp
     src/MarchingCubes.cpp
     src/Noise.cpp
     src/UI.cpp

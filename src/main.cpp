@@ -19,6 +19,7 @@
 #include <sqlite3.h>
 #include "DatabaseIO.hpp"
 #include "ItemDrop.hpp"
+#include "ItemModel3D.hpp"
 #include "VoxelLighting.hpp"
 #include "json.hpp"
 
@@ -476,79 +477,32 @@ void DrawFirstPersonViewmodel(
         };
 
         if (holding_tool) {
-            // === HERRAMIENTA EMPUÑADA EN LA MANO DERECHA ===
-            int ix = 0, iy = 7;
-            for (auto& ti : Config::TOOLS) {
-                if (ti.type == held_tool_type && ti.tier == held_tool_tier) {
-                    ix = ti.item_tex_x;
-                    iy = ti.item_tex_y;
-                    break;
-                }
-            }
-            auto uvs = get_item_uv(ix, iy);
+            // === HERRAMIENTA 3D EN LA MANO DERECHA (Minecraft Pose) ===
             unsigned char c_tool = (unsigned char)(255 * light);
+            Color tint = { c_tool, c_tool, c_tool, 255 };
 
-            rlPushMatrix();
-                // Anclado directamente en el puño
-                rlTranslatef(0.0f, 0.02f, 0.02f);
-                rlRotatef(-12.0f, 1.0f, 0.0f, 0.0f);
-                rlRotatef(-22.0f, 0.0f, 1.0f, 0.0f);
-                rlRotatef(24.0f, 0.0f, 0.0f, 1.0f);
+            Vector3 pos = { -0.01f, 0.01f, 0.04f };
+            Vector3 rot = { -15.0f, -42.0f, 6.0f };
+            Vector3 scale = { 0.32f, 0.32f, 0.32f };
 
-                float s = 0.30f;
-                rlSetTexture(spritesheet_items.id);
-                rlBegin(RL_QUADS);
-                    rlColor4ub(c_tool, c_tool, c_tool, 255);
-                    // Front quad (CCW)
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(0.0f, 0.0f, 0.0f);
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(   s, 0.0f, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(   s,    s, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(0.0f,    s, 0.0f);
-
-                    // Back quad (CCW)
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f(   s, 0.0f, 0.0f);
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(0.0f, 0.0f, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(0.0f,    s, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f(   s,    s, 0.0f);
-                rlEnd();
-                rlSetTexture(0);
-            rlPopMatrix();
+            ItemModel3D::get().draw_tool(held_tool_type, held_tool_tier, pos, rot, scale, tint);
         }
         else if (holding_item && held_item != 255 && Config::ITEMS.count(held_item)) {
-            // === ÍTEMS PLANOS/RECTOS EN LA PALMA DERECHA ===
-            auto& itype = Config::ITEMS.at(held_item);
-            auto uvs = get_item_uv(itype.item_tex_x, itype.item_tex_y);
+            // === ÍTEM 3D EN LA MANO DERECHA ===
             unsigned char c_item = (unsigned char)(255 * light);
+            Color tint = { c_item, c_item, c_item, 255 };
 
-            rlPushMatrix();
-                rlTranslatef(0.01f, 0.04f, 0.04f);
-                if (held_item == Config::ITEM_STICK) {
-                    rlRotatef(25.0f, 1.0f, 0.0f, 0.0f);
-                    rlRotatef(-20.0f, 0.0f, 1.0f, 0.0f);
-                } else {
-                    rlRotatef(-12.0f, 1.0f, 0.0f, 0.0f);
-                    rlRotatef(-10.0f, 0.0f, 1.0f, 0.0f);
-                    rlRotatef(4.0f, 0.0f, 0.0f, 1.0f);
-                }
-
-                float s = 0.22f;
-                rlSetTexture(spritesheet_items.id);
-                rlBegin(RL_QUADS);
-                    rlColor4ub(c_item, c_item, c_item, 255);
-                    // Front quad (CCW)
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s*0.5f, -s*0.5f, 0.0f);
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s*0.5f, -s*0.5f, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s*0.5f,  s*0.5f, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s*0.5f,  s*0.5f, 0.0f);
-
-                    // Back quad (CCW)
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s*0.5f, -s*0.5f, 0.0f);
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s*0.5f, -s*0.5f, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s*0.5f,  s*0.5f, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s*0.5f,  s*0.5f, 0.0f);
-                rlEnd();
-                rlSetTexture(0);
-            rlPopMatrix();
+            if (held_item == Config::ITEM_STICK) {
+                Vector3 pos = { -0.01f, 0.01f, 0.04f };
+                Vector3 rot = { -15.0f, -42.0f, 6.0f };
+                Vector3 scale = { 0.30f, 0.30f, 0.30f };
+                ItemModel3D::get().draw_item(held_item, pos, rot, scale, tint);
+            } else {
+                Vector3 pos = { 0.01f, 0.04f, 0.05f };
+                Vector3 rot = { -15.0f, -25.0f, 0.0f };
+                Vector3 scale = { 0.22f, 0.22f, 0.22f };
+                ItemModel3D::get().draw_item(held_item, pos, rot, scale, tint);
+            }
         }
         else if (holding_block && held_block != AIR && Config::BLOCKS.count(held_block)) {
             const auto& bt = Config::BLOCKS.at(held_block);
@@ -834,6 +788,7 @@ int main() {
 
     // Cargar todos los bloques, items y herramientas desde JSONs
     BlockRegistry::load_all("assets/data");
+    ItemModel3D::get().init(spritesheet_items);
 
     World world(mat_solid, mat_plants, mat_water);
     g_world = &world;
@@ -2274,6 +2229,7 @@ int main() {
         }
     }
 
+    ItemModel3D::get().cleanup();
     UnloadTexture(spritesheet);
     UnloadTexture(spritesheet_items);
     UnloadTexture(tex_sun);

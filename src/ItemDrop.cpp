@@ -1,4 +1,5 @@
 #include "ItemDrop.hpp"
+#include "ItemModel3D.hpp"
 #include "World.hpp"
 #include <rlgl.h>
 #include <raymath.h>
@@ -272,60 +273,17 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_it
             rlRotatef(d.rot_y, 0.0f, 1.0f, 0.0f);
 
             if (d.is_tool) {
-                // === HERRAMIENTA FLOTANTE ===
-                int ix = 0, iy = 7;
-                for (const auto& ti : Config::TOOLS) {
-                    if (ti.type == d.tool_type && ti.tier == d.tool_tier) {
-                        ix = ti.item_tex_x;
-                        iy = ti.item_tex_y;
-                        break;
-                    }
-                }
-                auto uvs = get_item_uv(ix, iy);
-                float s = 0.22f;
-
-                rlSetTexture(spritesheet_items.id);
-                rlBegin(RL_QUADS);
-                    unsigned char c = (unsigned char)(255 * light);
-                    rlColor4ub(c, c, c, 255);
-                    // Cara frontal
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s, -s, 0.0f);
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s, -s, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s,  s, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s,  s, 0.0f);
-                    // Cara trasera
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s, -s, 0.0f);
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s, -s, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s,  s, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s,  s, 0.0f);
-                rlEnd();
-                rlSetTexture(0);
+                // === HERRAMIENTA EXTRUIDA 3D FLOTANTE ===
+                unsigned char c = (unsigned char)(255 * light);
+                Color tint = { c, c, c, 255 };
+                ItemModel3D::get().draw_tool(d.tool_type, d.tool_tier, { -0.16f, -0.16f, 0.0f }, { 0.0f, 0.0f, 0.0f }, { 0.32f, 0.32f, 0.32f }, tint);
             } else if (d.is_item) {
-                // === ÍTEM BASE: QUAD 2D CON TEXTURA EN EL MUNDO ===
-                int ix = 0, iy = 1;
-                if (Config::ITEMS.count(d.id)) {
-                    ix = Config::ITEMS.at(d.id).item_tex_x;
-                    iy = Config::ITEMS.at(d.id).item_tex_y;
-                }
-                auto uvs = get_item_uv(ix, iy);
-                float s = 0.18f;
-
-                rlSetTexture(spritesheet_items.id);
-                rlBegin(RL_QUADS);
-                    unsigned char c = (unsigned char)(255 * light);
-                    rlColor4ub(c, c, c, 255);
-                    // Cara frontal
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s, -s, 0.0f);
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s, -s, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s,  s, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s,  s, 0.0f);
-                    // Cara trasera
-                    rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( s, -s, 0.0f);
-                    rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-s, -s, 0.0f);
-                    rlTexCoord2f(uvs[3].x, uvs[3].y); rlVertex3f(-s,  s, 0.0f);
-                    rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( s,  s, 0.0f);
-                rlEnd();
-                rlSetTexture(0);
+                // === ÍTEM EXTRUIDO 3D FLOTANTE ===
+                unsigned char c = (unsigned char)(255 * light);
+                Color tint = { c, c, c, 255 };
+                float s = (d.id == Config::ITEM_STICK) ? 0.30f : 0.26f;
+                Vector3 pos = (d.id == Config::ITEM_STICK) ? Vector3{ -0.15f, -0.15f, 0.0f } : Vector3{ 0.0f, 0.0f, 0.0f };
+                ItemModel3D::get().draw_item(d.id, pos, { 0.0f, 0.0f, 0.0f }, { s, s, s }, tint);
             } else {
                 // === BLOQUE ===
                 if (!Config::BLOCKS.count(d.id)) {
