@@ -161,7 +161,7 @@ void MenuResourcePacks::scan_packs() {
         std::string icon_path = info.path + "/pack.png";
         if (fs::exists(icon_path)) {
             info.icon = LoadTexture(icon_path.c_str());
-            SetTextureFilter(info.icon, TEXTURE_FILTER_BILINEAR);
+            SetTextureFilter(info.icon, TEXTURE_FILTER_POINT);
         }
 
         packs.push_back(info);

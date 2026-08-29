@@ -4,5 +4,5 @@
   "name": "Pico de Plata",
   "durability": 250,
   "mining_speed": 2.5,
-  "texture": "item/copper_pickaxe"
+  "texture": "item/netherite_pickaxe"
 }

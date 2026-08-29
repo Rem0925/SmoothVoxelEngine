@@ -209,7 +209,7 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_it
     float ith = 1.0f / (float)Config::ITEMS_ATLAS_ROWS;
     auto get_item_uv = [&](int ix, int iy) -> std::array<Vector2, 4> {
         float u0 = (float)ix * itw;
-        float v0 = ((float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)iy) * ith;
+        float v0 = (float)iy * ith;
         float u1 = u0 + itw;
         float v1 = v0 + ith;
         return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };

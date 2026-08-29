@@ -65,4 +65,8 @@ private:
     static inline Texture2D default_sky_side = { 0 };
     static inline Texture2D default_sky_top = { 0 };
     static inline Texture2D default_sky_bottom = { 0 };
+
+    static inline std::unordered_map<std::string, std::pair<int, int>> default_tile_map;
+    static inline std::unordered_map<std::string, std::pair<int, int>> default_item_map;
+    static inline Image default_item_image = { 0 };
 };

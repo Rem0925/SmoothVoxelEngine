@@ -6,6 +6,8 @@
 using namespace Config;
 
 UI::UI(Texture2D sheet, Texture2D items_sheet) : spritesheet(sheet), spritesheet_items(items_sheet) {
+    SetTextureFilter(spritesheet, TEXTURE_FILTER_POINT);
+    SetTextureFilter(spritesheet_items, TEXTURE_FILTER_POINT);
     slots.resize(10);
     slots[0] = { AIR, "Mano", -1 };
     storage.resize(27); // 9x3 standard Minecraft storage
@@ -254,9 +256,7 @@ void UI::draw_tool_icon(Config::ToolType type, Config::ToolTier tier, int x, int
         if (t.type == type && t.tier == tier) {
             float tw = (float)spritesheet_items.width / (float)Config::ITEMS_ATLAS_COLS;
             float th = (float)spritesheet_items.height / (float)Config::ITEMS_ATLAS_ROWS;
-            float correct_y = (float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)t.item_tex_y;
-            
-            Rectangle src = { (float)t.item_tex_x * tw, correct_y * th, tw, th };
+            Rectangle src = { (float)t.item_tex_x * tw, (float)t.item_tex_y * th, tw, th };
             Rectangle dst = { (float)x, (float)y, (float)size, (float)size };
             DrawTexturePro(spritesheet_items, src, dst, {0, 0}, 0.0f, WHITE);
             return;
@@ -270,9 +270,7 @@ void UI::draw_item_icon(uint8_t item_id, int x, int y, int size) {
     
     float tw = (float)spritesheet_items.width / (float)Config::ITEMS_ATLAS_COLS;
     float th = (float)spritesheet_items.height / (float)Config::ITEMS_ATLAS_ROWS;
-    float correct_y = (float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)it.item_tex_y;
-    
-    Rectangle src = { (float)it.item_tex_x * tw, correct_y * th, tw, th };
+    Rectangle src = { (float)it.item_tex_x * tw, (float)it.item_tex_y * th, tw, th };
     Rectangle dst = { (float)x, (float)y, (float)size, (float)size };
     DrawTexturePro(spritesheet_items, src, dst, {0, 0}, 0.0f, WHITE);
 }

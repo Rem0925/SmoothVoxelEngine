@@ -15,8 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": "block/grass_block",
-    "top": "block/grass_block_top",
-    "bottom": "block/dirt"
+    "default": "block/grass_block_top"
   }
 }

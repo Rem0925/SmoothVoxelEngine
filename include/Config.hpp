@@ -145,12 +145,12 @@ namespace Config {
         float tw = 1.0f / (float)ITEMS_ATLAS_COLS;
         float th = 1.0f / (float)ITEMS_ATLAS_ROWS;
         float cell_u0 = (float)tx * tw;
-        float cell_v0 = (float)(ITEMS_ATLAS_ROWS - 1 - ty) * th;
+        float cell_v0 = (float)ty * th;
 
         float u0 = cell_u0 + u0_sub * tw;
         float u1 = cell_u0 + u1_sub * tw;
-        float v0 = cell_v0 + (1.0f - v1_sub) * th;
-        float v1 = cell_v0 + (1.0f - v0_sub) * th;
+        float v0 = cell_v0 + v0_sub * th;
+        float v1 = cell_v0 + v1_sub * th;
 
         return { Vector2{ u0, v1 }, Vector2{ u1, v1 }, Vector2{ u1, v0 }, Vector2{ u0, v0 } };
     }
@@ -234,7 +234,7 @@ namespace Config {
     };
 
     inline const char* TOOL_TYPE_NAMES[] = {
-        "Pico", "Hacha", "Pala", "Martillo", "Mangual", "Espada"
+        "Pico", "Hacha", "Pala", "Martillo", "Espada"
     };
 
     struct ToolInfo {

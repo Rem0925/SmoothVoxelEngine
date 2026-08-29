@@ -11,9 +11,7 @@ public:
         return instance;
     }
 
-    void init(Texture2D items_texture);
     void rebuild(const Image& img, Texture2D items_texture);
-    void reset_to_default(Texture2D items_texture);
     void cleanup();
 
     // Direct draw helpers

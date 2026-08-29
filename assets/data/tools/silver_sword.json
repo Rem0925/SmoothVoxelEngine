@@ -4,5 +4,5 @@
   "name": "Espada de Plata",
   "durability": 225,
   "mining_speed": 2.5,
-  "texture": "item/copper_sword"
+  "texture": "item/netherite_sword"
 }

@@ -14,10 +14,10 @@
     "id": 28,
     "is_item": false
   },
-  "icon": "block/chest_front",
+  "icon": "block/oak_planks",
   "textures": {
     "default": "block/oak_planks",
-    "latch": "block/chest_front"
+    "latch": "block/iron_block"
   },
   "elements": [
     {

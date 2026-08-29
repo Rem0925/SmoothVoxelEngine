@@ -410,7 +410,7 @@ void DrawFirstPersonViewmodel(
         float ith = 1.0f / (float)Config::ITEMS_ATLAS_ROWS;
         auto get_item_uv = [&](int ix, int iy) -> std::array<Vector2, 4> {
             float u0 = (float)ix * itw;
-            float v0 = ((float)Config::ITEMS_ATLAS_ROWS - 1.0f - (float)iy) * ith;
+            float v0 = (float)iy * ith;
             float u1 = u0 + itw;
             float v1 = v0 + ith;
             return { Vector2{u0, v1}, Vector2{u1, v1}, Vector2{u1, v0}, Vector2{u0, v0} };
@@ -1039,7 +1039,6 @@ int main() {
                 sky_side = res_pack.get_sky_side();
                 sky_top = res_pack.get_sky_top();
                 sky_bottom = res_pack.get_sky_bottom();
-                ItemModel3D::get().reset_to_default(spritesheet_items);
                 world.mat_solid.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
                 world.mat_plants.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
                 world.mat_water.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;

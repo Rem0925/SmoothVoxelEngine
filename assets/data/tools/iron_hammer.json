@@ -4,5 +4,5 @@
   "name": "Martillo de Hierro",
   "durability": 450,
   "mining_speed": 2.0,
-  "texture": "item/iron_hammer"
+  "texture": "item/iron_hoe"
 }

@@ -4,5 +4,5 @@
   "name": "Martillo de Diamante",
   "durability": 2250,
   "mining_speed": 3.0,
-  "texture": "item/diamond_hammer"
+  "texture": "item/diamond_hoe"
 }

@@ -4,5 +4,5 @@
   "name": "Pala de Plata",
   "durability": 250,
   "mining_speed": 5.0,
-  "texture": "item/copper_shovel"
+  "texture": "item/netherite_shovel"
 }

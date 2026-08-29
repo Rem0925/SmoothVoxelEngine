@@ -10,6 +10,7 @@ namespace fs = std::filesystem;
 
 static Texture2D image_to_texture(Image img) {
     Texture2D tex = LoadTextureFromImage(img);
+    SetTextureFilter(tex, TEXTURE_FILTER_POINT);
     UnloadImage(img);
     return tex;
 }
@@ -46,40 +47,46 @@ Image ResourcePackManager::build_block_atlas(const std::string& pack_path, int& 
         return { 0 };
     }
 
+    int tile_size = 16;
     for (auto& entry : fs::directory_iterator(block_dir)) {
         if (entry.path().extension() != ".png") continue;
         std::string name = "block/" + entry.path().stem().string();
         Image img = LoadImage(entry.path().string().c_str());
         if (img.data == nullptr) continue;
-        if (img.width != 16 || img.height != 16) {
-            ImageResize(&img, 16, 16);
-        }
+        if (img.width > tile_size) tile_size = img.width;
+        if (img.height > tile_size) tile_size = img.height;
         textures.push_back({ name, img });
+    }
+
+    int count = (int)textures.size();
+    if (count == 0) { out_cols = 0; out_rows = 0; return { 0 }; }
+
+    for (auto& t : textures) {
+        if (t.second.width != tile_size || t.second.height != tile_size) {
+            ImageResizeNN(&t.second, tile_size, tile_size);
+        }
     }
 
     std::sort(textures.begin(), textures.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    int count = (int)textures.size();
-    if (count == 0) { out_cols = 0; out_rows = 0; return { 0 }; }
-
     out_cols = (int)std::ceil(std::sqrt((float)count));
     out_rows = (int)std::ceil((float)count / out_cols);
 
     tile_map.clear();
-    Image atlas = GenImageColor(out_cols * 16, out_rows * 16, BLANK);
+    Image atlas = GenImageColor(out_cols * tile_size, out_rows * tile_size, BLANK);
 
     for (int i = 0; i < count; ++i) {
         int col = i % out_cols;
         int row = i / out_cols;
         tile_map[textures[i].first] = { col, row };
-        ImageDraw(&atlas, textures[i].second, { 0, 0, 16, 16 },
-            { (float)(col * 16), (float)((out_rows - 1 - row) * 16), 16, 16 }, WHITE);
+        ImageDraw(&atlas, textures[i].second, { 0, 0, (float)tile_size, (float)tile_size },
+            { (float)(col * tile_size), (float)((out_rows - 1 - row) * tile_size), (float)tile_size, (float)tile_size }, WHITE);
         UnloadImage(textures[i].second);
     }
 
-    std::cout << "[ResourcePack] Block atlas: " << count << " textures -> "
-              << out_cols << "x" << out_rows << " grid" << std::endl;
+    std::cout << "[ResourcePack] Block atlas: " << count << " textures (" << tile_size << "x" << tile_size << ") -> "
+              << out_cols << "x" << out_rows << " grid (" << atlas.width << "x" << atlas.height << ")" << std::endl;
     return atlas;
 }
 
@@ -92,40 +99,46 @@ Image ResourcePackManager::build_item_atlas(const std::string& pack_path, int& o
         return { 0 };
     }
 
+    int tile_size = 16;
     for (auto& entry : fs::directory_iterator(item_dir)) {
         if (entry.path().extension() != ".png") continue;
         std::string name = "item/" + entry.path().stem().string();
         Image img = LoadImage(entry.path().string().c_str());
         if (img.data == nullptr) continue;
-        if (img.width != 16 || img.height != 16) {
-            ImageResize(&img, 16, 16);
-        }
+        if (img.width > tile_size) tile_size = img.width;
+        if (img.height > tile_size) tile_size = img.height;
         textures.push_back({ name, img });
+    }
+
+    int count = (int)textures.size();
+    if (count == 0) { out_cols = 0; out_rows = 0; return { 0 }; }
+
+    for (auto& t : textures) {
+        if (t.second.width != tile_size || t.second.height != tile_size) {
+            ImageResizeNN(&t.second, tile_size, tile_size);
+        }
     }
 
     std::sort(textures.begin(), textures.end(),
         [](const auto& a, const auto& b) { return a.first < b.first; });
 
-    int count = (int)textures.size();
-    if (count == 0) { out_cols = 0; out_rows = 0; return { 0 }; }
-
     out_cols = (int)std::ceil(std::sqrt((float)count));
     out_rows = (int)std::ceil((float)count / out_cols);
 
     item_map.clear();
-    Image atlas = GenImageColor(out_cols * 16, out_rows * 16, BLANK);
+    Image atlas = GenImageColor(out_cols * tile_size, out_rows * tile_size, BLANK);
 
     for (int i = 0; i < count; ++i) {
         int col = i % out_cols;
         int row = i / out_cols;
         item_map[textures[i].first] = { col, row };
-        ImageDraw(&atlas, textures[i].second, { 0, 0, 16, 16 },
-            { (float)(col * 16), (float)((out_rows - 1 - row) * 16), 16, 16 }, WHITE);
+        ImageDraw(&atlas, textures[i].second, { 0, 0, (float)tile_size, (float)tile_size },
+            { (float)(col * tile_size), (float)(row * tile_size), (float)tile_size, (float)tile_size }, WHITE);
         UnloadImage(textures[i].second);
     }
 
-    std::cout << "[ResourcePack] Item atlas: " << count << " textures -> "
-              << out_cols << "x" << out_rows << " grid" << std::endl;
+    std::cout << "[ResourcePack] Item atlas: " << count << " textures (" << tile_size << "x" << tile_size << ") -> "
+              << out_cols << "x" << out_rows << " grid (" << atlas.width << "x" << atlas.height << ")" << std::endl;
     return atlas;
 }
 
@@ -213,47 +226,23 @@ static std::pair<int, int> resolve_tex_item(const ResourcePackManager& rpm, cons
 }
 
 void ResourcePackManager::apply_item_texture_mapping() {
-    struct ItemTexMapping {
-        uint8_t id;
-        std::string mc_name;
-        std::vector<std::string> fallbacks;
-    };
-
-    std::vector<ItemTexMapping> item_mappings = {
-        { 0, "item/stick",              {} },
-        { 1, "item/coal",               {} },
-        { 2, "item/oak_planks",         { "item/planks" } },
-        { 3, "item/raw_copper",         {} },
-        { 4, "item/raw_iron",           {} },
-        { 5, "item/raw_gold",           {} },
-        { 6, "item/gold_ingot",         {} },
-        { 7, "item/diamond",            {} },
-    };
-
-    for (auto& m : item_mappings) {
-        if (!Config::ITEMS.count(m.id)) continue;
-        auto c = resolve_tex_item(*this, m.mc_name, m.fallbacks);
-        if (c.first >= 0) {
-            auto& it = Config::ITEMS.at(m.id);
-            it.item_tex_x = c.first;
-            it.item_tex_y = c.second;
+    for (auto& [id, it] : Config::ITEMS) {
+        if (!it.texture_mc.empty()) {
+            auto c = resolve_tex_item(*this, it.texture_mc);
+            if (c.first >= 0) {
+                it.item_tex_x = c.first;
+                it.item_tex_y = c.second;
+            }
         }
     }
 
-    const char* tier_prefix[] = { "wooden", "stone", "iron", "copper", "golden", "diamond" };
-    const char* tool_suffix[] = { "pickaxe", "axe", "shovel", "hammer", "sword" };
-
     for (auto& t : Config::TOOLS) {
-        int tool_idx = (int)t.type;
-        int tier_idx = (int)t.tier;
-
-        if (tool_idx >= 5 || tier_idx >= 6) continue;
-
-        std::string mc_name = "item/" + std::string(tier_prefix[tier_idx]) + "_" + tool_suffix[tool_idx];
-        auto c = get_item_coord(mc_name);
-        if (c.first >= 0) {
-            t.item_tex_x = c.first;
-            t.item_tex_y = c.second;
+        if (!t.texture_mc.empty()) {
+            auto c = resolve_tex_item(*this, t.texture_mc);
+            if (c.first >= 0) {
+                t.item_tex_x = c.first;
+                t.item_tex_y = c.second;
+            }
         }
     }
 }
@@ -351,12 +340,20 @@ void ResourcePackManager::build_defaults(const std::string& default_path) {
         Config::ITEMS_ATLAS_ROWS = item_rows;
         default_items_cols = item_cols;
         default_items_rows = item_rows;
-        ItemModel3D::get().rebuild(item_img, default_items_atlas);
-        UnloadImage(item_img);
     }
     
+    default_tile_map = tile_map;
+    default_item_map = item_map;
+
     apply_block_texture_mapping();
     apply_item_texture_mapping();
+
+    if (item_cols > 0 && item_img.data != nullptr) {
+        default_item_image = item_img;
+        ItemModel3D::get().rebuild(item_img, default_items_atlas);
+    } else {
+        default_item_image = { 0 };
+    }
     
     auto try_load_env = [&](const std::string& name, Texture2D& tex) {
         std::string path = default_path + "/assets/minecraft/textures/environment/" + name;
@@ -381,7 +378,7 @@ void ResourcePackManager::build_defaults(const std::string& default_path) {
 void ResourcePackManager::clear_pack() {
     if (is_active) {
         UnloadTexture(tiles_atlas);
-        if (items_atlas.id != default_items_atlas.id) {
+        if (items_atlas.id != default_items_atlas.id && items_atlas.id != 0) {
             UnloadTexture(items_atlas);
         }
         tiles_atlas = { 0 };
@@ -403,15 +400,26 @@ void ResourcePackManager::clear_pack() {
     }
     is_active = false;
     active_pack_path.clear();
-    tile_map.clear();
-    item_map.clear();
+    tile_map = default_tile_map;
+    item_map = default_item_map;
     Config::TILES_ATLAS_COLS = default_tiles_cols;
     Config::TILES_ATLAS_ROWS = default_tiles_rows;
     Config::ITEMS_ATLAS_COLS = default_items_cols;
     Config::ITEMS_ATLAS_ROWS = default_items_rows;
     Config::USING_RESOURCE_PACK = false;
+
+    apply_block_texture_mapping();
+    apply_item_texture_mapping();
+
+    if (default_item_image.data != nullptr) {
+        ItemModel3D::get().rebuild(default_item_image, default_items_atlas);
+    }
 }
 
 void ResourcePackManager::cleanup() {
     clear_pack();
+    if (default_item_image.data != nullptr) {
+        UnloadImage(default_item_image);
+        default_item_image = { 0 };
+    }
 }
