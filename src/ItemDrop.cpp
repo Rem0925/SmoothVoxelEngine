@@ -11,6 +11,7 @@ void ItemDropManager::spawn(Vector3 pos, uint8_t id, bool is_item, int count, Ve
     if (id == Config::AIR) return;
     ItemDrop drop;
     drop.position = pos;
+    drop.prev_position = pos;
     drop.velocity = initial_vel;
     drop.id = id;
     drop.is_item = is_item;
@@ -25,6 +26,7 @@ void ItemDropManager::spawn(Vector3 pos, uint8_t id, bool is_item, int count, Ve
 void ItemDropManager::spawn_tool(Vector3 pos, Config::ToolType type, Config::ToolTier tier, int durability, Vector3 initial_vel, float pickup_delay) {
     ItemDrop drop;
     drop.position = pos;
+    drop.prev_position = pos;
     drop.velocity = initial_vel;
     drop.id = 0;
     drop.is_item = false;
@@ -115,29 +117,35 @@ void ItemDropManager::update(float dt, World& world, Vector3 player_pos, UI& ui)
     // 1. Físicas y movimiento de cada drop
     for (size_t i = 0; i < drops.size(); ++i) {
         auto& d = drops[i];
+        d.prev_position = d.position;
         d.lifetime += dt;
         d.rot_y += 75.0f * dt;
         if (d.rot_y >= 360.0f) d.rot_y -= 360.0f;
         if (d.pickup_delay > 0.0f) d.pickup_delay -= dt;
 
-        // Gravedad
-        d.velocity.y -= 14.0f * dt;
-        d.position.x += d.velocity.x * dt;
-        d.position.y += d.velocity.y * dt;
-        d.position.z += d.velocity.z * dt;
+        // Gravedad + movimiento con sub-stepping para evitar tunneling
+        int steps = (int)std::ceil(dt / 0.02f);
+        float sub_dt = dt / (float)steps;
+        for (int s = 0; s < steps; ++s) {
+            d.velocity.y -= 14.0f * sub_dt;
+            d.position.x += d.velocity.x * sub_dt;
+            d.position.y += d.velocity.y * sub_dt;
+            d.position.z += d.velocity.z * sub_dt;
+
+            // Colisión con el terreno
+            float ground = get_ground_y(d.position.x, d.position.z, d.position.y);
+            if (ground > -900.0f && d.position.y <= ground + 0.15f) {
+                d.position.y = ground + 0.15f;
+                d.velocity.y = 0.0f;
+                d.velocity.x *= 0.6f;
+                d.velocity.z *= 0.6f;
+                break;
+            }
+        }
 
         // Fricción aérea
         d.velocity.x *= (1.0f - 1.5f * dt);
         d.velocity.z *= (1.0f - 1.5f * dt);
-
-        // Colisión con el terreno
-        float ground = get_ground_y(d.position.x, d.position.z, d.position.y);
-        if (ground > -900.0f && d.position.y <= ground + 0.15f) {
-            d.position.y = ground + 0.15f;
-            d.velocity.y = 0.0f;
-            d.velocity.x *= 0.6f;
-            d.velocity.z *= 0.6f;
-        }
 
         // Magnetismo hacia el jugador
         float dist_to_player = Vector3Distance(d.position, player_collect_pos);
@@ -184,7 +192,7 @@ void ItemDropManager::update(float dt, World& world, Vector3 player_pos, UI& ui)
     }
 }
 
-void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_items, float light) {
+void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_items, float light, float alpha) {
     if (drops.empty()) return;
 
     float tw = 1.0f / (float)Config::TILES_ATLAS_COLS;
@@ -265,8 +273,13 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, Texture2D spritesheet_it
     };
 
     for (const auto& d : drops) {
+        Vector3 lerped = {
+            d.prev_position.x + (d.position.x - d.prev_position.x) * alpha,
+            d.prev_position.y + (d.position.y - d.prev_position.y) * alpha,
+            d.prev_position.z + (d.position.z - d.prev_position.z) * alpha
+        };
         float bob_y = std::sin(d.lifetime * 3.5f) * 0.05f;
-        Vector3 render_pos = { d.position.x, d.position.y + bob_y, d.position.z };
+        Vector3 render_pos = { lerped.x, lerped.y + bob_y, lerped.z };
 
         rlPushMatrix();
             rlTranslatef(render_pos.x, render_pos.y, render_pos.z);

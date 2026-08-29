@@ -1729,7 +1729,7 @@ int main() {
         rlEnableDepthMask();
 
         world.draw(camera);
-        item_drops.draw(spritesheet, spritesheet_items, light_intensity);
+        item_drops.draw(spritesheet, spritesheet_items, light_intensity, tick_accumulator / TICK_TIME);
         
         // Minecraft-style Chunk & Sub-chunk Boundaries (F3+G)
         if (show_chunks) {
