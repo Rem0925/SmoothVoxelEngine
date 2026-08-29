@@ -22,6 +22,7 @@
 #include "ItemModel3D.hpp"
 #include "VoxelLighting.hpp"
 #include "json.hpp"
+#include "MenuManager.hpp"
 
 using json = nlohmann::json;
 using namespace Config;
@@ -808,6 +809,7 @@ int main() {
     UI ui(spritesheet, spritesheet_items);
     Chat chat;
     ItemDropManager item_drops;
+    MenuManager menu;
     
     std::string world_name = "world1";
     std::string save_dir = "worlds/" + world_name;
@@ -996,13 +998,21 @@ int main() {
         Vector3 hit = {0}, target_solid = {0}, target_empty = {0};
 
         if (IsKeyPressed(KEY_ESCAPE)) {
-            if (chat.is_open) {
+            if (menu.is_paused()) {
+                menu.go_back();
+            } else if (chat.is_open) {
                 chat.toggle();
             } else if (ui.is_open) {
                 ui.close_ui();
             } else {
-                break; // Exit the game
+                menu.open_pause();
+                EnableCursor();
             }
+        }
+        
+        if (menu.is_paused()) {
+            menu.update();
+            if (menu.wants_quit) break;
         }
         
 
@@ -1015,7 +1025,7 @@ int main() {
             save_player_data();
         }
 
-        if (!ui.is_open && !chat.is_open) {
+        if (!ui.is_open && !chat.is_open && !menu.is_paused()) {
             if (IsKeyPressed(KEY_Q)) {
                 Vector3 forward_dir = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
                 Vector3 throw_pos = Vector3Add(camera.position, Vector3Scale(forward_dir, 0.6f));
@@ -1405,7 +1415,7 @@ int main() {
             }
         }
         
-        if (!chat.is_open && !ui.is_open) {
+        if (!chat.is_open && !ui.is_open && !menu.is_paused()) {
             if (IsKeyPressed(KEY_T)) {
                 chat.toggle();
             } else if (IsKeyPressed(KEY_SLASH)) {
@@ -1434,7 +1444,11 @@ int main() {
         float frame_dt = std::min(GetFrameTime(), 0.1f);
         tick_accumulator += frame_dt;
 
-        while (tick_accumulator >= TICK_TIME) {
+        if (menu.is_paused()) {
+            tick_accumulator = 0.0f;
+        }
+
+        while (tick_accumulator >= TICK_TIME && !menu.is_paused()) {
             tick_accumulator -= TICK_TIME;
 
             // 1. Progresión del ciclo día/noche en ticks (24000 ticks = 20 minutos de día completo)
@@ -2185,7 +2199,11 @@ int main() {
                 cur_y += line_h + 2;
             }
         }
-        
+
+        if (menu.is_paused()) {
+            menu.draw();
+        }
+
         EndDrawing();
         
         // Restore physical camera position

@@ -41,6 +41,10 @@ set(SOURCES
     src/ItemDrop.cpp
     src/ItemModel3D.cpp
     src/MarchingCubes.cpp
+    src/MenuManager.cpp
+    src/MenuPause.cpp
+    src/MenuOptions.cpp
+    src/MenuResourcePacks.cpp
     src/Noise.cpp
     src/UI.cpp
     src/VoxelLighting.cpp
