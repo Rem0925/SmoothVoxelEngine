@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      1,
-      0
-    ]
+    "default": "block/copper_ore"
   }
 }

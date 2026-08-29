@@ -14,14 +14,8 @@
     "id": 26,
     "is_item": false
   },
-  "icon": [
-    7,
-    9
-  ],
+  "icon": "block/oak_planks",
   "textures": {
-    "default": [
-      0,
-      8
-    ]
+    "default": "block/oak_planks"
   }
 }

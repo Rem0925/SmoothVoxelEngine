@@ -1,8 +1,5 @@
 {
   "id": 2,
   "name": "Tablas",
-  "texture": [
-    2,
-    1
-  ]
+  "texture": "item/planks"
 }

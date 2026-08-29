@@ -14,7 +14,6 @@ static Config::ToolType parse_tool_type(const std::string& str) {
     if (str == "axe" || str == "hacha") return Config::TOOL_AXE;
     if (str == "shovel" || str == "pala") return Config::TOOL_SHOVEL;
     if (str == "hammer" || str == "martillo") return Config::TOOL_HAMMER;
-    if (str == "flail" || str == "mangual") return Config::TOOL_FLAIL;
     if (str == "sword" || str == "espada") return Config::TOOL_SWORD;
     return Config::TOOL_COUNT;
 }
@@ -146,6 +145,7 @@ bool load_blocks(const std::string& blocks_dir) {
 
             // Textures dictionary map for this block
             std::unordered_map<std::string, std::pair<int, int>> block_textures;
+            std::unordered_map<std::string, std::string> block_texture_names;
 
             // Textures
             if (j.contains("textures") && j["textures"].is_object()) {
@@ -153,6 +153,8 @@ bool load_blocks(const std::string& blocks_dir) {
                 for (auto& [key, val] : tj.items()) {
                     if (val.is_array() && val.size() >= 2) {
                         block_textures[key] = { val[0].get<int>(), val[1].get<int>() };
+                    } else if (val.is_string()) {
+                        block_texture_names[key] = val.get<std::string>();
                     }
                 }
 
@@ -166,18 +168,35 @@ bool load_blocks(const std::string& blocks_dir) {
                     bt.tex_x = 0;
                     bt.tex_y = 0;
                 }
+                
+                if (block_texture_names.count("default")) {
+                    bt.texture_mc = block_texture_names["default"];
+                } else if (block_texture_names.count("all")) {
+                    bt.texture_mc = block_texture_names["all"];
+                }
 
                 if (block_textures.count("top")) {
                     bt.tex_top_x = block_textures["top"].first;
                     bt.tex_top_y = block_textures["top"].second;
                 }
+                if (block_texture_names.count("top")) {
+                    bt.texture_top_mc = block_texture_names["top"];
+                }
+                
                 if (block_textures.count("bottom")) {
                     bt.tex_bottom_x = block_textures["bottom"].first;
                     bt.tex_bottom_y = block_textures["bottom"].second;
                 }
+                if (block_texture_names.count("bottom")) {
+                    bt.texture_bottom_mc = block_texture_names["bottom"];
+                }
+                
                 if (block_textures.count("front")) {
                     bt.tex_front_x = block_textures["front"].first;
                     bt.tex_front_y = block_textures["front"].second;
+                }
+                if (block_texture_names.count("front")) {
+                    bt.texture_front_mc = block_texture_names["front"];
                 }
                 if (block_textures.count("latch")) {
                     bt.tex_latch_x = block_textures["latch"].first;
@@ -186,9 +205,13 @@ bool load_blocks(const std::string& blocks_dir) {
             }
 
             // Inventory Icon
-            if (j.contains("icon") && j["icon"].is_array() && j["icon"].size() >= 2) {
-                bt.tex_icon_x = j["icon"][0].get<int>();
-                bt.tex_icon_y = j["icon"][1].get<int>();
+            if (j.contains("icon")) {
+                if (j["icon"].is_array() && j["icon"].size() >= 2) {
+                    bt.tex_icon_x = j["icon"][0].get<int>();
+                    bt.tex_icon_y = j["icon"][1].get<int>();
+                } else if (j["icon"].is_string()) {
+                    bt.texture_icon_mc = j["icon"].get<std::string>();
+                }
             }
 
             // 3D Cuboid Elements (Solo para bloques tipo modelo)
@@ -256,10 +279,17 @@ bool load_blocks(const std::string& blocks_dir) {
                                         elem.faces[dir].tex_y = face_obj["texture"][1].get<int>();
                                     } else if (face_obj["texture"].is_string()) {
                                         std::string tname = face_obj["texture"].get<std::string>();
-                                        if (!tname.empty() && tname[0] == '#') tname = tname.substr(1);
-                                        if (block_textures.count(tname)) {
-                                            elem.faces[dir].tex_x = block_textures[tname].first;
-                                            elem.faces[dir].tex_y = block_textures[tname].second;
+                                        if (!tname.empty() && tname[0] == '#') {
+                                            std::string ref_name = tname.substr(1);
+                                            if (block_textures.count(ref_name)) {
+                                                elem.faces[dir].tex_x = block_textures[ref_name].first;
+                                                elem.faces[dir].tex_y = block_textures[ref_name].second;
+                                            }
+                                            if (block_texture_names.count(ref_name)) {
+                                                elem.faces[dir].texture_name = block_texture_names[ref_name];
+                                            }
+                                        } else {
+                                            elem.faces[dir].texture_name = tname;
                                         }
                                     }
                                 }
@@ -321,9 +351,15 @@ bool load_items(const std::string& items_dir) {
 
             Config::ItemType it;
             it.name = j.value("name", "Item");
-            if (j.contains("texture") && j["texture"].is_array() && j["texture"].size() >= 2) {
-                it.item_tex_x = j["texture"][0].get<int>();
-                it.item_tex_y = j["texture"][1].get<int>();
+            if (j.contains("texture")) {
+                if (j["texture"].is_array() && j["texture"].size() >= 2) {
+                    it.item_tex_x = j["texture"][0].get<int>();
+                    it.item_tex_y = j["texture"][1].get<int>();
+                } else if (j["texture"].is_string()) {
+                    it.texture_mc = j["texture"].get<std::string>();
+                    it.item_tex_x = -1;
+                    it.item_tex_y = -1;
+                }
             } else {
                 it.item_tex_x = 0;
                 it.item_tex_y = 0;
@@ -364,9 +400,15 @@ bool load_tools(const std::string& tools_dir) {
             t.durability = j.value("durability", 100);
             t.mining_speed = j.value("mining_speed", 1.0f);
 
-            if (j.contains("texture") && j["texture"].is_array() && j["texture"].size() >= 2) {
-                t.item_tex_x = j["texture"][0].get<int>();
-                t.item_tex_y = j["texture"][1].get<int>();
+            if (j.contains("texture")) {
+                if (j["texture"].is_array() && j["texture"].size() >= 2) {
+                    t.item_tex_x = j["texture"][0].get<int>();
+                    t.item_tex_y = j["texture"][1].get<int>();
+                } else if (j["texture"].is_string()) {
+                    t.texture_mc = j["texture"].get<std::string>();
+                    t.item_tex_x = -1;
+                    t.item_tex_y = -1;
+                }
             } else {
                 t.item_tex_x = 0;
                 t.item_tex_y = 0;

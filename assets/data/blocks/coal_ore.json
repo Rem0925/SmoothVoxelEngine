@@ -15,9 +15,6 @@
     "is_item": true
   },
   "textures": {
-    "default": [
-      3,
-      8
-    ]
+    "default": "block/coal_ore"
   }
 }

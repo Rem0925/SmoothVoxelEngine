@@ -4,8 +4,5 @@
   "name": "Pala de Diamante",
   "durability": 1500,
   "mining_speed": 6.0,
-  "texture": [
-    2,
-    2
-  ]
+  "texture": "item/diamond_shovel"
 }

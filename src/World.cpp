@@ -444,6 +444,14 @@ void World::save_all() {
     }
 }
 
+void World::invalidate_all_meshes() {
+    std::lock_guard<std::mutex> lock(chunks_mutex);
+    for (auto& pair : chunks) {
+        pair.second->is_dirty = true;
+        pair.second->dirty_subchunks_mask = 0xFF;
+    }
+}
+
 Chunk* World::get_chunk(int cx, int cz) {
     auto key = std::make_pair(cx, cz);
     if (chunks.find(key) != chunks.end()) {

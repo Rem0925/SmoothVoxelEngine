@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      3,
-      6
-    ]
+    "default": "block/iron_ore"
   }
 }

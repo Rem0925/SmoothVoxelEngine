@@ -15,23 +15,46 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      4,
-      7
-    ]
+    "default": "block/stone_bricks"
   },
   "elements": [
     {
       "name": "cube",
-      "from": [0, 0, 0],
-      "to": [16, 16, 16],
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
       "faces": {
-        "up":    { "texture": "#default", "cullface": "up" },
-        "down":  { "texture": "#default", "cullface": "down" },
-        "north": { "texture": "#default", "cullface": "north" },
-        "south": { "texture": "#default", "cullface": "south" },
-        "west":  { "texture": "#default", "cullface": "west" },
-        "east":  { "texture": "#default", "cullface": "east" }
+        "up": {
+          "texture": "#default",
+          "cullface": "up"
+        },
+        "down": {
+          "texture": "#default",
+          "cullface": "down"
+        },
+        "north": {
+          "texture": "#default",
+          "cullface": "north"
+        },
+        "south": {
+          "texture": "#default",
+          "cullface": "south"
+        },
+        "west": {
+          "texture": "#default",
+          "cullface": "west"
+        },
+        "east": {
+          "texture": "#default",
+          "cullface": "east"
+        }
       }
     }
   ]

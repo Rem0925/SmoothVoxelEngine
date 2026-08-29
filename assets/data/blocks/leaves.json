@@ -16,9 +16,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      4,
-      1
-    ]
+    "default": "block/oak_leaves"
   }
 }

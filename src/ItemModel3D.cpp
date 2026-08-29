@@ -12,26 +12,24 @@ struct ExtrudeQuad {
     Color color;
 };
 
-void ItemModel3D::init(Texture2D items_texture) {
-    if (is_initialized) return;
+void ItemModel3D::rebuild(const Image& img, Texture2D items_texture) {
+    cleanup();
     texture_items = items_texture;
-
-    Image img = LoadImage("assets/textures/spritesheet_items.png");
+    
     if (img.data == nullptr) {
-        std::cerr << "[ItemModel3D] Failed to load spritesheet_items.png for 3D extrusion!" << std::endl;
+        std::cerr << "[ItemModel3D] Invalid image for 3D extrusion!" << std::endl;
         return;
     }
 
     int cols = Config::ITEMS_ATLAS_COLS;
     int rows = Config::ITEMS_ATLAS_ROWS;
-    float thickness = 0.0625f; // Standard Minecraft 1/16 voxel thickness
+    float thickness = 0.0625f;
 
     // 1. Generate 3D models for all Tools
     for (const auto& ti : Config::TOOLS) {
         int ix = ti.item_tex_x;
         int iy = Config::ITEMS_ATLAS_ROWS - 1 - ti.item_tex_y;
-
-        Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, false /* pivot at handle */);
+        Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, false);
         Model mdl = LoadModelFromMesh(m);
         mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture_items;
         tool_models[{ (int)ti.type, (int)ti.tier }] = mdl;
@@ -41,18 +39,29 @@ void ItemModel3D::init(Texture2D items_texture) {
     for (const auto& [id, itype] : Config::ITEMS) {
         int ix = itype.item_tex_x;
         int iy = Config::ITEMS_ATLAS_ROWS - 1 - itype.item_tex_y;
-
-        bool center = (id != Config::ITEM_STICK); // Sticks use handle pivot, other items center
+        bool center = (id != Config::ITEM_STICK);
         Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, center);
         Model mdl = LoadModelFromMesh(m);
         mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture_items;
         item_models[id] = mdl;
     }
 
-    UnloadImage(img);
     is_initialized = true;
     std::cout << "[ItemModel3D] Generated " << (tool_models.size() + item_models.size())
-              << " exact pixel-crisp 3D item models successfully." << std::endl;
+              << " 3D models." << std::endl;
+}
+
+void ItemModel3D::init(Texture2D items_texture) {
+    if (is_initialized) return;
+    Image img = LoadImage("assets/textures/spritesheet_items.png");
+    rebuild(img, items_texture);
+    UnloadImage(img);
+}
+
+void ItemModel3D::reset_to_default(Texture2D items_texture) {
+    Image img = LoadImage("assets/textures/spritesheet_items.png");
+    rebuild(img, items_texture);
+    UnloadImage(img);
 }
 
 Mesh ItemModel3D::generate_pixel_extruded_mesh(const Image& img, int cell_x, int cell_y, int cols, int rows, float thickness, bool center_pivot) {

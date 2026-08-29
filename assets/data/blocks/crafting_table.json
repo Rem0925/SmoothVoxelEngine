@@ -14,40 +14,51 @@
     "id": 30,
     "is_item": false
   },
-  "icon": [
-    1,
-    2
-  ],
+  "icon": "block/crafting_table_top",
   "textures": {
-    "default": [
-      0,
-      8
-    ],
-    "top": [
-      1,
-      2
-    ],
-    "bottom": [
-      0,
-      8
-    ],
-    "front": [
-      0,
-      8
-    ]
+    "default": "block/oak_planks",
+    "top": "block/crafting_table_top",
+    "bottom": "block/oak_planks",
+    "front": "block/crafting_table_front"
   },
   "elements": [
     {
       "name": "cube",
-      "from": [0, 0, 0],
-      "to": [16, 16, 16],
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
       "faces": {
-        "up":    { "texture": "#top", "cullface": "up" },
-        "down":  { "texture": "#bottom", "cullface": "down" },
-        "north": { "texture": "#default", "cullface": "north" },
-        "south": { "texture": "#front", "cullface": "south" },
-        "west":  { "texture": "#default", "cullface": "west" },
-        "east":  { "texture": "#default", "cullface": "east" }
+        "up": {
+          "texture": "#top",
+          "cullface": "up"
+        },
+        "down": {
+          "texture": "#bottom",
+          "cullface": "down"
+        },
+        "north": {
+          "texture": "#default",
+          "cullface": "north"
+        },
+        "south": {
+          "texture": "#front",
+          "cullface": "south"
+        },
+        "west": {
+          "texture": "#default",
+          "cullface": "west"
+        },
+        "east": {
+          "texture": "#default",
+          "cullface": "east"
+        }
       }
     }
   ]

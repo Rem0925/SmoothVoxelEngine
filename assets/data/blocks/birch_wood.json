@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      0,
-      1
-    ]
+    "default": "block/birch_log"
   }
 }

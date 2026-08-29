@@ -4,8 +4,5 @@
   "name": "Hacha de Oro",
   "durability": 50,
   "mining_speed": 5.25,
-  "texture": [
-    1,
-    3
-  ]
+  "texture": "item/golden_axe"
 }

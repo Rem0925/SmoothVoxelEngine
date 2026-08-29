@@ -1,8 +1,5 @@
 {
   "id": 7,
   "name": "Ingoto de Diamante",
-  "texture": [
-    6,
-    1
-  ]
+  "texture": "item/diamond_ingot"
 }

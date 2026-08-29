@@ -106,7 +106,6 @@ namespace Config {
         TOOL_AXE,
         TOOL_SHOVEL,
         TOOL_HAMMER,
-        TOOL_FLAIL,
         TOOL_SWORD,
         TOOL_COUNT
     };
@@ -122,6 +121,7 @@ namespace Config {
     };
 
     // ===================== ATLAS DE TEXTURAS (Configurable dinamicamente) =====================
+    inline bool USING_RESOURCE_PACK = false;
     inline int TILES_ATLAS_COLS = 9;
     inline int TILES_ATLAS_ROWS = 10;
     inline int ITEMS_ATLAS_COLS = 7;
@@ -170,10 +170,11 @@ namespace Config {
         int tex_x = -1;
         int tex_y = -1;
         std::string cullface = "";
+        std::string texture_name = "";
     };
 
     struct CuboidElement {
-        std::string name = "box";
+        std::string name;
         Vector3 from = {0.0f, 0.0f, 0.0f}; // Coordenadas 0..16
         Vector3 to   = {16.0f, 16.0f, 16.0f};
         CuboidFace faces[6];
@@ -183,6 +184,7 @@ namespace Config {
         std::string name;
         int tex_x;
         int tex_y;
+        std::string texture_mc = "";
         bool transparent;
         bool is_waving;
         uint8_t drop_id;        // que bloque/item suelta al minar (255 = ninguno)
@@ -196,10 +198,14 @@ namespace Config {
         BlockShape shape = SHAPE_TERRAIN;
         // Texturas especificas por cara (si son -1, usan tex_x y tex_y)
         int tex_top_x = -1, tex_top_y = -1;
+        std::string texture_top_mc = "";
         int tex_bottom_x = -1, tex_bottom_y = -1;
+        std::string texture_bottom_mc = "";
         int tex_front_x = -1, tex_front_y = -1;
+        std::string texture_front_mc = "";
         int tex_latch_x = -1, tex_latch_y = -1; // Para el pomo/cerrojo del cofre
         int tex_icon_x = -1, tex_icon_y = -1;   // Portada / Icono de inventario (si es -1, usa fallback)
+        std::string texture_icon_mc = "";
         std::vector<CuboidElement> elements;     // Modelos 3D por cuboides/partes
     };
 
@@ -216,9 +222,12 @@ namespace Config {
         std::string name;
         int item_tex_x;   // coordenada en spritesheet_items (columna)
         int item_tex_y;   // coordenada en spritesheet_items (fila)
+        std::string texture_mc = "";
     };
 
     inline std::unordered_map<uint8_t, ItemType> ITEMS;
+
+    // ===================== REGISTRO DE ENTIDADES / ITEMS =====================
 
     inline const char* TIER_NAMES[] = {
         "Madera", "Piedra", "Hierro", "Plata", "Oro", "Diamante"
@@ -236,6 +245,7 @@ namespace Config {
         float mining_speed;    // multiplicador de velocidad de minado
         int item_tex_x;        // columna en spritesheet_items.png
         int item_tex_y;        // fila en spritesheet_items.png
+        std::string texture_mc = "";
     };
 
     inline std::vector<ToolInfo> TOOLS;

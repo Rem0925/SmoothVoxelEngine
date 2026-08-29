@@ -1,8 +1,5 @@
 {
   "id": 6,
   "name": "Ingoto de Oro",
-  "texture": [
-    5,
-    1
-  ]
+  "texture": "item/gold_ingot"
 }

@@ -23,6 +23,8 @@
 #include "VoxelLighting.hpp"
 #include "json.hpp"
 #include "MenuManager.hpp"
+#include "MenuResourcePacks.hpp"
+#include "ResourcePackManager.hpp"
 
 using json = nlohmann::json;
 using namespace Config;
@@ -722,31 +724,20 @@ int main() {
     SetTargetFPS(MAX_FPS); 
     DisableCursor();
 
-    Texture2D spritesheet = LoadTexture("assets/textures/spritesheet_tiles.png");
-    SetTextureFilter(spritesheet, TEXTURE_FILTER_POINT);
+    BlockRegistry::load_all("assets/data");
     
-    Texture2D spritesheet_items = LoadTexture("assets/textures/spritesheet_items.png");
-    SetTextureFilter(spritesheet_items, TEXTURE_FILTER_POINT);
+    ResourcePackManager res_pack;
+    res_pack.build_defaults(".");
     
-    Texture2D tex_sun = LoadTexture("assets/textures/sun.png");
-    SetTextureFilter(tex_sun, TEXTURE_FILTER_POINT);
+    Texture2D spritesheet = res_pack.get_tiles_atlas();
+    Texture2D spritesheet_items = res_pack.get_items_atlas();
     
-    Texture2D tex_moon = LoadTexture("assets/textures/moon.png");
-    SetTextureFilter(tex_moon, TEXTURE_FILTER_POINT);
-    
-    Texture2D tex_clouds = LoadTexture("assets/textures/clouds.png");
-    SetTextureFilter(tex_clouds, TEXTURE_FILTER_POINT);
-    SetTextureWrap(tex_clouds, TEXTURE_WRAP_REPEAT);
-    
-    Texture2D sky_side = LoadTexture("assets/textures/skybox_sideClouds.png");
-    SetTextureFilter(sky_side, TEXTURE_FILTER_POINT);
-    SetTextureWrap(sky_side, TEXTURE_WRAP_CLAMP);
-    Texture2D sky_top = LoadTexture("assets/textures/skybox_top.png");
-    SetTextureFilter(sky_top, TEXTURE_FILTER_POINT);
-    SetTextureWrap(sky_top, TEXTURE_WRAP_CLAMP);
-    Texture2D sky_bottom = LoadTexture("assets/textures/skybox_bottom.png");
-    SetTextureFilter(sky_bottom, TEXTURE_FILTER_POINT);
-    SetTextureWrap(sky_bottom, TEXTURE_WRAP_CLAMP);
+    Texture2D tex_sun = res_pack.get_sun();
+    Texture2D tex_moon = res_pack.get_moon();
+    Texture2D tex_clouds = res_pack.get_clouds();
+    Texture2D sky_side = res_pack.get_sky_side();
+    Texture2D sky_top = res_pack.get_sky_top();
+    Texture2D sky_bottom = res_pack.get_sky_bottom();
     
 
     Shader terrainSolidShader = LoadShader("assets/shaders/terrain.vs", "assets/shaders/terrain_solid.fs");
@@ -799,10 +790,6 @@ int main() {
     // Bind noiseTex to the shader's "noiseTex" uniform using a spare material map
     waterShader.locs[SHADER_LOC_MAP_EMISSION] = GetShaderLocation(waterShader, "noiseTex");
     mat_water.maps[MATERIAL_MAP_EMISSION].texture = noiseTex;
-
-    // Cargar todos los bloques, items y herramientas desde JSONs
-    BlockRegistry::load_all("assets/data");
-    ItemModel3D::get().init(spritesheet_items);
 
     World world(mat_solid, mat_plants, mat_water);
     g_world = &world;
@@ -1010,9 +997,57 @@ int main() {
             }
         }
         
+        static bool was_paused = false;
         if (menu.is_paused()) {
             menu.update();
             if (menu.wants_quit) break;
+            was_paused = true;
+        } else if (was_paused) {
+            was_paused = false;
+        }
+        
+        static std::string last_pack_path = MenuResourcePacks::get_active_pack_path();
+        std::string current_pack = MenuResourcePacks::get_active_pack_path();
+        if (current_pack != last_pack_path || (current_pack.empty() && res_pack.get_is_active()) || (!current_pack.empty() && !res_pack.get_is_active() && current_pack != res_pack.get_active_pack_path())) {
+            last_pack_path = current_pack;
+            if (!current_pack.empty()) {
+                if (res_pack.apply_pack(current_pack)) {
+                    spritesheet = res_pack.get_tiles_atlas();
+                    spritesheet_items = res_pack.get_items_atlas();
+                    tex_sun = res_pack.get_sun();
+                    tex_moon = res_pack.get_moon();
+                    tex_clouds = res_pack.get_clouds();
+                    sky_side = res_pack.get_sky_side();
+                    sky_top = res_pack.get_sky_top();
+                    sky_bottom = res_pack.get_sky_bottom();
+                    world.mat_solid.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+                    world.mat_plants.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+                    world.mat_water.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+                    ui.spritesheet = spritesheet;
+                    ui.spritesheet_items = spritesheet_items;
+                    world.invalidate_all_meshes();
+                    chat.add_message("Paquete de recursos aplicado!");
+                }
+            } else {
+                res_pack.clear_pack();
+                BlockRegistry::load_all("assets/data");
+                spritesheet = res_pack.get_tiles_atlas();
+                spritesheet_items = res_pack.get_items_atlas();
+                tex_sun = res_pack.get_sun();
+                tex_moon = res_pack.get_moon();
+                tex_clouds = res_pack.get_clouds();
+                sky_side = res_pack.get_sky_side();
+                sky_top = res_pack.get_sky_top();
+                sky_bottom = res_pack.get_sky_bottom();
+                ItemModel3D::get().reset_to_default(spritesheet_items);
+                world.mat_solid.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+                world.mat_plants.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+                world.mat_water.maps[MATERIAL_MAP_DIFFUSE].texture = spritesheet;
+                ui.spritesheet = spritesheet;
+                ui.spritesheet_items = spritesheet_items;
+                world.invalidate_all_meshes();
+                chat.add_message("Texturas por defecto restauradas");
+            }
         }
         
 
@@ -1482,7 +1517,6 @@ int main() {
                                          tool->type == TOOL_SHOVEL ? 2.0f :
                                          tool->type == TOOL_AXE ? 2.0f :
                                          tool->type == TOOL_SWORD ? 1.5f :
-                                         tool->type == TOOL_FLAIL ? 0.8f :
                                          tool->type == TOOL_HAMMER ? 1.2f : 1.0f;
                             
                             float tier_mult = tool->tier == TIER_WOOD ? 1.0f :

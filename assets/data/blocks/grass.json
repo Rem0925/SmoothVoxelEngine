@@ -15,17 +15,8 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      6,
-      8
-    ],
-    "top": [
-      6,
-      8
-    ],
-    "bottom": [
-      7,
-      4
-    ]
+    "default": "block/grass_block",
+    "top": "block/grass_block_top",
+    "bottom": "block/dirt"
   }
 }

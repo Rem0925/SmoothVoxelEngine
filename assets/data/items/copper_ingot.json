@@ -1,8 +1,5 @@
 {
   "id": 3,
   "name": "Ingoto de Cobre",
-  "texture": [
-    3,
-    1
-  ]
+  "texture": "item/copper_ingot"
 }

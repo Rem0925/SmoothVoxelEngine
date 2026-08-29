@@ -132,6 +132,13 @@ void MenuResourcePacks::save_selection() {
     save_selected();
 }
 
+std::string MenuResourcePacks::get_active_pack_path() {
+    for (auto& p : packs) {
+        if (p.selected) return p.path;
+    }
+    return "";
+}
+
 void MenuResourcePacks::scan_packs() {
     packs.clear();
 

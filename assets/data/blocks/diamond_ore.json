@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      2,
-      0
-    ]
+    "default": "block/diamond_ore"
   }
 }

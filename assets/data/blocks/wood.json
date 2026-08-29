@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      1,
-      9
-    ]
+    "default": "block/oak_log"
   }
 }

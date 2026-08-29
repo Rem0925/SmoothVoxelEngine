@@ -51,6 +51,7 @@ public:
     void set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation = 0);
     int flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, class ItemDropManager* item_drops = nullptr);
     float get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea& area, int tool_tier);
+    void invalidate_all_meshes();
     
     Chunk* get_chunk(int cx, int cz);
     std::shared_ptr<Chunk> get_chunk_shared(int cx, int cz) {

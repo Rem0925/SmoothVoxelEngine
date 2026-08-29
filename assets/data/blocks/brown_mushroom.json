@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      4,
-      3
-    ]
+    "default": "block/brown_mushroom"
   }
 }

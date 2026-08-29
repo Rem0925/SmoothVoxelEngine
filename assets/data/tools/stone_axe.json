@@ -4,8 +4,5 @@
   "name": "Hacha de Piedra",
   "durability": 200,
   "mining_speed": 2.25,
-  "texture": [
-    1,
-    6
-  ]
+  "texture": "item/stone_axe"
 }

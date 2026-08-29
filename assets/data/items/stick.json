@@ -1,8 +1,5 @@
 {
   "id": 0,
   "name": "Palo",
-  "texture": [
-    0,
-    1
-  ]
+  "texture": "item/stick"
 }

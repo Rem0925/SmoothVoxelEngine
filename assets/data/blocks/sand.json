@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      3,
-      3
-    ]
+    "default": "block/sand"
   }
 }

@@ -46,6 +46,7 @@ set(SOURCES
     src/MenuOptions.cpp
     src/MenuResourcePacks.cpp
     src/Noise.cpp
+    src/ResourcePackManager.cpp
     src/UI.cpp
     src/VoxelLighting.cpp
     src/World.cpp

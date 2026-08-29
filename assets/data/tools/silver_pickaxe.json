@@ -4,8 +4,5 @@
   "name": "Pico de Plata",
   "durability": 250,
   "mining_speed": 2.5,
-  "texture": [
-    0,
-    4
-  ]
+  "texture": "item/copper_pickaxe"
 }
