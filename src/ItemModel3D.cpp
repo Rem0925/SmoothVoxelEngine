@@ -57,11 +57,11 @@ Mesh ItemModel3D::generate_pixel_extruded_mesh(const Image& img, int cell_x, int
     int px_start = cell_x * cell_w;
     int py_start = cell_y * cell_h;
 
-    int voxel_res = 16;
+    int voxel_res = cell_w;
     float step_x = (float)cell_w / voxel_res;
     float step_y = (float)cell_h / voxel_res;
 
-    // Solid mask for the 16x16 voxel grid
+    // Solid mask for the voxel grid
     std::vector<std::vector<bool>> solid(voxel_res, std::vector<bool>(voxel_res, false));
     for (int y = 0; y < voxel_res; y++) {
         for (int x = 0; x < voxel_res; x++) {
