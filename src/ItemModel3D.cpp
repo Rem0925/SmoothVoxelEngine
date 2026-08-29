@@ -68,7 +68,7 @@ Mesh ItemModel3D::generate_pixel_extruded_mesh(const Image& img, int cell_x, int
             int px = px_start + (int)((x + 0.5f) * step_x);
             int py = py_start + (int)((y + 0.5f) * step_y);
             Color c = GetImageColor(img, px, py);
-            solid[y][x] = (c.a > 128); // Alpha threshold
+            solid[y][x] = (c.a > 200);
         }
     }
 
