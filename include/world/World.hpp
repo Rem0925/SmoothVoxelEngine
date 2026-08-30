@@ -50,6 +50,7 @@ public:
     uint8_t get_rotation(int wx, int wy, int wz);
     uint8_t get_light(int wx, int wy, int wz);
     float get_density(int wx, int wy, int wz) const;
+    float sample_density_trilinear(float x, float y, float z) const;
     void set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation = 0);
     int flatten_terrain(int wx, int wy, int wz, const HammerArea& area, int tool_tier, class ItemDropManager* item_drops = nullptr);
     float get_hammer_mining_hardness(int wx, int wy, int wz, const HammerArea& area, int tool_tier);

@@ -566,7 +566,6 @@ int main() {
         BeginDrawing();
         
         float sun_y = std::sin(gs.day_time);
-        float sun_x = std::cos(gs.day_time);
         // Alinear la claridad del terreno con la del cielo
         float dayFactor = std::clamp(sun_y * 2.0f + 0.2f, 0.0f, 1.0f);
         float light_intensity = std::max(0.05f, dayFactor);

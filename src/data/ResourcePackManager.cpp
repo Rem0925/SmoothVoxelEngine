@@ -15,11 +15,6 @@ static Texture2D image_to_texture(Image img) {
     return tex;
 }
 
-static int next_pow2(int v) {
-    v--;
-    v |= v >> 1; v |= v >> 2; v |= v >> 4; v |= v >> 8; v |= v >> 16;
-    return v + 1;
-}
 
 std::pair<int, int> ResourcePackManager::get_tile_coord(const std::string& mc_name) const {
     auto it = tile_map.find(mc_name);

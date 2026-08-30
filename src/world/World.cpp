@@ -58,7 +58,7 @@ void World::update(Vector3 player_pos) {
         }
     }
     
-    int chunks_started = 0;
+    
     
     static std::vector<std::pair<int, int>> chunk_coords;
     static int cached_load_radius = -1;
@@ -275,7 +275,7 @@ void World::set_block(int wx, int wy, int wz, uint8_t type, uint8_t rotation) {
     int lx = wx - cx * CHUNK_SIZE;
     int lz = wz - cz * CHUNK_SIZE;
     
-    uint8_t old_b = get_block(wx, wy, wz);
+    
 
     auto update_chunk = [&](int c_x, int c_z, int l_x, int l_z) {
         Chunk* c = get_chunk(c_x, c_z);
@@ -434,4 +434,30 @@ uint8_t World::get_light(int wx, int wy, int wz) {
         return chunk->get_light(lx, wy, lz);
     }
     return 0;
+}
+
+float World::sample_density_trilinear(float x, float y, float z) const {
+    int ix = (int)std::floor(x);
+    int iy = (int)std::floor(y);
+    int iz = (int)std::floor(z);
+    float fx = x - ix;
+    float fy = y - iy;
+    float fz = z - iz;
+
+    float d000 = get_density(ix,   iy,   iz);
+    float d100 = get_density(ix+1, iy,   iz);
+    float d010 = get_density(ix,   iy+1, iz);
+    float d110 = get_density(ix+1, iy+1, iz);
+    float d001 = get_density(ix,   iy,   iz+1);
+    float d101 = get_density(ix+1, iy,   iz+1);
+    float d011 = get_density(ix,   iy+1, iz+1);
+    float d111 = get_density(ix+1, iy+1, iz+1);
+
+    float c00 = d000 * (1.0f - fx) + d100 * fx;
+    float c10 = d010 * (1.0f - fx) + d110 * fx;
+    float c01 = d001 * (1.0f - fx) + d101 * fx;
+    float c11 = d011 * (1.0f - fx) + d111 * fx;
+    float c0  = c00  * (1.0f - fz) + c01  * fz;
+    float c1  = c10  * (1.0f - fz) + c11  * fz;
+    return c0 * (1.0f - fy) + c1 * fy;
 }

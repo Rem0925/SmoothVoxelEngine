@@ -15,32 +15,6 @@ void UpdatePlayerPhysics(World& world, Camera3D& camera, PlayerPhysicsState& sta
         if (current_chunk && current_chunk->is_ready) {
             float r = 0.28f;
 
-            auto sample_density = [&](float x, float y, float z) -> float {
-                int ix = (int)std::floor(x);
-                int iy = (int)std::floor(y);
-                int iz = (int)std::floor(z);
-                float fx = x - ix;
-                float fy = y - iy;
-                float fz = z - iz;
-
-                float d000 = world.get_density(ix,   iy,   iz);
-                float d100 = world.get_density(ix+1, iy,   iz);
-                float d010 = world.get_density(ix,   iy+1, iz);
-                float d110 = world.get_density(ix+1, iy+1, iz);
-                float d001 = world.get_density(ix,   iy,   iz+1);
-                float d101 = world.get_density(ix+1, iy,   iz+1);
-                float d011 = world.get_density(ix,   iy+1, iz+1);
-                float d111 = world.get_density(ix+1, iy+1, iz+1);
-
-                float c00 = d000 * (1.0f - fx) + d100 * fx;
-                float c10 = d010 * (1.0f - fx) + d110 * fx;
-                float c01 = d001 * (1.0f - fx) + d101 * fx;
-                float c11 = d011 * (1.0f - fx) + d111 * fx;
-                float c0  = c00  * (1.0f - fz) + c01  * fz;
-                float c1  = c10  * (1.0f - fz) + c11  * fz;
-                return c0 * (1.0f - fy) + c1 * fy;
-            };
-
             auto is_solid = [&](float x, float y, float z) -> bool {
                 int bx = (int)std::floor(x + 0.5f);
                 int by = (int)std::floor(y + 0.5f);
@@ -56,7 +30,7 @@ void UpdatePlayerPhysics(World& world, Camera3D& camera, PlayerPhysicsState& sta
                         return true;
                     }
                 }
-                return sample_density(x, y, z) >= Config::ISO_SURFACE;
+                return world.sample_density_trilinear(x, y, z) >= Config::ISO_SURFACE;
             };
 
             auto check_wall = [&](float vx, float vz, float y) {
@@ -72,16 +46,16 @@ void UpdatePlayerPhysics(World& world, Camera3D& camera, PlayerPhysicsState& sta
                 float scan_bot = ref_feet_y - 1.20f;
 
                 float prev_y = scan_bot;
-                float prev_d = sample_density(px, prev_y, pz);
+                float prev_d = world.sample_density_trilinear(px, prev_y, pz);
 
                 for (float y = scan_bot + 0.12f; y <= scan_top + 0.05f; y += 0.12f) {
-                    float d = sample_density(px, y, pz);
+                    float d = world.sample_density_trilinear(px, y, pz);
                     if (prev_d >= Config::ISO_SURFACE && d < Config::ISO_SURFACE) {
                         float lo = prev_y;
                         float hi = y;
                         for (int i = 0; i < 8; i++) {
                             float mid = (lo + hi) * 0.5f;
-                            if (sample_density(px, mid, pz) >= Config::ISO_SURFACE) lo = mid;
+                            if (world.sample_density_trilinear(px, mid, pz) >= Config::ISO_SURFACE) lo = mid;
                             else hi = mid;
                         }
                         ground_y = (lo + hi) * 0.5f;
@@ -92,14 +66,14 @@ void UpdatePlayerPhysics(World& world, Camera3D& camera, PlayerPhysicsState& sta
                 }
 
                 if (ground_y < -900.0f) {
-                    float d_bot = sample_density(px, scan_bot, pz);
-                    float d_top = sample_density(px, scan_top, pz);
+                    float d_bot = world.sample_density_trilinear(px, scan_bot, pz);
+                    float d_top = world.sample_density_trilinear(px, scan_top, pz);
                     if (d_bot >= Config::ISO_SURFACE && d_top < Config::ISO_SURFACE) {
                         float lo = scan_bot;
                         float hi = scan_top;
                         for (int i = 0; i < 10; i++) {
                             float mid = (lo + hi) * 0.5f;
-                            if (sample_density(px, mid, pz) >= Config::ISO_SURFACE) lo = mid;
+                            if (world.sample_density_trilinear(px, mid, pz) >= Config::ISO_SURFACE) lo = mid;
                             else hi = mid;
                         }
                         ground_y = (lo + hi) * 0.5f;
