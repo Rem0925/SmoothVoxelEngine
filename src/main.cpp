@@ -1434,14 +1434,6 @@ int main() {
                             uint8_t bot_rot = world.get_rotation(bx, by - 1, bz);
                             world.set_block(bx, by - 1, bz, Config::DOOR_WOOD, (bot_rot & ~4) | (new_rot & 4));
                         }
-                    } else if (look_b == Config::TORCH) {
-                        chat.add_message("[Antorcha] Iluminando el entorno con calidez");
-                    } else if (look_b == Config::FENCE_WOOD) {
-                        chat.add_message("[Valla de Madera] Bloque de contencion");
-                    } else if (look_b == Config::STAIRS_WOOD || look_b == Config::STAIRS_STONE) {
-                        chat.add_message("[Escalera] Peldanos para subir niveles sin saltar");
-                    } else if (look_b != Config::AIR && look_b != Config::WATER && Config::BLOCKS.count(look_b)) {
-                        chat.add_message("[" + Config::BLOCKS.at(look_b).name + "] Bloque de construccion");
                     }
                 }
             } else {
