@@ -11,7 +11,7 @@ public:
         return instance;
     }
 
-    void rebuild(const Image& img, Texture2D items_texture);
+    void rebuild(const Image& img, Texture2D items_texture, const std::string& pack_path = "");
     void cleanup();
 
     // Direct draw helpers
@@ -29,4 +29,5 @@ private:
     std::map<uint8_t, Model> item_models;
 
     Mesh generate_pixel_extruded_mesh(const Image& img, int cell_x, int cell_y, int cols, int rows, float thickness, bool center_pivot);
+    Mesh generate_elements_mesh(const std::vector<Config::CuboidElement>& elements, int cell_x, int cell_y, int cols, int rows, bool center_pivot);
 };

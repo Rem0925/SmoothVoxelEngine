@@ -167,14 +167,25 @@ namespace Config {
         float uv[4] = {0.0f, 0.0f, 16.0f, 16.0f}; // [u0, v0, u1, v1] en 0..16
         int tex_x = -1;
         int tex_y = -1;
+        int tintindex = -1; // -1 = sin tinte, >= 0 = tinte de bioma (grass/foliage)
+        int uv_rotation = 0; // 0, 90, 180, 270 grados
         std::string cullface = "";
         std::string texture_name = "";
+    };
+
+    struct ElementRotation {
+        bool enabled = false;
+        Vector3 origin = {8.0f, 8.0f, 8.0f};
+        char axis = 'y'; // 'x', 'y', 'z'
+        float angle = 0.0f;
+        bool rescale = false;
     };
 
     struct CuboidElement {
         std::string name;
         Vector3 from = {0.0f, 0.0f, 0.0f}; // Coordenadas 0..16
         Vector3 to   = {16.0f, 16.0f, 16.0f};
+        ElementRotation rotation;
         CuboidFace faces[6];
     };
 
@@ -185,6 +196,8 @@ namespace Config {
         std::string texture_mc = "";
         bool transparent;
         bool is_waving;
+        bool is_foliage = false; // Usa tinte de follaje del bioma (hojas, etc.)
+        bool is_grass = false;   // Usa tinte de pasto del bioma (pasto, césped corto, etc.)
         uint8_t drop_id;        // que bloque/item suelta al minar (255 = ninguno)
         bool drop_is_item;      // true = drop_id es ItemID, false = drop_id es BlockID
         uint8_t ideal_tool;     // ToolType mas eficiente (255 = cualquiera)

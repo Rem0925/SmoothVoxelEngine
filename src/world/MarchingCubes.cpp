@@ -528,8 +528,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         std::swap(b_primary, b_secondary);
                     }
 
-                    bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES);
-                    bool sec_is_foliage = (b_secondary == Config::GRASS || b_secondary == Config::LEAVES);
+                    bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES || (Config::BLOCKS.count(b_primary) && (Config::BLOCKS.at(b_primary).is_foliage || Config::BLOCKS.at(b_primary).is_grass)));
+                    bool sec_is_foliage = (b_secondary == Config::GRASS || b_secondary == Config::LEAVES || (Config::BLOCKS.count(b_secondary) && (Config::BLOCKS.at(b_secondary).is_foliage || Config::BLOCKS.at(b_secondary).is_grass)));
                     float foliage_pri_offset = pri_is_foliage ? 10.0f : 0.0f;
                     float foliage_sec_offset = sec_is_foliage ? 10.0f : 0.0f;
 

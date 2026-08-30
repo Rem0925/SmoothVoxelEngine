@@ -94,6 +94,10 @@ bool load_blocks(const std::string& blocks_dir) {
             bt.hardness = j.value("hardness", 1.0f);
             bt.transparent = j.value("transparent", false);
             bt.is_waving = j.value("is_waving", false);
+            bt.is_foliage = j.value("is_foliage", (id == Config::LEAVES));
+            bt.is_grass = j.value("is_grass", (id == Config::GRASS || id == Config::TALL_GRASS));
+            if (id == Config::LEAVES) bt.is_foliage = true;
+            if (id == Config::GRASS || id == Config::TALL_GRASS) bt.is_grass = true;
             bt.light_emission = (uint8_t)j.value("light_emission", (int)j.value("light", 0));
             bt.light_filter = (uint8_t)j.value("light_filter", bt.transparent ? 0 : 15);
             
@@ -256,6 +260,29 @@ bool load_blocks(const std::string& blocks_dir) {
                         elem.to = { tx, ty, tz };
                     }
 
+                    // Parse element rotation if present
+                    if (ej.contains("rotation") && ej["rotation"].is_object()) {
+                        const auto& rj = ej["rotation"];
+                        elem.rotation.enabled = true;
+                        if (rj.contains("origin") && rj["origin"].is_array() && rj["origin"].size() >= 3) {
+                            elem.rotation.origin = {
+                                rj["origin"][0].get<float>(),
+                                rj["origin"][1].get<float>(),
+                                rj["origin"][2].get<float>()
+                            };
+                        }
+                        if (rj.contains("axis")) {
+                            std::string ax = rj["axis"].get<std::string>();
+                            if (!ax.empty()) elem.rotation.axis = ax[0];
+                        }
+                        if (rj.contains("angle")) {
+                            elem.rotation.angle = rj["angle"].get<float>();
+                        }
+                        if (rj.contains("rescale")) {
+                            elem.rotation.rescale = rj["rescale"].get<bool>();
+                        }
+                    }
+
                     // Parse faces if present (Minecraft format)
                     if (ej.contains("faces") && ej["faces"].is_object()) {
                         const auto& fj = ej["faces"];
@@ -271,6 +298,12 @@ bool load_blocks(const std::string& blocks_dir) {
                                 }
                                 if (face_obj.contains("cullface")) {
                                     elem.faces[dir].cullface = face_obj["cullface"].get<std::string>();
+                                }
+                                if (face_obj.contains("tintindex")) {
+                                    elem.faces[dir].tintindex = face_obj["tintindex"].get<int>();
+                                }
+                                if (face_obj.contains("rotation")) {
+                                    elem.faces[dir].uv_rotation = face_obj["rotation"].get<int>();
                                 }
                                 // Texture
                                 if (face_obj.contains("texture")) {

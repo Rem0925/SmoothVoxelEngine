@@ -735,7 +735,7 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_
                 };
                 
                 bool is_foliage_plant = (plant_type == Config::TALL_GRASS);
-                float foliage_offset = (is_foliage_plant && !Config::USING_RESOURCE_PACK) ? 10.0f : 0.0f;
+                float foliage_offset = is_foliage_plant ? 10.0f : 0.0f;
                 
                 Vector2 uvs[] = { 
                     {u1, v1 + foliage_offset}, 

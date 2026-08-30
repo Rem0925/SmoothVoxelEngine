@@ -3,7 +3,48 @@
 #include <cmath>
 #include <algorithm>
 
+#include <filesystem>
+
 namespace Biome {
+
+namespace fs = std::filesystem;
+
+static Image s_grass_colormap = { 0 };
+static Image s_foliage_colormap = { 0 };
+
+void load_colormaps(const std::string& pack_path) {
+    unload_colormaps();
+    std::string grass_path = pack_path + "/assets/minecraft/textures/colormap/grass.png";
+    if (fs::exists(grass_path)) {
+        s_grass_colormap = LoadImage(grass_path.c_str());
+    }
+    std::string foliage_path = pack_path + "/assets/minecraft/textures/colormap/foliage.png";
+    if (fs::exists(foliage_path)) {
+        s_foliage_colormap = LoadImage(foliage_path.c_str());
+    }
+}
+
+void unload_colormaps() {
+    if (s_grass_colormap.data != nullptr) {
+        UnloadImage(s_grass_colormap);
+        s_grass_colormap = { 0 };
+    }
+    if (s_foliage_colormap.data != nullptr) {
+        UnloadImage(s_foliage_colormap);
+        s_foliage_colormap = { 0 };
+    }
+}
+
+static Color sample_colormap_direct(const Image& img, float temp, float hum) {
+    if (img.data == nullptr) return WHITE;
+    float t = std::clamp(temp, 0.0f, 1.0f);
+    float h = std::clamp(hum, 0.0f, 1.0f);
+    float u = 1.0f - t;
+    float v = 1.0f - (t * h);
+    int px = std::clamp((int)(u * (img.width - 1)), 0, img.width - 1);
+    int py = std::clamp((int)(v * (img.height - 1)), 0, img.height - 1);
+    return GetImageColor(img, px, py);
+}
 
 static inline Color lerp_color(Color a, Color b, float t) {
     t = std::clamp(t, 0.0f, 1.0f);
@@ -181,6 +222,13 @@ static inline BiomeConfig get_pure_biome_config(BiomeType type, float temp, floa
             break;
     }
     
+    if (s_grass_colormap.data != nullptr) {
+        cfg.grass_tint = sample_colormap_direct(s_grass_colormap, temp, hum);
+    }
+    if (s_foliage_colormap.data != nullptr) {
+        cfg.foliage_tint = sample_colormap_direct(s_foliage_colormap, temp, hum);
+    }
+
     return cfg;
 }
 

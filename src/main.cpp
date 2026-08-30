@@ -245,7 +245,6 @@ int main() {
                 }
             } else {
                 res_pack.clear_pack();
-                BlockRegistry::load_all("assets/data");
                 reload_textures();
                 chat.add_message("Texturas por defecto restauradas");
             }

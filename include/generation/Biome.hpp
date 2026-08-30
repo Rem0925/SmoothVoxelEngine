@@ -78,5 +78,9 @@ namespace Biome {
         return get_blended_foliage_tint(wx, wz, seed_offset, 6);
     }
     
+    // Carga de colormaps (grass.png / foliage.png) desde un resource pack
+    void load_colormaps(const std::string& pack_path);
+    void unload_colormaps();
+
     const char* get_biome_name_at(double wx, double wz, int seed_offset);
 }

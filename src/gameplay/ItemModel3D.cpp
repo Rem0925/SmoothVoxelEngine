@@ -12,7 +12,192 @@ struct ExtrudeQuad {
     Color color;
 };
 
-void ItemModel3D::rebuild(const Image& img, Texture2D items_texture) {
+#include "core/json.hpp"
+#include <fstream>
+#include <filesystem>
+
+using json = nlohmann::json;
+namespace fs = std::filesystem;
+
+static bool try_load_item_json_elements(const std::string& pack_path, const std::string& mc_name, std::vector<Config::CuboidElement>& out_elements) {
+    if (pack_path.empty()) return false;
+    std::string path = pack_path + "/assets/minecraft/models/item/" + mc_name + ".json";
+    if (!fs::exists(path)) {
+        path = pack_path + "/assets/minecraft/items/" + mc_name + ".json";
+        if (!fs::exists(path)) return false;
+    }
+
+    try {
+        std::ifstream f(path);
+        if (!f.is_open()) return false;
+        json j;
+        f >> j;
+
+        if (j.contains("elements") && j["elements"].is_array() && !j["elements"].empty()) {
+            for (const auto& ej : j["elements"]) {
+                Config::CuboidElement elem;
+                elem.name = ej.value("name", "box");
+                if (ej.contains("from") && ej["from"].is_array() && ej["from"].size() >= 3) {
+                    elem.from = { ej["from"][0].get<float>(), ej["from"][1].get<float>(), ej["from"][2].get<float>() };
+                }
+                if (ej.contains("to") && ej["to"].is_array() && ej["to"].size() >= 3) {
+                    elem.to = { ej["to"][0].get<float>(), ej["to"][1].get<float>(), ej["to"][2].get<float>() };
+                }
+                if (ej.contains("faces") && ej["faces"].is_object()) {
+                    const auto& fj = ej["faces"];
+                    auto parse_f = [&](const std::string& fname, Config::BlockFaceDirection dir) {
+                        if (fj.contains(fname)) {
+                            const auto& fo = fj[fname];
+                            elem.faces[dir].enabled = true;
+                            if (fo.contains("uv") && fo["uv"].is_array() && fo["uv"].size() >= 4) {
+                                elem.faces[dir].uv[0] = fo["uv"][0].get<float>();
+                                elem.faces[dir].uv[1] = fo["uv"][1].get<float>();
+                                elem.faces[dir].uv[2] = fo["uv"][2].get<float>();
+                                elem.faces[dir].uv[3] = fo["uv"][3].get<float>();
+                            }
+                        }
+                    };
+                    parse_f("down", Config::FACE_DOWN);
+                    parse_f("up", Config::FACE_UP);
+                    parse_f("north", Config::FACE_NORTH);
+                    parse_f("south", Config::FACE_SOUTH);
+                    parse_f("west", Config::FACE_WEST);
+                    parse_f("east", Config::FACE_EAST);
+                }
+                out_elements.push_back(elem);
+            }
+            return !out_elements.empty();
+        }
+    } catch (...) {}
+    return false;
+}
+
+Mesh ItemModel3D::generate_elements_mesh(const std::vector<Config::CuboidElement>& elements, int cell_x, int cell_y, int cols, int rows, bool center_pivot) {
+    std::vector<ExtrudeQuad> quads;
+    quads.reserve(elements.size() * 6);
+
+    float tw = 1.0f / (float)cols;
+    float th = 1.0f / (float)rows;
+    float u_base = (float)cell_x * tw;
+    float v_base = (float)(rows - 1 - cell_y) * th;
+
+    Color c_front = { 245, 245, 245, 255 };
+    Color c_back  = { 170, 170, 170, 255 };
+    Color c_top   = { 255, 255, 255, 255 };
+    Color c_bot   = { 130, 130, 130, 255 };
+    Color c_right = { 210, 210, 210, 255 };
+    Color c_left  = { 180, 180, 180, 255 };
+
+    for (const auto& elem : elements) {
+        float x0 = elem.from.x / 16.0f - (center_pivot ? 0.5f : 0.0f);
+        float y0 = elem.from.y / 16.0f - (center_pivot ? 0.5f : 0.0f);
+        float z0 = elem.from.z / 16.0f - 0.5f;
+
+        float x1 = elem.to.x / 16.0f - (center_pivot ? 0.5f : 0.0f);
+        float y1 = elem.to.y / 16.0f - (center_pivot ? 0.5f : 0.0f);
+        float z1 = elem.to.z / 16.0f - 0.5f;
+
+        auto make_uv = [&](float u16, float v16) -> Vector2 {
+            return { u_base + (u16 / 16.0f) * tw, v_base + (1.0f - v16 / 16.0f) * th };
+        };
+
+        // UP (+Y)
+        if (elem.faces[Config::FACE_UP].enabled) {
+            const auto& f = elem.faces[Config::FACE_UP];
+            quads.push_back({
+                {x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0},
+                make_uv(f.uv[0], f.uv[3]), make_uv(f.uv[2], f.uv[3]), make_uv(f.uv[2], f.uv[1]), make_uv(f.uv[0], f.uv[1]),
+                {0.0f, 1.0f, 0.0f}, c_top
+            });
+        }
+        // DOWN (-Y)
+        if (elem.faces[Config::FACE_DOWN].enabled) {
+            const auto& f = elem.faces[Config::FACE_DOWN];
+            quads.push_back({
+                {x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1},
+                make_uv(f.uv[0], f.uv[1]), make_uv(f.uv[2], f.uv[1]), make_uv(f.uv[2], f.uv[3]), make_uv(f.uv[0], f.uv[3]),
+                {0.0f, -1.0f, 0.0f}, c_bot
+            });
+        }
+        // NORTH (-Z)
+        if (elem.faces[Config::FACE_NORTH].enabled) {
+            const auto& f = elem.faces[Config::FACE_NORTH];
+            quads.push_back({
+                {x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0},
+                make_uv(f.uv[0], f.uv[3]), make_uv(f.uv[2], f.uv[3]), make_uv(f.uv[2], f.uv[1]), make_uv(f.uv[0], f.uv[1]),
+                {0.0f, 0.0f, -1.0f}, c_back
+            });
+        }
+        // SOUTH (+Z)
+        if (elem.faces[Config::FACE_SOUTH].enabled) {
+            const auto& f = elem.faces[Config::FACE_SOUTH];
+            quads.push_back({
+                {x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1},
+                make_uv(f.uv[0], f.uv[3]), make_uv(f.uv[2], f.uv[3]), make_uv(f.uv[2], f.uv[1]), make_uv(f.uv[0], f.uv[1]),
+                {0.0f, 0.0f, 1.0f}, c_front
+            });
+        }
+        // WEST (-X)
+        if (elem.faces[Config::FACE_WEST].enabled) {
+            const auto& f = elem.faces[Config::FACE_WEST];
+            quads.push_back({
+                {x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0},
+                make_uv(f.uv[0], f.uv[3]), make_uv(f.uv[2], f.uv[3]), make_uv(f.uv[2], f.uv[1]), make_uv(f.uv[0], f.uv[1]),
+                {-1.0f, 0.0f, 0.0f}, c_left
+            });
+        }
+        // EAST (+X)
+        if (elem.faces[Config::FACE_EAST].enabled) {
+            const auto& f = elem.faces[Config::FACE_EAST];
+            quads.push_back({
+                {x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1},
+                make_uv(f.uv[0], f.uv[3]), make_uv(f.uv[2], f.uv[3]), make_uv(f.uv[2], f.uv[1]), make_uv(f.uv[0], f.uv[1]),
+                {1.0f, 0.0f, 0.0f}, c_right
+            });
+        }
+    }
+
+    Mesh mesh = { 0 };
+    mesh.triangleCount = (int)quads.size() * 2;
+    mesh.vertexCount = mesh.triangleCount * 3;
+    if (mesh.vertexCount == 0) return mesh;
+
+    mesh.vertices = (float*)RL_MALLOC(mesh.vertexCount * 3 * sizeof(float));
+    mesh.texcoords = (float*)RL_MALLOC(mesh.vertexCount * 2 * sizeof(float));
+    mesh.normals = (float*)RL_MALLOC(mesh.vertexCount * 3 * sizeof(float));
+    mesh.colors = (unsigned char*)RL_MALLOC(mesh.vertexCount * 4 * sizeof(unsigned char));
+
+    int vi = 0, ti = 0, ni = 0, ci = 0;
+    auto push_vert = [&](const Vector3& v, const Vector2& uv, const Vector3& n, const Color& col) {
+        mesh.vertices[vi++] = v.x;
+        mesh.vertices[vi++] = v.y;
+        mesh.vertices[vi++] = v.z;
+        mesh.texcoords[ti++] = uv.x;
+        mesh.texcoords[ti++] = uv.y;
+        mesh.normals[ni++] = n.x;
+        mesh.normals[ni++] = n.y;
+        mesh.normals[ni++] = n.z;
+        mesh.colors[ci++] = col.r;
+        mesh.colors[ci++] = col.g;
+        mesh.colors[ci++] = col.b;
+        mesh.colors[ci++] = col.a;
+    };
+
+    for (const auto& q : quads) {
+        push_vert(q.v0, q.uv0, q.normal, q.color);
+        push_vert(q.v1, q.uv1, q.normal, q.color);
+        push_vert(q.v2, q.uv2, q.normal, q.color);
+
+        push_vert(q.v0, q.uv0, q.normal, q.color);
+        push_vert(q.v2, q.uv2, q.normal, q.color);
+        push_vert(q.v3, q.uv3, q.normal, q.color);
+    }
+
+    UploadMesh(&mesh, false);
+    return mesh;
+}
+
+void ItemModel3D::rebuild(const Image& img, Texture2D items_texture, const std::string& pack_path) {
     cleanup();
     texture_items = items_texture;
     
@@ -29,7 +214,17 @@ void ItemModel3D::rebuild(const Image& img, Texture2D items_texture) {
     for (const auto& ti : Config::TOOLS) {
         int ix = ti.item_tex_x;
         int iy = ti.item_tex_y;
-        Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, false);
+        std::string mc_name = ti.texture_mc;
+        if (mc_name.rfind("item/", 0) == 0) mc_name = mc_name.substr(5);
+        if (mc_name.rfind("minecraft:item/", 0) == 0) mc_name = mc_name.substr(15);
+
+        std::vector<Config::CuboidElement> custom_elems;
+        Mesh m;
+        if (try_load_item_json_elements(pack_path, mc_name, custom_elems)) {
+            m = generate_elements_mesh(custom_elems, ix, iy, cols, rows, false);
+        } else {
+            m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, false);
+        }
         Model mdl = LoadModelFromMesh(m);
         mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture_items;
         tool_models[{ (int)ti.type, (int)ti.tier }] = mdl;
@@ -40,7 +235,17 @@ void ItemModel3D::rebuild(const Image& img, Texture2D items_texture) {
         int ix = itype.item_tex_x;
         int iy = itype.item_tex_y;
         bool center = (id != Config::ITEM_STICK);
-        Mesh m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, center);
+        std::string mc_name = itype.texture_mc;
+        if (mc_name.rfind("item/", 0) == 0) mc_name = mc_name.substr(5);
+        if (mc_name.rfind("minecraft:item/", 0) == 0) mc_name = mc_name.substr(15);
+
+        std::vector<Config::CuboidElement> custom_elems;
+        Mesh m;
+        if (try_load_item_json_elements(pack_path, mc_name, custom_elems)) {
+            m = generate_elements_mesh(custom_elems, ix, iy, cols, rows, center);
+        } else {
+            m = generate_pixel_extruded_mesh(img, ix, iy, cols, rows, thickness, center);
+        }
         Model mdl = LoadModelFromMesh(m);
         mdl.materials[0].maps[MATERIAL_MAP_DIFFUSE].texture = texture_items;
         item_models[id] = mdl;
@@ -320,6 +525,9 @@ void ItemModel3D::draw_tool(Config::ToolType type, Config::ToolTier tier, Vector
         if (rot.x != 0.0f) rlRotatef(rot.x, 1.0f, 0.0f, 0.0f);
         if (rot.y != 0.0f) rlRotatef(rot.y, 0.0f, 1.0f, 0.0f);
         if (rot.z != 0.0f) rlRotatef(rot.z, 0.0f, 0.0f, 1.0f);
+        if (Config::USING_RESOURCE_PACK) {
+            rlRotatef(180.0f, 1.0f, 1.0f, 0.0f);
+        }
         rlScalef(scale.x, scale.y, scale.z);
         DrawModel(mdl, {0, 0, 0}, 1.0f, tint);
     rlPopMatrix();

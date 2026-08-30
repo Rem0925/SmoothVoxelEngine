@@ -32,6 +32,7 @@ private:
     Image build_item_atlas(const std::string& pack_path, int& out_cols, int& out_rows);
     void apply_block_texture_mapping();
     void apply_item_texture_mapping();
+    void load_block_models_from_pack(const std::string& pack_path);
 
     std::unordered_map<std::string, std::pair<int, int>> tile_map;
     std::unordered_map<std::string, std::pair<int, int>> item_map;
