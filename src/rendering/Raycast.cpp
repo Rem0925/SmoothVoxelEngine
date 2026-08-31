@@ -67,6 +67,29 @@ bool VoxelRaycastSmooth(World& world, Vector3 origin, Vector3 dir, float max_dis
                     hit_is_build = true;
                 }
             }
+
+            if (sc.trans_mesh.vertexCount > 0) {
+                RayCollision trans_hit = GetRayCollisionMesh(ray, sc.trans_mesh, MatrixIdentity());
+                if (trans_hit.hit && trans_hit.distance < closest_hit.distance) {
+                    closest_hit = trans_hit;
+
+                    int bx = std::round(trans_hit.point.x - trans_hit.normal.x * 0.02f);
+                    int by = std::round(trans_hit.point.y - trans_hit.normal.y * 0.02f);
+                    int bz = std::round(trans_hit.point.z - trans_hit.normal.z * 0.02f);
+                    uint8_t b = c->get_block(bx - c->cx * Config::CHUNK_SIZE, by, bz - c->cz * Config::CHUNK_SIZE);
+                    if (b == Config::AIR) {
+                        bx = std::floor(trans_hit.point.x);
+                        by = std::floor(trans_hit.point.y);
+                        bz = std::floor(trans_hit.point.z);
+                        b = c->get_block(bx - c->cx * Config::CHUNK_SIZE, by, bz - c->cz * Config::CHUNK_SIZE);
+                    }
+                    if (Config::BLOCKS.count(b) && Config::BLOCKS.at(b).shape != Config::SHAPE_TERRAIN) {
+                        hit_is_build = true;
+                    } else {
+                        hit_is_build = false;
+                    }
+                }
+            }
         }
     }
 

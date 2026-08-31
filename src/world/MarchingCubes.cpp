@@ -309,6 +309,11 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
               std::vector<Vector2>& uvs,
               std::vector<Vector2>& uvs2,
               std::vector<Color>& colors,
+              std::vector<Vector3>& t_vertices,
+              std::vector<Vector3>& t_normals,
+              std::vector<Vector2>& t_uvs,
+              std::vector<Vector2>& t_uvs2,
+              std::vector<Color>& t_colors,
               float origin_x, float origin_z, int seed_offset, int lod,
               const Color* grass_tint_cache, const Color* foliage_tint_cache,
               const uint8_t* light_grid,
@@ -319,6 +324,11 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
     uvs.reserve(uvs.size() + 2048);
     uvs2.reserve(uvs2.size() + 2048);
     colors.reserve(colors.size() + 2048);
+    t_vertices.reserve(t_vertices.size() + 512);
+    t_normals.reserve(t_normals.size() + 512);
+    t_uvs.reserve(t_uvs.size() + 512);
+    t_uvs2.reserve(t_uvs2.size() + 512);
+    t_colors.reserve(t_colors.size() + 512);
 
     int slice = size_x * size_z;
     
@@ -404,12 +414,7 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     Vector3 v2 = vertlist[triangle_table[cubeindex][i + 1]];
                     Vector3 v3 = vertlist[triangle_table[cubeindex][i + 2]];
 
-                    // Winding order flipped
-                    vertices.push_back(v3);
-                    vertices.push_back(v2);
-                    vertices.push_back(v1);
-
-                    // Compute normal
+                    // Compute normal (winding order flipped later)
                     Vector3 u = {v2.x - v3.x, v2.y - v3.y, v2.z - v3.z};
                     Vector3 v = {v1.x - v3.x, v1.y - v3.y, v1.z - v3.z};
                     Vector3 n = {
@@ -572,26 +577,9 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         tri_tint = sample_bilinear_tint(tri_x, tri_z, target_cache);
                     }
 
-                    Color col1 = tri_tint;
-                    Color col2 = tri_tint;
-                    Color col3 = tri_tint;
-
-                    col1.a = (b1 == b_primary) ? 255 : 0;
-                    col2.a = (b2 == b_primary) ? 255 : 0;
-                    col3.a = (b3 == b_primary) ? 255 : 0;
-
                     VoxelLighting::LightSample ls1 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v1.x, v1.y, v1.z, n);
                     VoxelLighting::LightSample ls2 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v2.x, v2.y, v2.z, n);
                     VoxelLighting::LightSample ls3 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v3.x, v3.y, v3.z, n);
-
-                    // El orden de vertices es v3, v2, v1: x = AO, y = Luz Solar, z = Luz de Bloque
-                    normals.push_back({ ao3, ls3.sunlight, ls3.blocklight });
-                    normals.push_back({ ao2, ls2.sunlight, ls2.blocklight });
-                    normals.push_back({ ao1, ls1.sunlight, ls1.blocklight });
-
-                    colors.push_back(col3);
-                    colors.push_back(col2);
-                    colors.push_back(col1);
 
                     Config::BlockType b_info_pri = Config::BLOCKS.at(Config::GRASS);
                     if (Config::BLOCKS.find(b_primary) != Config::BLOCKS.end()) {
@@ -606,6 +594,30 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     } else {
                         b_info_sec.is_waving = false;
                     }
+
+                    bool is_trans = b_info_pri.transparent || b_info_sec.transparent;
+                    auto& v_vec = is_trans ? t_vertices : vertices;
+                    auto& n_vec = is_trans ? t_normals : normals;
+                    auto& u_vec = is_trans ? t_uvs : uvs;
+                    auto& u2_vec = is_trans ? t_uvs2 : uvs2;
+                    auto& c_vec = is_trans ? t_colors : colors;
+
+                    // El orden de vertices es v3, v2, v1: x = AO, y = Luz Solar, z = Luz de Bloque
+                    v_vec.push_back(v3); v_vec.push_back(v2); v_vec.push_back(v1);
+                    n_vec.push_back({ ao3, ls3.sunlight, ls3.blocklight });
+                    n_vec.push_back({ ao2, ls2.sunlight, ls2.blocklight });
+                    n_vec.push_back({ ao1, ls1.sunlight, ls1.blocklight });
+
+                    Color col1 = tri_tint;
+                    Color col2 = tri_tint;
+                    Color col3 = tri_tint;
+                    col1.a = (b1 == b_primary) ? 255 : 0;
+                    col2.a = (b2 == b_primary) ? 255 : 0;
+                    col3.a = (b3 == b_primary) ? 255 : 0;
+
+                    c_vec.push_back(col3);
+                    c_vec.push_back(col2);
+                    c_vec.push_back(col1);
 
                     float tex_w = 1.0f / (float)Config::TILES_ATLAS_COLS;
                     float tex_h = 1.0f / (float)Config::TILES_ATLAS_ROWS;
@@ -622,11 +634,6 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                     float abs_y = std::abs(n.y);
                     float abs_z = std::abs(n.z);
                     
-                    // Modificar colores para el blend (alpha channel)
-                    colors[colors.size() - 1].a = (b1 == b_primary) ? 255 : 0; // v1
-                    colors[colors.size() - 2].a = (b2 == b_primary) ? 255 : 0; // v2
-                    colors[colors.size() - 3].a = (b3 == b_primary) ? 255 : 0; // v3
-
                     auto check_sway = [&](Vector3 v) -> bool {
                         bool has_waving = false;
                         int base_x = std::floor(v.x);
@@ -667,8 +674,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         
                         float sway = check_sway(vert) ? 10.0f : 0.0f;
                         
-                        uvs.push_back({uv.x * tex_w + offset_u_pri + sway, uv.y * tex_h + offset_v_pri + foliage_pri_offset});
-                        uvs2.push_back({uv.x * tex_w + offset_u_sec + sway, uv.y * tex_h + offset_v_sec + foliage_sec_offset});
+                        u_vec.push_back({uv.x * tex_w + offset_u_pri + sway, uv.y * tex_h + offset_v_pri + foliage_pri_offset});
+                        u2_vec.push_back({uv.x * tex_w + offset_u_sec + sway, uv.y * tex_h + offset_v_sec + foliage_sec_offset});
                     }
                 }
             }

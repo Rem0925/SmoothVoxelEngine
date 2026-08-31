@@ -4,6 +4,7 @@
   "shape": "terrain",
   "hardness": 0.1,
   "transparent": true,
+  "is_grass": true,
   "is_waving": true,
   "tool": {
     "ideal": "none",

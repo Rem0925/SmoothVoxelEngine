@@ -13,11 +13,13 @@ struct SubChunk {
     Mesh build_mesh = { 0 };
     Mesh water_mesh = { 0 };
     Mesh plants_mesh = { 0 };
+    Mesh trans_mesh = { 0 };
 
     Mesh next_solid_mesh = { 0 };
     Mesh next_build_mesh = { 0 };
     Mesh next_water_mesh = { 0 };
     Mesh next_plants_mesh = { 0 };
+    Mesh next_trans_mesh = { 0 };
 
     std::vector<Vector3> s_vertices, s_normals;
     std::vector<Vector2> s_uvs, s_uvs2;
@@ -34,6 +36,10 @@ struct SubChunk {
     std::vector<Vector3> p_vertices, p_normals;
     std::vector<Vector2> p_uvs;
     std::vector<Color> p_colors;
+    
+    std::vector<Vector3> t_vertices, t_normals;
+    std::vector<Vector2> t_uvs, t_uvs2;
+    std::vector<Color> t_colors;
 };
 
 class Chunk : public std::enable_shared_from_this<Chunk> {
@@ -72,6 +78,7 @@ public:
     void draw_water(Material& mat_water, Vector3 camera_pos);
     void draw_subchunk_solid(int s, Material& mat_solid, Material& mat_plants, Vector3 camera_pos);
     void draw_subchunk_water(int s, Material& mat_water, Vector3 camera_pos);
+    void draw_subchunk_trans(int s, Material& mat_plants, Vector3 camera_pos);
 
     inline int get_idx(int x, int y, int z) const {
         return y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + z * (Config::CHUNK_SIZE + 1) + x;
@@ -122,7 +129,9 @@ private:
     void generate_thread();
     void rebuild_thread();
     void build_mesh_data(const Config::VoxelData* voxels_ptr, int lod = 1, uint8_t sub_mask = 0xFF);
-    void build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid = nullptr, uint8_t sub_mask = 0xFF);
+    void build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid = nullptr, uint8_t sub_mask = 0xFF,
+                                 const Config::VoxelData* north = nullptr, const Config::VoxelData* south = nullptr,
+                                 const Config::VoxelData* west = nullptr, const Config::VoxelData* east = nullptr);
     void build_water_mesh(const Config::VoxelData* voxels_ptr, int lod = 1, uint8_t sub_mask = 0xFF);
     void pack_meshes(int mask, uint8_t sub_mask = 0xFF);
     void upload_meshes();

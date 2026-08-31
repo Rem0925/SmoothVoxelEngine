@@ -42,10 +42,12 @@ Chunk::~Chunk() {
         free_if_packed(subchunks[s].build_mesh);
         free_if_packed(subchunks[s].water_mesh);
         free_if_packed(subchunks[s].plants_mesh);
+        free_if_packed(subchunks[s].trans_mesh);
         free_if_packed(subchunks[s].next_solid_mesh);
         free_if_packed(subchunks[s].next_build_mesh);
         free_if_packed(subchunks[s].next_water_mesh);
         free_if_packed(subchunks[s].next_plants_mesh);
+        free_if_packed(subchunks[s].next_trans_mesh);
     }
 }
 
@@ -549,6 +551,10 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_
     std::vector<Vector2> lp_uvs;
     std::vector<Color> lp_colors;
 
+    std::vector<Vector3> lt_vertices, lt_normals;
+    std::vector<Vector2> lt_uvs, lt_uvs2;
+    std::vector<Color> lt_colors;
+
     // 1. Terrain Mesh (Marching Cubes)
     int seed_offset = static_cast<int>(static_cast<uint32_t>(Config::WORLD_SEED) * 1000U);
 
@@ -593,6 +599,7 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_
 
         mc::generate(voxels_ptr, nullptr, CHUNK_SIZE + 1, GRID_Y, CHUNK_SIZE + 1, ISO_SURFACE, Config::GRASS, 
                      ls_vertices, ls_normals, ls_uvs, ls_uvs2, ls_colors, 
+                     lt_vertices, lt_normals, lt_uvs, lt_uvs2, lt_colors,
                      cx * CHUNK_SIZE, cz * CHUNK_SIZE, seed_offset, lod, 
                      grass_tint_cache.data(), foliage_tint_cache.data(), local_light_grid.data(),
                      mc_min_y, mc_max_y);
@@ -600,6 +607,10 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_
     
     // Remap vertices to global coords
     for (auto& v : ls_vertices) {
+        v.x += cx * CHUNK_SIZE;
+        v.z += cz * CHUNK_SIZE;
+    }
+    for (auto& v : lt_vertices) {
         v.x += cx * CHUNK_SIZE;
         v.z += cz * CHUNK_SIZE;
     }
@@ -781,6 +792,12 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_
                 subchunks[s].p_normals.clear();
                 subchunks[s].p_uvs.clear();
                 subchunks[s].p_colors.clear();
+
+                subchunks[s].t_vertices.clear();
+                subchunks[s].t_normals.clear();
+                subchunks[s].t_uvs.clear();
+                subchunks[s].t_uvs2.clear();
+                subchunks[s].t_colors.clear();
             }
         }
         light_grid = local_light_grid;
@@ -832,13 +849,46 @@ void Chunk::build_mesh_data(const Config::VoxelData* voxels_ptr, int lod, uint8_
                 subchunks[s].p_colors.push_back(lp_colors[i+2]);
             }
         }
+
+        for (size_t i = 0; i < lt_vertices.size(); i += 3) {
+            float avg_y = (lt_vertices[i].y + lt_vertices[i+1].y + lt_vertices[i+2].y) / 3.0f;
+            int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].t_vertices.push_back(lt_vertices[i]);
+                subchunks[s].t_vertices.push_back(lt_vertices[i+1]);
+                subchunks[s].t_vertices.push_back(lt_vertices[i+2]);
+
+                subchunks[s].t_normals.push_back(lt_normals[i]);
+                subchunks[s].t_normals.push_back(lt_normals[i+1]);
+                subchunks[s].t_normals.push_back(lt_normals[i+2]);
+
+                subchunks[s].t_uvs.push_back(lt_uvs[i]);
+                subchunks[s].t_uvs.push_back(lt_uvs[i+1]);
+                subchunks[s].t_uvs.push_back(lt_uvs[i+2]);
+
+                subchunks[s].t_uvs2.push_back(lt_uvs2[i]);
+                subchunks[s].t_uvs2.push_back(lt_uvs2[i+1]);
+                subchunks[s].t_uvs2.push_back(lt_uvs2[i+2]);
+
+                subchunks[s].t_colors.push_back(lt_colors[i]);
+                subchunks[s].t_colors.push_back(lt_colors[i+1]);
+                subchunks[s].t_colors.push_back(lt_colors[i+2]);
+            }
+        }
     }
 
-    build_construction_mesh(voxels_ptr, local_light_grid.data(), sub_mask);
+    const Config::VoxelData* n_data[4] = {nullptr, nullptr, nullptr, nullptr};
+    if (neighbors[1][0]) n_data[0] = neighbors[1][0]->voxels.data();
+    if (neighbors[1][2]) n_data[1] = neighbors[1][2]->voxels.data();
+    if (neighbors[0][1]) n_data[2] = neighbors[0][1]->voxels.data();
+    if (neighbors[2][1]) n_data[3] = neighbors[2][1]->voxels.data();
+    build_construction_mesh(voxels_ptr, local_light_grid.data(), sub_mask, n_data[0], n_data[1], n_data[2], n_data[3]);
     build_water_mesh(voxels_ptr, lod, sub_mask);
 }
 
-void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid, uint8_t sub_mask) {
+void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const uint8_t* light_grid, uint8_t sub_mask,
+                                     const Config::VoxelData* n_north, const Config::VoxelData* n_south,
+                                     const Config::VoxelData* n_west, const Config::VoxelData* n_east) {
     int min_sub = 0;
     while (min_sub < Config::NUM_SUBCHUNKS && !(sub_mask & (1 << min_sub))) min_sub++;
     int max_sub = Config::NUM_SUBCHUNKS - 1;
@@ -852,10 +902,20 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
     std::vector<Vector2> lb_uvs;
     std::vector<Color> lb_colors;
 
+    std::vector<Vector3> lt_vertices, lt_normals;
+    std::vector<Vector2> lt_uvs, lt_uvs2;
+    std::vector<Color> lt_colors;
+
     lb_vertices.reserve(512);
     lb_normals.reserve(512);
     lb_uvs.reserve(512);
     lb_colors.reserve(512);
+    
+    lt_vertices.reserve(512);
+    lt_normals.reserve(512);
+    lt_uvs.reserve(512);
+    lt_uvs2.reserve(512);
+    lt_colors.reserve(512);
 
     float tw = 1.0f / (float)Config::TILES_ATLAS_COLS;
     float th = 1.0f / (float)Config::TILES_ATLAS_ROWS;
@@ -873,20 +933,66 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
     };
 
     auto is_opaque_cube = [&](int x, int y, int z) -> bool {
-        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
-        int idx = get_idx(x, y, z);
-        if (voxels_ptr[idx].density >= Config::ISO_SURFACE) return true;
-        uint8_t b = voxels_ptr[idx].block;
+        if (y < 0 || y >= Config::GRID_Y) return false;
+        if (x >= 0 && x <= Config::CHUNK_SIZE && z >= 0 && z <= Config::CHUNK_SIZE) {
+            int idx = get_idx(x, y, z);
+            if (voxels_ptr[idx].density >= Config::ISO_SURFACE) return true;
+            uint8_t b = voxels_ptr[idx].block;
+            if (b == Config::AIR || b == Config::WATER) return false;
+            if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
+            const auto& nb_t = Config::BLOCKS.at(b);
+            return (nb_t.shape == Config::SHAPE_CUBE && !nb_t.transparent);
+        }
+        // Cross-chunk lookup
+        const Config::VoxelData* n_ptr = nullptr;
+        int lx = x, lz = z;
+        if (x < 0) { n_ptr = n_west; lx = x + Config::CHUNK_SIZE; }
+        else if (x > Config::CHUNK_SIZE) { n_ptr = n_east; lx = x - Config::CHUNK_SIZE; }
+        if (z < 0) { n_ptr = n_north; lz = z + Config::CHUNK_SIZE; }
+        else if (z > Config::CHUNK_SIZE) { n_ptr = n_south; lz = z - Config::CHUNK_SIZE; }
+        if (!n_ptr) return false;
+        int idx = y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx;
+        if (n_ptr[idx].density >= Config::ISO_SURFACE) return true;
+        uint8_t b = n_ptr[idx].block;
         if (b == Config::AIR || b == Config::WATER) return false;
         if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
         const auto& nb_t = Config::BLOCKS.at(b);
         return (nb_t.shape == Config::SHAPE_CUBE && !nb_t.transparent);
     };
 
+    auto is_same_block = [&](int x, int y, int z, uint8_t self_b) -> bool {
+        if (y < 0 || y >= Config::GRID_Y) return false;
+        if (x >= 0 && x <= Config::CHUNK_SIZE && z >= 0 && z <= Config::CHUNK_SIZE) {
+            int idx = get_idx(x, y, z);
+            return (voxels_ptr[idx].block == self_b);
+        }
+        const Config::VoxelData* n_ptr = nullptr;
+        int lx = x, lz = z;
+        if (x < 0) { n_ptr = n_west; lx = x + Config::CHUNK_SIZE; }
+        else if (x > Config::CHUNK_SIZE) { n_ptr = n_east; lx = x - Config::CHUNK_SIZE; }
+        if (z < 0) { n_ptr = n_north; lz = z + Config::CHUNK_SIZE; }
+        else if (z > Config::CHUNK_SIZE) { n_ptr = n_south; lz = z - Config::CHUNK_SIZE; }
+        if (!n_ptr) return false;
+        int idx = y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx;
+        return (n_ptr[idx].block == self_b);
+    };
+
     auto is_solid_block = [&](int x, int y, int z) -> bool {
-        if (x < 0 || x > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y || z < 0 || z > Config::CHUNK_SIZE) return false;
-        int idx = get_idx(x, y, z);
-        uint8_t b = voxels_ptr[idx].block;
+        if (y < 0 || y >= Config::GRID_Y) return false;
+        if (x >= 0 && x <= Config::CHUNK_SIZE && z >= 0 && z <= Config::CHUNK_SIZE) {
+            int idx = get_idx(x, y, z);
+            uint8_t b = voxels_ptr[idx].block;
+            return (b != Config::AIR && b != Config::WATER);
+        }
+        const Config::VoxelData* n_ptr = nullptr;
+        int lx = x, lz = z;
+        if (x < 0) { n_ptr = n_west; lx = x + Config::CHUNK_SIZE; }
+        else if (x > Config::CHUNK_SIZE) { n_ptr = n_east; lx = x - Config::CHUNK_SIZE; }
+        if (z < 0) { n_ptr = n_north; lz = z + Config::CHUNK_SIZE; }
+        else if (z > Config::CHUNK_SIZE) { n_ptr = n_south; lz = z - Config::CHUNK_SIZE; }
+        if (!n_ptr) return false;
+        int idx = y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx;
+        uint8_t b = n_ptr[idx].block;
         return (b != Config::AIR && b != Config::WATER);
     };
 
@@ -904,68 +1010,48 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
         return { std::max(self_ls.sunlight, n_ls.sunlight), std::max(self_ls.blocklight, n_ls.blocklight) };
     };
 
-    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, float sun, float block, int tx, int ty) {
+    auto add_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, float sun, float block, int tx, int ty, bool is_trans = false) {
         auto uvs = get_face_uv(tx, ty);
         Color white = { 255, 255, 255, 255 };
+        
+        auto& v_vec = is_trans ? lt_vertices : lb_vertices;
+        auto& n_vec = is_trans ? lt_normals : lb_normals;
+        auto& u_vec = is_trans ? lt_uvs : lb_uvs;
+        auto& c_vec = is_trans ? lt_colors : lb_colors;
+
         // Triangle 1: v0, v1, v2
-        lb_vertices.push_back(v0);
-        lb_vertices.push_back(v1);
-        lb_vertices.push_back(v2);
-        lb_normals.push_back({ ao0, sun, block });
-        lb_normals.push_back({ ao1, sun, block });
-        lb_normals.push_back({ ao2, sun, block });
-        lb_uvs.push_back(uvs[0]);
-        lb_uvs.push_back(uvs[1]);
-        lb_uvs.push_back(uvs[2]);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
+        v_vec.push_back(v0); v_vec.push_back(v1); v_vec.push_back(v2);
+        n_vec.push_back({ ao0, sun, block }); n_vec.push_back({ ao1, sun, block }); n_vec.push_back({ ao2, sun, block });
+        u_vec.push_back(uvs[0]); u_vec.push_back(uvs[1]); u_vec.push_back(uvs[2]);
+        c_vec.push_back(white); c_vec.push_back(white); c_vec.push_back(white);
 
         // Triangle 2: v0, v2, v3
-        lb_vertices.push_back(v0);
-        lb_vertices.push_back(v2);
-        lb_vertices.push_back(v3);
-        lb_normals.push_back({ ao0, sun, block });
-        lb_normals.push_back({ ao2, sun, block });
-        lb_normals.push_back({ ao3, sun, block });
-        lb_uvs.push_back(uvs[0]);
-        lb_uvs.push_back(uvs[2]);
-        lb_uvs.push_back(uvs[3]);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
+        v_vec.push_back(v0); v_vec.push_back(v2); v_vec.push_back(v3);
+        n_vec.push_back({ ao0, sun, block }); n_vec.push_back({ ao2, sun, block }); n_vec.push_back({ ao3, sun, block });
+        u_vec.push_back(uvs[0]); u_vec.push_back(uvs[2]); u_vec.push_back(uvs[3]);
+        c_vec.push_back(white); c_vec.push_back(white); c_vec.push_back(white);
     };
 
-    auto add_quad_sub = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, float sun, float block, int tx, int ty, float u0_16, float v0_16, float u1_16, float v1_16) {
+    auto add_quad_sub = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3, float ao0, float ao1, float ao2, float ao3, float sun, float block, int tx, int ty, float u0_16, float v0_16, float u1_16, float v1_16, bool is_trans = false) {
         auto uvs = get_face_sub_uv(tx, ty, u0_16, v0_16, u1_16, v1_16);
         Color white = { 255, 255, 255, 255 };
+        
+        auto& v_vec = is_trans ? lt_vertices : lb_vertices;
+        auto& n_vec = is_trans ? lt_normals : lb_normals;
+        auto& u_vec = is_trans ? lt_uvs : lb_uvs;
+        auto& c_vec = is_trans ? lt_colors : lb_colors;
+
         // Triangle 1: v0, v1, v2
-        lb_vertices.push_back(v0);
-        lb_vertices.push_back(v1);
-        lb_vertices.push_back(v2);
-        lb_normals.push_back({ ao0, sun, block });
-        lb_normals.push_back({ ao1, sun, block });
-        lb_normals.push_back({ ao2, sun, block });
-        lb_uvs.push_back(uvs[0]);
-        lb_uvs.push_back(uvs[1]);
-        lb_uvs.push_back(uvs[2]);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
+        v_vec.push_back(v0); v_vec.push_back(v1); v_vec.push_back(v2);
+        n_vec.push_back({ ao0, sun, block }); n_vec.push_back({ ao1, sun, block }); n_vec.push_back({ ao2, sun, block });
+        u_vec.push_back(uvs[0]); u_vec.push_back(uvs[1]); u_vec.push_back(uvs[2]);
+        c_vec.push_back(white); c_vec.push_back(white); c_vec.push_back(white);
 
         // Triangle 2: v0, v2, v3
-        lb_vertices.push_back(v0);
-        lb_vertices.push_back(v2);
-        lb_vertices.push_back(v3);
-        lb_normals.push_back({ ao0, sun, block });
-        lb_normals.push_back({ ao2, sun, block });
-        lb_normals.push_back({ ao3, sun, block });
-        lb_uvs.push_back(uvs[0]);
-        lb_uvs.push_back(uvs[2]);
-        lb_uvs.push_back(uvs[3]);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
-        lb_colors.push_back(white);
+        v_vec.push_back(v0); v_vec.push_back(v2); v_vec.push_back(v3);
+        n_vec.push_back({ ao0, sun, block }); n_vec.push_back({ ao2, sun, block }); n_vec.push_back({ ao3, sun, block });
+        u_vec.push_back(uvs[0]); u_vec.push_back(uvs[2]); u_vec.push_back(uvs[3]);
+        c_vec.push_back(white); c_vec.push_back(white); c_vec.push_back(white);
     };
 
     auto add_box = [&](int lx, int ly, int lz,
@@ -979,14 +1065,14 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                        bool cull_top = false, bool cull_bot = false,
                        bool cull_front = false, bool cull_back = false,
                        bool cull_left = false, bool cull_right = false,
-                       bool is_custom_shape = false) {
+                       bool is_custom_shape = false, bool is_trans = false) {
         if (!cull_top) {
             float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
             float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
             float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
             float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
             auto ls = sample_face_light(lx, ly, lz, lx, ly+1, lz);
-            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, top_tx, top_ty);
+            add_quad({x0, y1, z1}, {x1, y1, z1}, {x1, y1, z0}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, top_tx, top_ty, is_trans);
         }
         if (!cull_bot) {
             float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx-1, ly-1, lz-1));
@@ -994,7 +1080,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
             float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx+1, ly-1, lz+1));
             float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
             auto ls = sample_face_light(lx, ly, lz, lx, ly-1, lz);
-            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, bot_tx, bot_ty);
+            add_quad({x0, y0, z0}, {x1, y0, z0}, {x1, y0, z1}, {x0, y0, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, bot_tx, bot_ty, is_trans);
         }
         if (!cull_front) {
             float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly-1, lz+1), is_solid_block(lx-1, ly-1, lz+1));
@@ -1002,7 +1088,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
             float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx+1, ly+1, lz+1));
             float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz+1), is_solid_block(lx, ly+1, lz+1), is_solid_block(lx-1, ly+1, lz+1));
             auto ls = sample_face_light(lx, ly, lz, lx, ly, lz+1);
-            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, front_tx, front_ty);
+            add_quad({x0, y0, z1}, {x1, y0, z1}, {x1, y1, z1}, {x0, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, front_tx, front_ty, is_trans);
         }
         if (!cull_back) {
             float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly-1, lz-1), is_solid_block(lx+1, ly-1, lz-1));
@@ -1010,7 +1096,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
             float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx-1, ly+1, lz-1));
             float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly, lz-1), is_solid_block(lx, ly+1, lz-1), is_solid_block(lx+1, ly+1, lz-1));
             auto ls = sample_face_light(lx, ly, lz, lx, ly, lz-1);
-            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, back_tx, back_ty);
+            add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, back_tx, back_ty, is_trans);
         }
         if (!cull_right) {
             float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
@@ -1018,7 +1104,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
             float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly+1, lz-1));
             float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
             auto ls = sample_face_light(lx, ly, lz, lx+1, ly, lz);
-            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, right_tx, right_ty);
+            add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, right_tx, right_ty, is_trans);
         }
         if (!cull_left) {
             float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
@@ -1026,7 +1112,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
             float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
             float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
             auto ls = sample_face_light(lx, ly, lz, lx-1, ly, lz);
-            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, left_tx, left_ty);
+            add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, left_tx, left_ty, is_trans);
         }
     };
 
@@ -1086,13 +1172,24 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                             // Culling: si cullface esta definido, verificar vecino en la direccion world
                             bool cull = false;
                             if (!f.cullface.empty()) {
-                                switch (wf) {
-                                    case 1: cull = is_opaque_cube(lx, ly + 1, lz); break;
-                                    case 0: cull = is_opaque_cube(lx, ly - 1, lz); break;
-                                    case 2: cull = is_opaque_cube(lx, ly, lz - 1); break;
-                                    case 3: cull = is_opaque_cube(lx, ly, lz + 1); break;
-                                    case 4: cull = is_opaque_cube(lx - 1, ly, lz); break;
-                                    case 5: cull = is_opaque_cube(lx + 1, ly, lz); break;
+                                if (bt.transparent) {
+                                    switch (wf) {
+                                        case 1: cull = is_same_block(lx, ly + 1, lz, b); break;
+                                        case 0: cull = is_same_block(lx, ly - 1, lz, b); break;
+                                        case 2: cull = is_same_block(lx, ly, lz - 1, b); break;
+                                        case 3: cull = is_same_block(lx, ly, lz + 1, b); break;
+                                        case 4: cull = is_same_block(lx - 1, ly, lz, b); break;
+                                        case 5: cull = is_same_block(lx + 1, ly, lz, b); break;
+                                    }
+                                } else {
+                                    switch (wf) {
+                                        case 1: cull = is_opaque_cube(lx, ly + 1, lz); break;
+                                        case 0: cull = is_opaque_cube(lx, ly - 1, lz); break;
+                                        case 2: cull = is_opaque_cube(lx, ly, lz - 1); break;
+                                        case 3: cull = is_opaque_cube(lx, ly, lz + 1); break;
+                                        case 4: cull = is_opaque_cube(lx - 1, ly, lz); break;
+                                        case 5: cull = is_opaque_cube(lx + 1, ly, lz); break;
+                                    }
                                 }
                             }
                             if (cull) continue;
@@ -1109,37 +1206,30 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                             }
                             auto ls = sample_face_light(lx, ly, lz, nx, ny, nz);
 
+                            auto add_face_quad = [&](Vector3 v0, Vector3 v1, Vector3 v2, Vector3 v3) {
+                                add_quad_sub(v0, v1, v2, v3, 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
+                                             f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3], bt.transparent);
+                            };
+
                             // Renderizar cara segun su direccion world
                             switch (wf) {
                                 case 1: // UP (+Y)
-                                    add_quad_sub({ex0, ey1, ez1}, {ex1, ey1, ez1}, {ex1, ey1, ez0}, {ex0, ey1, ez0},
-                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    add_face_quad({ex0, ey1, ez1}, {ex1, ey1, ez1}, {ex1, ey1, ez0}, {ex0, ey1, ez0});
                                     break;
                                 case 0: // DOWN (-Y)
-                                    add_quad_sub({ex0, ey0, ez0}, {ex1, ey0, ez0}, {ex1, ey0, ez1}, {ex0, ey0, ez1},
-                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    add_face_quad({ex0, ey0, ez0}, {ex1, ey0, ez0}, {ex1, ey0, ez1}, {ex0, ey0, ez1});
                                     break;
                                 case 2: // NORTH (-Z)
-                                    add_quad_sub({ex1, ey0, ez0}, {ex0, ey0, ez0}, {ex0, ey1, ez0}, {ex1, ey1, ez0},
-                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    add_face_quad({ex1, ey0, ez0}, {ex0, ey0, ez0}, {ex0, ey1, ez0}, {ex1, ey1, ez0});
                                     break;
                                 case 3: // SOUTH (+Z)
-                                    add_quad_sub({ex0, ey0, ez1}, {ex1, ey0, ez1}, {ex1, ey1, ez1}, {ex0, ey1, ez1},
-                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    add_face_quad({ex0, ey0, ez1}, {ex1, ey0, ez1}, {ex1, ey1, ez1}, {ex0, ey1, ez1});
                                     break;
                                 case 4: // WEST (-X)
-                                    add_quad_sub({ex0, ey0, ez0}, {ex0, ey0, ez1}, {ex0, ey1, ez1}, {ex0, ey1, ez0},
-                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    add_face_quad({ex0, ey0, ez0}, {ex0, ey0, ez1}, {ex0, ey1, ez1}, {ex0, ey1, ez0});
                                     break;
                                 case 5: // EAST (+X)
-                                    add_quad_sub({ex1, ey0, ez1}, {ex1, ey0, ez0}, {ex1, ey1, ez0}, {ex1, ey1, ez1},
-                                                 1.0f, 1.0f, 1.0f, 1.0f, ls.sunlight, ls.blocklight,
-                                                 f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3]);
+                                    add_face_quad({ex1, ey0, ez1}, {ex1, ey0, ez0}, {ex1, ey1, ez0}, {ex1, ey1, ez1});
                                     break;
                             }
                         }
@@ -1193,7 +1283,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
                                 def_tx, def_ty, def_tx, def_ty,
-                                false, false, false, false, false, false, true);
+                                false, false, false, false, false, false, true, bt.transparent);
                         break;
                     }
                     case Config::SHAPE_FENCE: {
@@ -1272,6 +1362,32 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                 subchunks[s].b_colors.push_back(lb_colors[i+2]);
             }
         }
+
+        for (size_t i = 0; i < lt_vertices.size(); i += 3) {
+            float avg_y = (lt_vertices[i].y + lt_vertices[i+1].y + lt_vertices[i+2].y) / 3.0f;
+            int s = std::clamp((int)std::floor(avg_y / (float)Config::SUBCHUNK_SIZE), 0, Config::NUM_SUBCHUNKS - 1);
+            if ((sub_mask & (1 << s)) != 0) {
+                subchunks[s].t_vertices.push_back(lt_vertices[i]);
+                subchunks[s].t_vertices.push_back(lt_vertices[i+1]);
+                subchunks[s].t_vertices.push_back(lt_vertices[i+2]);
+
+                subchunks[s].t_normals.push_back(lt_normals[i]);
+                subchunks[s].t_normals.push_back(lt_normals[i+1]);
+                subchunks[s].t_normals.push_back(lt_normals[i+2]);
+
+                subchunks[s].t_uvs.push_back(lt_uvs[i]);
+                subchunks[s].t_uvs.push_back(lt_uvs[i+1]);
+                subchunks[s].t_uvs.push_back(lt_uvs[i+2]);
+
+                subchunks[s].t_uvs2.push_back({0,0});
+                subchunks[s].t_uvs2.push_back({0,0});
+                subchunks[s].t_uvs2.push_back({0,0});
+
+                subchunks[s].t_colors.push_back(lt_colors[i]);
+                subchunks[s].t_colors.push_back(lt_colors[i+1]);
+                subchunks[s].t_colors.push_back(lt_colors[i+2]);
+            }
+        }
     }
 }
 
@@ -1342,7 +1458,13 @@ void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod, uint8
         }
     }
 
-    mc::generate(voxels_ptr, water_density.data(), wx, GRID_Y, wz, ISO_SURFACE, Config::WATER, lw_vertices, lw_normals, lw_uvs, lw_uvs2, lw_colors, 0.0f, 0.0f, 0, lod);
+    std::vector<Vector3> dummy_t_verts, dummy_t_norms;
+    std::vector<Vector2> dummy_t_uvs, dummy_t_uvs2;
+    std::vector<Color> dummy_t_cols;
+    mc::generate(voxels_ptr, water_density.data(), wx, GRID_Y, wz, ISO_SURFACE, Config::WATER, 
+                 lw_vertices, lw_normals, lw_uvs, lw_uvs2, lw_colors, 
+                 dummy_t_verts, dummy_t_norms, dummy_t_uvs, dummy_t_uvs2, dummy_t_cols,
+                 0.0f, 0.0f, 0, lod);
 
     std::vector<Vector3> fw_vertices, fw_normals;
     std::vector<Vector2> fw_uvs, fw_uvs2;
@@ -1628,6 +1750,47 @@ void Chunk::pack_meshes(int mask, uint8_t sub_mask) {
                 std::vector<Vector2>().swap(sc.p_uvs);
                 std::vector<Color>().swap(sc.p_colors);
             }
+            
+            free_arrays(sc.next_trans_mesh);
+            sc.next_trans_mesh = {0};
+
+            if (!sc.t_vertices.empty()) {
+                sc.next_trans_mesh.vertexCount = sc.t_vertices.size();
+                sc.next_trans_mesh.triangleCount = sc.t_vertices.size() / 3;
+
+                sc.next_trans_mesh.vertices = (float*)MemAlloc(sc.t_vertices.size() * 3 * sizeof(float));
+                sc.next_trans_mesh.normals = (float*)MemAlloc(sc.t_normals.size() * 3 * sizeof(float));
+                sc.next_trans_mesh.texcoords = (float*)MemAlloc(sc.t_uvs.size() * 2 * sizeof(float));
+                sc.next_trans_mesh.texcoords2 = (float*)MemAlloc(sc.t_uvs2.size() * 2 * sizeof(float));
+                sc.next_trans_mesh.colors = (unsigned char*)MemAlloc(sc.t_colors.size() * 4 * sizeof(unsigned char));
+
+                for (size_t i = 0; i < sc.t_vertices.size(); i++) {
+                    sc.next_trans_mesh.vertices[i*3] = sc.t_vertices[i].x;
+                    sc.next_trans_mesh.vertices[i*3+1] = sc.t_vertices[i].y;
+                    sc.next_trans_mesh.vertices[i*3+2] = sc.t_vertices[i].z;
+
+                    sc.next_trans_mesh.normals[i*3] = sc.t_normals[i].x;
+                    sc.next_trans_mesh.normals[i*3+1] = sc.t_normals[i].y;
+                    sc.next_trans_mesh.normals[i*3+2] = sc.t_normals[i].z;
+
+                    sc.next_trans_mesh.texcoords[i*2] = sc.t_uvs[i].x;
+                    sc.next_trans_mesh.texcoords[i*2+1] = sc.t_uvs[i].y;
+
+                    sc.next_trans_mesh.texcoords2[i*2] = sc.t_uvs2[i].x;
+                    sc.next_trans_mesh.texcoords2[i*2+1] = sc.t_uvs2[i].y;
+
+                    sc.next_trans_mesh.colors[i*4] = sc.t_colors[i].r;
+                    sc.next_trans_mesh.colors[i*4+1] = sc.t_colors[i].g;
+                    sc.next_trans_mesh.colors[i*4+2] = sc.t_colors[i].b;
+                    sc.next_trans_mesh.colors[i*4+3] = sc.t_colors[i].a;
+                }
+
+                std::vector<Vector3>().swap(sc.t_vertices);
+                std::vector<Vector3>().swap(sc.t_normals);
+                std::vector<Vector2>().swap(sc.t_uvs);
+                std::vector<Vector2>().swap(sc.t_uvs2);
+                std::vector<Color>().swap(sc.t_colors);
+            }
         }
 
         if ((mask & 1) != 0) {
@@ -1712,6 +1875,7 @@ void Chunk::upload_meshes() {
             upload_and_swap(sc.solid_mesh, sc.next_solid_mesh);
             upload_and_swap(sc.build_mesh, sc.next_build_mesh);
             upload_and_swap(sc.plants_mesh, sc.next_plants_mesh);
+            upload_and_swap(sc.trans_mesh, sc.next_trans_mesh);
         }
         if ((mask & 1) != 0) {
             upload_and_swap(sc.water_mesh, sc.next_water_mesh);
@@ -1763,6 +1927,17 @@ void Chunk::draw_subchunk_water(int s, Material& mat_water, Vector3 camera_pos) 
     
     if (sc.water_mesh.vboId) {
         DrawMesh(sc.water_mesh, mat_water, MatrixIdentity());
+    }
+}
+
+void Chunk::draw_subchunk_trans(int s, Material& mat_plants, Vector3 camera_pos) {
+    if (!is_ready || s < 0 || s >= Config::NUM_SUBCHUNKS) return;
+    auto& sc = subchunks[s];
+    
+    if (sc.trans_mesh.vboId) {
+        rlDisableBackfaceCulling();
+        DrawMesh(sc.trans_mesh, mat_plants, MatrixIdentity());
+        rlEnableBackfaceCulling();
     }
 }
 

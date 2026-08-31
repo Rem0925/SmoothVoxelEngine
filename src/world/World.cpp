@@ -185,7 +185,21 @@ void World::draw(Camera3D camera) {
         }
     }
     
-    // Pass 2: Transparent geometry (Water)
+    // Pass 2: Transparent cutout geometry (Leaves, Glass) - Both faces visible
+    rlEnableDepthMask();
+    rlDisableBackfaceCulling();
+    for (auto& c : snapshot) {
+        if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+                if (is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
+                    c->draw_subchunk_trans(s, mat_plants, camera.position);
+                }
+            }
+        }
+    }
+    rlEnableBackfaceCulling();
+
+    // Pass 3: Blended transparent geometry (Water)
     int cam_x = std::floor(camera.position.x);
     int cam_y = std::floor(camera.position.y);
     int cam_z = std::floor(camera.position.z);
@@ -193,6 +207,7 @@ void World::draw(Camera3D camera) {
 
     rlEnableBackfaceCulling();
     rlSetCullFace(is_underwater ? RL_CULL_FACE_BACK : RL_CULL_FACE_FRONT);
+    rlDisableDepthMask();
 
     for (auto& c : snapshot) {
         if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
@@ -204,6 +219,7 @@ void World::draw(Camera3D camera) {
         }
     }
 
+    rlEnableDepthMask();
     rlSetCullFace(RL_CULL_FACE_BACK);
 }
 

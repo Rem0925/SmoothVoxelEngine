@@ -173,7 +173,12 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
         std::vector<Vector3> g_verts, g_norms;
         std::vector<Vector2> g_uvs, g_uvs2;
         std::vector<Color> g_cols;
-        mc::generate(nullptr, d_slice.data(), size_x, size_y, size_z, 0.0f, AIR, g_verts, g_norms, g_uvs, g_uvs2, g_cols);
+        std::vector<Vector3> dummy_t_verts, dummy_t_norms;
+        std::vector<Vector2> dummy_t_uvs, dummy_t_uvs2;
+        std::vector<Color> dummy_t_cols;
+        mc::generate(nullptr, d_slice.data(), size_x, size_y, size_z, 0.0f, AIR, 
+                     g_verts, g_norms, g_uvs, g_uvs2, g_cols,
+                     dummy_t_verts, dummy_t_norms, dummy_t_uvs, dummy_t_uvs2, dummy_t_cols);
 
         rlPushMatrix();
         rlTranslatef(bx + (float)off_min_x, by - 1.0f, bz + (float)off_min_z);

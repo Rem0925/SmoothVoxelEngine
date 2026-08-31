@@ -134,6 +134,6 @@ void main()
     
     finalColor.rgb = mix(finalColor.rgb, dynamicFogColor, fogFactor);
     
-    // Discard transparent pixels
-    if (finalColor.a < 0.1) discard;
+    // Discard transparent pixels (cutout transparency)
+    if (finalColor.a < 0.5) discard;
 }

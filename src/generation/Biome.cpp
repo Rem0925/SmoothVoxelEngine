@@ -227,6 +227,8 @@ static inline BiomeConfig get_pure_biome_config(BiomeType type, float temp, floa
     }
     if (s_foliage_colormap.data != nullptr) {
         cfg.foliage_tint = sample_colormap_direct(s_foliage_colormap, temp, hum);
+    } else if (s_grass_colormap.data != nullptr) {
+        cfg.foliage_tint = sample_colormap_direct(s_grass_colormap, temp, hum);
     }
 
     return cfg;
