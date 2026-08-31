@@ -936,7 +936,6 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
         if (y < 0 || y >= Config::GRID_Y) return false;
         if (x >= 0 && x <= Config::CHUNK_SIZE && z >= 0 && z <= Config::CHUNK_SIZE) {
             int idx = get_idx(x, y, z);
-            if (voxels_ptr[idx].density >= Config::ISO_SURFACE) return true;
             uint8_t b = voxels_ptr[idx].block;
             if (b == Config::AIR || b == Config::WATER) return false;
             if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
@@ -952,7 +951,6 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
         else if (z > Config::CHUNK_SIZE) { n_ptr = n_south; lz = z - Config::CHUNK_SIZE; }
         if (!n_ptr) return false;
         int idx = y * (Config::CHUNK_SIZE + 1) * (Config::CHUNK_SIZE + 1) + lz * (Config::CHUNK_SIZE + 1) + lx;
-        if (n_ptr[idx].density >= Config::ISO_SURFACE) return true;
         uint8_t b = n_ptr[idx].block;
         if (b == Config::AIR || b == Config::WATER) return false;
         if (Config::BLOCKS.find(b) == Config::BLOCKS.end()) return false;
@@ -1099,18 +1097,18 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
             add_quad({x1, y0, z0}, {x0, y0, z0}, {x0, y1, z0}, {x1, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, back_tx, back_ty, is_trans);
         }
         if (!cull_right) {
-            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
-            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
-            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly+1, lz-1));
-            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly-1, lz-1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly-1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly-1, lz+1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz+1), is_solid_block(lx+1, ly+1, lz+1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx+1, ly+1, lz), is_solid_block(lx+1, ly, lz-1), is_solid_block(lx+1, ly+1, lz-1));
             auto ls = sample_face_light(lx, ly, lz, lx+1, ly, lz);
             add_quad({x1, y0, z1}, {x1, y0, z0}, {x1, y1, z0}, {x1, y1, z1}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, right_tx, right_ty, is_trans);
         }
         if (!cull_left) {
-            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
-            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly-1, lz+1));
-            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
-            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            float ao0 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly-1, lz+1));
+            float ao1 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly-1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly-1, lz-1));
+            float ao2 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz-1), is_solid_block(lx-1, ly+1, lz-1));
+            float ao3 = is_custom_shape ? 1.0f : calc_ao(is_solid_block(lx-1, ly+1, lz), is_solid_block(lx-1, ly, lz+1), is_solid_block(lx-1, ly+1, lz+1));
             auto ls = sample_face_light(lx, ly, lz, lx-1, ly, lz);
             add_quad({x0, y0, z0}, {x0, y0, z1}, {x0, y1, z1}, {x0, y1, z0}, ao0, ao1, ao2, ao3, ls.sunlight, ls.blocklight, left_tx, left_ty, is_trans);
         }
@@ -1134,15 +1132,16 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                 uint8_t rot = voxels_ptr[idx].rotation;
 
                 if (!bt.elements.empty()) {
-                    // Modelos 3D por JSON con rotacion automatica
+                    // Modelos 3D nativos definidos por JSON con rotacion
                     uint8_t elem_rot = rot & 3;
 
                     // Tabla de remapeo de caras: face_remap[rot][element_face] = world_face
+                    // En modelos nativos, la cara frontal es SOUTH (3)
                     static const int face_remap[4][6] = {
-                        {0, 1, 2, 3, 4, 5},  // rot=0: sin cambio
-                        {0, 1, 5, 4, 2, 3},  // rot=1: 90 CW - N→E, S→E->W, W→N, E→S
-                        {0, 1, 3, 2, 5, 4},  // rot=2: 180° - N↔S, W↔E
-                        {0, 1, 4, 5, 3, 2}   // rot=3: 270 CW - N→W, S→E, W→S, E→N
+                        {0, 1, 2, 3, 4, 5},  // rot=0: mira al Sur (+Z, hacia player)
+                        {0, 1, 5, 4, 2, 3},  // rot=1: 90 CW -> mira al Oeste (-X, hacia player)
+                        {0, 1, 3, 2, 5, 4},  // rot=2: 180° -> mira al Norte (-Z, hacia player)
+                        {0, 1, 4, 5, 3, 2}   // rot=3: 270 CW -> mira al Este (+X, hacia player)
                     };
 
                     for (const auto& elem : bt.elements) {
@@ -1211,7 +1210,7 @@ void Chunk::build_construction_mesh(const Config::VoxelData* voxels_ptr, const u
                                              f.tex_x, f.tex_y, f.uv[0], f.uv[1], f.uv[2], f.uv[3], bt.transparent);
                             };
 
-                            // Renderizar cara segun su direccion world
+                            // Renderizar cara segun su direccion world con orden de vertices CCW y normales hacia afuera
                             switch (wf) {
                                 case 1: // UP (+Y)
                                     add_face_quad({ex0, ey1, ez1}, {ex1, ey1, ez1}, {ex1, ey1, ez0}, {ex0, ey1, ez0});

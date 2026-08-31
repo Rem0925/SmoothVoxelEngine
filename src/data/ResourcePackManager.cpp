@@ -386,121 +386,6 @@ void ResourcePackManager::apply_item_texture_mapping() {
     }
 }
 
-void ResourcePackManager::load_block_models_from_pack(const std::string& pack_path) {
-    std::string models_dir = pack_path + "/assets/minecraft/models/block";
-    if (!fs::exists(models_dir)) return;
-
-    // Solo bloques de construcción, decorativos o mobiliario (NUNCA bloques de terreno liso / marching cubes)
-    static const std::unordered_map<std::string, uint8_t> mc_block_to_id = {
-        {"torch", Config::TORCH},
-        {"oak_planks", Config::PLANKS_CUBE},
-        {"stone_bricks", Config::STONE_BRICK},
-        {"oak_stairs", Config::STAIRS_WOOD},
-        {"cobblestone_stairs", Config::STAIRS_STONE},
-        {"stone_stairs", Config::STAIRS_STONE},
-        {"oak_fence", Config::FENCE_WOOD},
-        {"oak_door_bottom", Config::DOOR_WOOD},
-        {"oak_door", Config::DOOR_WOOD},
-        {"chest", Config::CHEST},
-        {"furnace", Config::FURNACE},
-        {"crafting_table", Config::CRAFTING_TABLE},
-        {"glass", Config::GLASS}
-    };
-
-    for (const auto& entry : fs::directory_iterator(models_dir)) {
-        if (entry.path().extension() != ".json") continue;
-        std::string stem = entry.path().stem().string();
-        auto it = mc_block_to_id.find(stem);
-        if (it == mc_block_to_id.end()) continue;
-
-        uint8_t bid = it->second;
-        if (Config::BLOCKS.find(bid) == Config::BLOCKS.end()) continue;
-        // Los bloques suaves de terreno nunca aceptan elementos de cubos
-        if (Config::BLOCKS[bid].shape == Config::SHAPE_TERRAIN) continue;
-
-        try {
-            std::ifstream f(entry.path());
-            if (!f.is_open()) continue;
-            json j;
-            f >> j;
-
-            std::unordered_map<std::string, std::string> model_tex_names;
-            if (j.contains("textures") && j["textures"].is_object()) {
-                for (auto& [k, v] : j["textures"].items()) {
-                    if (v.is_string()) model_tex_names[k] = v.get<std::string>();
-                }
-            }
-
-            if (j.contains("elements") && j["elements"].is_array() && !j["elements"].empty()) {
-                std::vector<Config::CuboidElement> new_elements;
-                for (const auto& ej : j["elements"]) {
-                    Config::CuboidElement elem;
-                    elem.name = ej.value("name", "box");
-                    if (ej.contains("from") && ej["from"].is_array() && ej["from"].size() >= 3) {
-                        elem.from = { ej["from"][0].get<float>(), ej["from"][1].get<float>(), ej["from"][2].get<float>() };
-                    }
-                    if (ej.contains("to") && ej["to"].is_array() && ej["to"].size() >= 3) {
-                        elem.to = { ej["to"][0].get<float>(), ej["to"][1].get<float>(), ej["to"][2].get<float>() };
-                    }
-                    if (ej.contains("rotation") && ej["rotation"].is_object()) {
-                        const auto& rj = ej["rotation"];
-                        elem.rotation.enabled = true;
-                        if (rj.contains("origin") && rj["origin"].is_array() && rj["origin"].size() >= 3) {
-                            elem.rotation.origin = { rj["origin"][0].get<float>(), rj["origin"][1].get<float>(), rj["origin"][2].get<float>() };
-                        }
-                        if (rj.contains("axis")) {
-                            std::string ax = rj["axis"].get<std::string>();
-                            if (!ax.empty()) elem.rotation.axis = ax[0];
-                        }
-                        if (rj.contains("angle")) elem.rotation.angle = rj["angle"].get<float>();
-                        if (rj.contains("rescale")) elem.rotation.rescale = rj["rescale"].get<bool>();
-                    }
-
-                    if (ej.contains("faces") && ej["faces"].is_object()) {
-                        const auto& fj = ej["faces"];
-                        auto parse_f = [&](const std::string& fname, Config::BlockFaceDirection dir) {
-                            if (fj.contains(fname)) {
-                                const auto& fo = fj[fname];
-                                elem.faces[dir].enabled = true;
-                                if (fo.contains("uv") && fo["uv"].is_array() && fo["uv"].size() >= 4) {
-                                    elem.faces[dir].uv[0] = fo["uv"][0].get<float>();
-                                    elem.faces[dir].uv[1] = fo["uv"][1].get<float>();
-                                    elem.faces[dir].uv[2] = fo["uv"][2].get<float>();
-                                    elem.faces[dir].uv[3] = fo["uv"][3].get<float>();
-                                }
-                                if (fo.contains("cullface")) elem.faces[dir].cullface = fo["cullface"].get<std::string>();
-                                if (fo.contains("tintindex")) elem.faces[dir].tintindex = fo["tintindex"].get<int>();
-                                if (fo.contains("rotation")) elem.faces[dir].uv_rotation = fo["rotation"].get<int>();
-                                if (fo.contains("texture") && fo["texture"].is_string()) {
-                                    std::string tname = fo["texture"].get<std::string>();
-                                    if (!tname.empty() && tname[0] == '#') {
-                                        std::string ref = tname.substr(1);
-                                        if (model_tex_names.count(ref)) tname = model_tex_names[ref];
-                                    }
-                                    elem.faces[dir].texture_name = tname;
-                                    auto c = resolve_tex(*this, tname);
-                                    elem.faces[dir].tex_x = c.first;
-                                    elem.faces[dir].tex_y = c.second;
-                                }
-                            }
-                        };
-                        parse_f("down", Config::FACE_DOWN);
-                        parse_f("up", Config::FACE_UP);
-                        parse_f("north", Config::FACE_NORTH);
-                        parse_f("south", Config::FACE_SOUTH);
-                        parse_f("west", Config::FACE_WEST);
-                        parse_f("east", Config::FACE_EAST);
-                    }
-                    new_elements.push_back(elem);
-                }
-                if (!new_elements.empty()) {
-                    Config::BLOCKS[bid].elements = new_elements;
-                }
-            }
-        } catch (...) {}
-    }
-}
-
 bool ResourcePackManager::apply_pack(const std::string& pack_path) {
     clear_pack();
 
@@ -522,9 +407,8 @@ bool ResourcePackManager::apply_pack(const std::string& pack_path) {
     // Cargar colormaps (grass.png / foliage.png) si existen en el pack
     Biome::load_colormaps(pack_path);
 
-    // Cargar y mapear texturas y modelos 3D del resource pack
+    // Mapear texturas estándar del resource pack a los bloques
     apply_block_texture_mapping();
-    load_block_models_from_pack(pack_path);
 
     if (item_cols > 0 && item_img.data != nullptr) {
         items_atlas = LoadTextureFromImage(item_img);
