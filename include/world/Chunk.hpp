@@ -56,6 +56,9 @@ public:
     std::atomic<int> pending_upload_mask{0};
     std::atomic<uint8_t> dirty_subchunks_mask{0xFF};
     std::atomic<uint8_t> pending_subchunks_upload_mask{0xFF};
+    std::atomic<uint8_t> solid_subchunks_mask{0};
+    std::atomic<uint8_t> trans_subchunks_mask{0};
+    std::atomic<uint8_t> water_subchunks_mask{0};
     std::atomic<bool> generating{false};
     
     std::mutex chunk_mutex;

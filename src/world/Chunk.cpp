@@ -1881,6 +1881,19 @@ void Chunk::upload_meshes() {
             upload_and_swap(sc.water_mesh, sc.next_water_mesh);
         }
     }
+
+    uint8_t current_solid_mask = 0;
+    uint8_t current_trans_mask = 0;
+    uint8_t current_water_mask = 0;
+    for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
+        auto& sc = subchunks[s];
+        if (sc.solid_mesh.vboId || sc.build_mesh.vboId || sc.plants_mesh.vboId) current_solid_mask |= (1 << s);
+        if (sc.trans_mesh.vboId) current_trans_mask |= (1 << s);
+        if (sc.water_mesh.vboId) current_water_mask |= (1 << s);
+    }
+    solid_subchunks_mask.store(current_solid_mask, std::memory_order_relaxed);
+    trans_subchunks_mask.store(current_trans_mask, std::memory_order_relaxed);
+    water_subchunks_mask.store(current_water_mask, std::memory_order_relaxed);
 }
 
 void Chunk::update_logic(int& upload_budget) {
@@ -1935,9 +1948,24 @@ void Chunk::draw_subchunk_trans(int s, Material& mat_plants, Vector3 camera_pos)
     auto& sc = subchunks[s];
     
     if (sc.trans_mesh.vboId) {
-        rlDisableBackfaceCulling();
+        float cx_center = cx * CHUNK_SIZE + CHUNK_SIZE / 2.0f;
+        float cz_center = cz * CHUNK_SIZE + CHUNK_SIZE / 2.0f;
+        float sy_center = s * SUBCHUNK_SIZE + SUBCHUNK_SIZE / 2.0f;
+        
+        float dist_sq = (cx_center - camera_pos.x)*(cx_center - camera_pos.x) +
+                        (sy_center - camera_pos.y)*(sy_center - camera_pos.y) +
+                        (cz_center - camera_pos.z)*(cz_center - camera_pos.z);
+        
+        // Cerca (< 32m): Dibujar ambas caras para volumen y detalle interior
+        // Lejos (>= 32m): Backface culling activo (GPU descarta 50% de caras interiores)
+        bool is_near = (dist_sq < 32.0f * 32.0f);
+        if (is_near) {
+            rlDisableBackfaceCulling();
+        }
         DrawMesh(sc.trans_mesh, mat_plants, MatrixIdentity());
-        rlEnableBackfaceCulling();
+        if (is_near) {
+            rlEnableBackfaceCulling();
+        }
     }
 }
 

@@ -332,14 +332,26 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
 
     int slice = size_x * size_z;
 
-    auto is_trans_terrain_block = [](uint8_t blk) -> bool {
-        if (blk == Config::AIR || blk == Config::WATER || blk == 255) return false;
-        if (blk == Config::LEAVES) return true;
-        if (Config::BLOCKS.count(blk)) {
-            const auto& bt = Config::BLOCKS.at(blk);
-            return (bt.shape == Config::SHAPE_TERRAIN && (bt.transparent || bt.is_foliage));
+    static bool is_trans_lut[256] = { false };
+    static bool is_terrain_lut[256] = { false };
+    static bool luts_initialized = false;
+    if (!luts_initialized) {
+        is_trans_lut[Config::LEAVES] = true;
+        for (const auto& [id, bt] : Config::BLOCKS) {
+            if (id < 256) {
+                if (bt.shape == Config::SHAPE_TERRAIN) {
+                    is_terrain_lut[id] = true;
+                    if (bt.transparent || bt.is_foliage) {
+                        is_trans_lut[id] = true;
+                    }
+                }
+            }
         }
-        return false;
+        luts_initialized = true;
+    }
+
+    auto is_trans_terrain_block = [](uint8_t blk) -> bool {
+        return is_trans_lut[blk];
     };
 
     bool has_trans_blocks = false;
@@ -350,7 +362,7 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
             for (int z = 0; z < size_z && !has_trans_blocks; z++) {
                 for (int x = 0; x < size_x && !has_trans_blocks; x++) {
                     int idx = y * slice + z * size_x + x;
-                    if (voxels[idx].density >= isovalue && is_trans_terrain_block(voxels[idx].block)) {
+                    if (voxels[idx].density >= isovalue && is_trans_lut[voxels[idx].block]) {
                         has_trans_blocks = true;
                     }
                 }
@@ -378,7 +390,7 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
             if (is_trans_pass) {
                 return voxels[idx].density;
             } else {
-                if (is_trans_terrain_block(b)) {
+                if (is_trans_lut[b]) {
                     return -1.0f;
                 }
                 return voxels[idx].density;
@@ -394,21 +406,17 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
         };
 
         auto is_valid_terrain_block = [&](uint8_t blk) -> bool {
-            if (blk == 255 || blk == 7 || blk == Config::TALL_GRASS || blk == Config::AIR || blk == Config::WATER) return false;
-            if (Config::BLOCKS.find(blk) != Config::BLOCKS.end()) {
-                return Config::BLOCKS.at(blk).shape == Config::SHAPE_TERRAIN;
-            }
-            return false;
+            return is_terrain_lut[blk];
         };
 
         auto get_v_block = [&](Vector3 v) -> uint8_t {
             int ix_f = std::floor(v.x); int iy_f = std::floor(v.y); int iz_f = std::floor(v.z);
             int ix_c = std::ceil(v.x);  int iy_c = std::ceil(v.y);  int iz_c = std::ceil(v.z);
             uint8_t b = get_raw_block(ix_f, iy_f, iz_f);
-            if (!is_valid_terrain_block(b)) b = get_raw_block(ix_c, iy_c, iz_c);
-            if (!is_valid_terrain_block(b)) b = get_raw_block(ix_f, iy_f - 1, iz_f);
-            if (!is_valid_terrain_block(b)) b = get_raw_block(ix_f, iy_f + 1, iz_f);
-            if (!is_valid_terrain_block(b)) b = default_block;
+            if (!is_terrain_lut[b]) b = get_raw_block(ix_c, iy_c, iz_c);
+            if (!is_terrain_lut[b]) b = get_raw_block(ix_f, iy_f - 1, iz_f);
+            if (!is_terrain_lut[b]) b = get_raw_block(ix_f, iy_f + 1, iz_f);
+            if (!is_terrain_lut[b]) b = default_block;
             return b;
         };
 
@@ -497,6 +505,19 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
             for (int z = 0; z < size_z - lod; z += lod) {
                 for (int x = 0; x < size_x - lod; x += lod) {
                     
+                    // EARLY-EXIT: En la pasada de hojas, si ninguno de los 8 vértices del cubo toca follaje, saltar celda de inmediato
+                    if (is_trans_pass && voxels) {
+                        bool cell_touches_trans = is_trans_lut[get_raw_block(x, y, z)] ||
+                                                  is_trans_lut[get_raw_block(x + lod, y, z)] ||
+                                                  is_trans_lut[get_raw_block(x + lod, y, z + lod)] ||
+                                                  is_trans_lut[get_raw_block(x, y, z + lod)] ||
+                                                  is_trans_lut[get_raw_block(x, y + lod, z)] ||
+                                                  is_trans_lut[get_raw_block(x + lod, y + lod, z)] ||
+                                                  is_trans_lut[get_raw_block(x + lod, y + lod, z + lod)] ||
+                                                  is_trans_lut[get_raw_block(x, y + lod, z + lod)];
+                        if (!cell_touches_trans) continue;
+                    }
+
                     float val[8];
                     val[0] = get_val(x, y, z);
                     val[1] = get_val(x + lod, y, z);

@@ -177,21 +177,25 @@ void World::draw(Camera3D camera) {
     // Pass 1: Opaque geometry (Solid and Plants)
     for (auto& c : snapshot) {
         if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            uint8_t mask = c->solid_subchunks_mask.load(std::memory_order_relaxed);
+            if (!mask) continue;
             for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
-                if (is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
+                if ((mask & (1 << s)) && is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
                     c->draw_subchunk_solid(s, mat_solid, mat_plants, camera.position);
                 }
             }
         }
     }
     
-    // Pass 2: Transparent cutout geometry (Leaves, Glass) - Both faces visible
+    // Pass 2: Transparent cutout geometry (Leaves, Glass)
     rlEnableDepthMask();
-    rlDisableBackfaceCulling();
+    rlEnableBackfaceCulling();
     for (auto& c : snapshot) {
         if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            uint8_t mask = c->trans_subchunks_mask.load(std::memory_order_relaxed);
+            if (!mask) continue; // Si este chunk no tiene hojas en ningún subchunk, saltar inmediatamente
             for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
-                if (is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
+                if ((mask & (1 << s)) && is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
                     c->draw_subchunk_trans(s, mat_plants, camera.position);
                 }
             }
@@ -211,8 +215,10 @@ void World::draw(Camera3D camera) {
 
     for (auto& c : snapshot) {
         if (c && c->is_ready && is_chunk_in_frustum(frustum, c->cx, c->cz)) {
+            uint8_t mask = c->water_subchunks_mask.load(std::memory_order_relaxed);
+            if (!mask) continue; // Si este chunk no tiene agua, saltar inmediatamente
             for (int s = 0; s < Config::NUM_SUBCHUNKS; ++s) {
-                if (is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
+                if ((mask & (1 << s)) && is_subchunk_in_frustum(frustum, c->cx, s, c->cz)) {
                     c->draw_subchunk_water(s, mat_water, camera.position);
                 }
             }
