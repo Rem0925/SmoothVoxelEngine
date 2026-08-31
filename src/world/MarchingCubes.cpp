@@ -331,351 +331,384 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
     t_colors.reserve(t_colors.size() + 512);
 
     int slice = size_x * size_z;
-    
-    auto get_val = [&](int x, int y, int z) -> float {
-        int idx = y * slice + z * size_x + x;
-        return custom_density ? custom_density[idx] : voxels[idx].density;
+
+    auto is_trans_terrain_block = [](uint8_t blk) -> bool {
+        if (blk == Config::AIR || blk == Config::WATER || blk == 255) return false;
+        if (blk == Config::LEAVES) return true;
+        if (Config::BLOCKS.count(blk)) {
+            const auto& bt = Config::BLOCKS.at(blk);
+            return (bt.shape == Config::SHAPE_TERRAIN && (bt.transparent || bt.is_foliage));
+        }
+        return false;
     };
-    
-    auto get_block = [&](float vx, float vy, float vz) -> uint8_t {
-        if (!voxels) return default_block;
-        int ix = std::floor(vx);
-        int iy = std::floor(vy);
-        int iz = std::floor(vz);
-        if (ix < 0) ix = 0; if (ix >= size_x) ix = size_x - 1;
-        if (iy < 0) iy = 0; if (iy >= size_y) iy = size_y - 1;
-        if (iz < 0) iz = 0; if (iz >= size_z) iz = size_z - 1;
-        uint8_t b = voxels[iy * slice + iz * size_x + ix].block;
-        if (b == 255 || b == 7 || b == Config::TALL_GRASS) b = default_block;
-        return b;
-    };
+
+    bool has_trans_blocks = false;
+    if (voxels && !custom_density) {
+        int start_y_chk = std::max(0, min_y);
+        int end_y_chk = (max_y > 0) ? std::min(size_y, max_y + lod) : size_y;
+        for (int y = start_y_chk; y < end_y_chk && !has_trans_blocks; y++) {
+            for (int z = 0; z < size_z && !has_trans_blocks; z++) {
+                for (int x = 0; x < size_x && !has_trans_blocks; x++) {
+                    int idx = y * slice + z * size_x + x;
+                    if (voxels[idx].density >= isovalue && is_trans_terrain_block(voxels[idx].block)) {
+                        has_trans_blocks = true;
+                    }
+                }
+            }
+        }
+    }
+
+    int start_y = std::max(0, min_y);
+    int end_y = (max_y > 0) ? std::min(size_y - lod, max_y) : (size_y - lod);
 
     Vector3 light_dir = {0.5f, 1.0f, 0.5f};
     float light_len = std::sqrt(light_dir.x*light_dir.x + light_dir.y*light_dir.y + light_dir.z*light_dir.z);
     light_dir.x /= light_len; light_dir.y /= light_len; light_dir.z /= light_len;
 
-    int start_y = std::max(0, min_y);
-    int end_y = (max_y > 0) ? std::min(size_y - lod, max_y) : (size_y - lod);
+    int num_passes = has_trans_blocks ? 2 : 1;
 
-    for (int y = start_y; y < end_y; y += lod) {
-        for (int z = 0; z < size_z - lod; z += lod) {
-            for (int x = 0; x < size_x - lod; x += lod) {
-                
-                float val[8];
-                val[0] = get_val(x, y, z);
-                val[1] = get_val(x + lod, y, z);
-                val[2] = get_val(x + lod, y, z + lod);
-                val[3] = get_val(x, y, z + lod);
-                val[4] = get_val(x, y + lod, z);
-                val[5] = get_val(x + lod, y + lod, z);
-                val[6] = get_val(x + lod, y + lod, z + lod);
-                val[7] = get_val(x, y + lod, z + lod);
+    for (int pass = 0; pass < num_passes; ++pass) {
+        bool is_trans_pass = (pass == 1);
 
-                int cubeindex = 0;
-                if (val[0] < isovalue) cubeindex |= 1;
-                if (val[1] < isovalue) cubeindex |= 2;
-                if (val[2] < isovalue) cubeindex |= 4;
-                if (val[3] < isovalue) cubeindex |= 8;
-                if (val[4] < isovalue) cubeindex |= 16;
-                if (val[5] < isovalue) cubeindex |= 32;
-                if (val[6] < isovalue) cubeindex |= 64;
-                if (val[7] < isovalue) cubeindex |= 128;
+        auto get_val = [&](int x, int y, int z) -> float {
+            int idx = y * slice + z * size_x + x;
+            if (custom_density) return custom_density[idx];
+            if (!voxels) return -1.0f;
+            uint8_t b = voxels[idx].block;
+            if (is_trans_pass) {
+                return voxels[idx].density;
+            } else {
+                if (is_trans_terrain_block(b)) {
+                    return -1.0f;
+                }
+                return voxels[idx].density;
+            }
+        };
 
-                if (edge_table[cubeindex] == 0)
-                    continue;
+        auto get_raw_block = [&](int bx, int by, int bz) -> uint8_t {
+            if (!voxels) return default_block;
+            if (bx < 0) bx = 0; if (bx >= size_x) bx = size_x - 1;
+            if (by < 0) by = 0; if (by >= size_y) by = size_y - 1;
+            if (bz < 0) bz = 0; if (bz >= size_z) bz = size_z - 1;
+            return voxels[by * slice + bz * size_x + bx].block;
+        };
 
-                Vector3 p[8] = {
-                    {(float)x, (float)y, (float)z},
-                    {(float)x + lod, (float)y, (float)z},
-                    {(float)x + lod, (float)y, (float)z + lod},
-                    {(float)x, (float)y, (float)z + lod},
-                    {(float)x, (float)y + lod, (float)z},
-                    {(float)x + lod, (float)y + lod, (float)z},
-                    {(float)x + lod, (float)y + lod, (float)z + lod},
-                    {(float)x, (float)y + lod, (float)z + lod}
-                };
+        auto is_valid_terrain_block = [&](uint8_t blk) -> bool {
+            if (blk == 255 || blk == 7 || blk == Config::TALL_GRASS || blk == Config::AIR || blk == Config::WATER) return false;
+            if (Config::BLOCKS.find(blk) != Config::BLOCKS.end()) {
+                return Config::BLOCKS.at(blk).shape == Config::SHAPE_TERRAIN;
+            }
+            return false;
+        };
 
-                Vector3 vertlist[12];
-                if (edge_table[cubeindex] & 1) vertlist[0] = interpolate(isovalue, p[0], p[1], val[0], val[1]);
-                if (edge_table[cubeindex] & 2) vertlist[1] = interpolate(isovalue, p[1], p[2], val[1], val[2]);
-                if (edge_table[cubeindex] & 4) vertlist[2] = interpolate(isovalue, p[2], p[3], val[2], val[3]);
-                if (edge_table[cubeindex] & 8) vertlist[3] = interpolate(isovalue, p[3], p[0], val[3], val[0]);
-                if (edge_table[cubeindex] & 16) vertlist[4] = interpolate(isovalue, p[4], p[5], val[4], val[5]);
-                if (edge_table[cubeindex] & 32) vertlist[5] = interpolate(isovalue, p[5], p[6], val[5], val[6]);
-                if (edge_table[cubeindex] & 64) vertlist[6] = interpolate(isovalue, p[6], p[7], val[6], val[7]);
-                if (edge_table[cubeindex] & 128) vertlist[7] = interpolate(isovalue, p[7], p[4], val[7], val[4]);
-                if (edge_table[cubeindex] & 256) vertlist[8] = interpolate(isovalue, p[0], p[4], val[0], val[4]);
-                if (edge_table[cubeindex] & 512) vertlist[9] = interpolate(isovalue, p[1], p[5], val[1], val[5]);
-                if (edge_table[cubeindex] & 1024) vertlist[10] = interpolate(isovalue, p[2], p[6], val[2], val[6]);
-                if (edge_table[cubeindex] & 2048) vertlist[11] = interpolate(isovalue, p[3], p[7], val[3], val[7]);
+        auto get_v_block = [&](Vector3 v) -> uint8_t {
+            int ix_f = std::floor(v.x); int iy_f = std::floor(v.y); int iz_f = std::floor(v.z);
+            int ix_c = std::ceil(v.x);  int iy_c = std::ceil(v.y);  int iz_c = std::ceil(v.z);
+            uint8_t b = get_raw_block(ix_f, iy_f, iz_f);
+            if (!is_valid_terrain_block(b)) b = get_raw_block(ix_c, iy_c, iz_c);
+            if (!is_valid_terrain_block(b)) b = get_raw_block(ix_f, iy_f - 1, iz_f);
+            if (!is_valid_terrain_block(b)) b = get_raw_block(ix_f, iy_f + 1, iz_f);
+            if (!is_valid_terrain_block(b)) b = default_block;
+            return b;
+        };
 
-                for (int i = 0; triangle_table[cubeindex][i] != -1; i += 3) {
-                    Vector3 v1 = vertlist[triangle_table[cubeindex][i]];
-                    Vector3 v2 = vertlist[triangle_table[cubeindex][i + 1]];
-                    Vector3 v3 = vertlist[triangle_table[cubeindex][i + 2]];
+        auto sample_smooth_density = [&](float sx, float sy, float sz) -> float {
+            int ix = std::clamp((int)std::floor(sx), 0, size_x - 2);
+            int iy = std::clamp((int)std::floor(sy), 0, size_y - 2);
+            int iz = std::clamp((int)std::floor(sz), 0, size_z - 2);
+            float fx = sx - (float)ix;
+            float fy = sy - (float)iy;
+            float fz = sz - (float)iz;
 
-                    // Compute normal (winding order flipped later)
-                    Vector3 u = {v2.x - v3.x, v2.y - v3.y, v2.z - v3.z};
-                    Vector3 v = {v1.x - v3.x, v1.y - v3.y, v1.z - v3.z};
-                    Vector3 n = {
-                        u.y * v.z - u.z * v.y,
-                        u.z * v.x - u.x * v.z,
-                        u.x * v.y - u.y * v.x
-                    };
-                    float len = std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z);
-                    if (len > 0.0f) { n.x /= len; n.y /= len; n.z /= len; }
+            float d000 = get_val(ix,   iy,   iz);
+            float d100 = get_val(ix+1, iy,   iz);
+            float d010 = get_val(ix,   iy+1, iz);
+            float d110 = get_val(ix+1, iy+1, iz);
+            float d001 = get_val(ix,   iy,   iz+1);
+            float d101 = get_val(ix+1, iy,   iz+1);
+            float d011 = get_val(ix,   iy+1, iz+1);
+            float d111 = get_val(ix+1, iy+1, iz+1);
 
-                    // 1. Leer el grid PURO para evitar que el aire se disfrace de pasto
-                    auto get_raw_block = [&](int bx, int by, int bz) -> uint8_t {
-                        if (!voxels) return default_block;
-                        if (bx < 0) bx = 0; if (bx >= size_x) bx = size_x - 1;
-                        if (by < 0) by = 0; if (by >= size_y) by = size_y - 1;
-                        if (bz < 0) bz = 0; if (bz >= size_z) bz = size_z - 1;
-                        int slice = size_x * size_z;
-                        return voxels[by * slice + bz * size_x + bx].block;
-                    };
+            float c00 = d000 * (1.0f - fx) + d100 * fx;
+            float c10 = d010 * (1.0f - fx) + d110 * fx;
+            float c01 = d001 * (1.0f - fx) + d101 * fx;
+            float c11 = d011 * (1.0f - fx) + d111 * fx;
+            float c0  = c00  * (1.0f - fz) + c01  * fz;
+            float c1  = c10  * (1.0f - fz) + c11  * fz;
+            return c0 * (1.0f - fy) + c1 * fy;
+        };
+
+        auto calc_vertex_ao = [&](Vector3 v_pt, Vector3 n_vec) -> float {
+            Vector3 tangent = (std::abs(n_vec.y) < 0.9f) ? Vector3Normalize(Vector3CrossProduct(n_vec, {0, 1, 0})) : Vector3Normalize(Vector3CrossProduct(n_vec, {1, 0, 0}));
+            Vector3 bitangent = Vector3CrossProduct(n_vec, tangent);
+
+            float r = 0.75f;
+            float h = 0.35f;
+            Vector3 p1 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(tangent, r)));
+            Vector3 p2 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(tangent, -r)));
+            Vector3 p3 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(bitangent, r)));
+            Vector3 p4 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(bitangent, -r)));
+
+            float occ = 0.0f;
+            float d1 = sample_smooth_density(p1.x, p1.y, p1.z);
+            float d2 = sample_smooth_density(p2.x, p2.y, p2.z);
+            float d3 = sample_smooth_density(p3.x, p3.y, p3.z);
+            float d4 = sample_smooth_density(p4.x, p4.y, p4.z);
+
+            if (d1 >= isovalue) occ += std::clamp((d1 - isovalue) * 2.0f, 0.1f, 1.0f);
+            if (d2 >= isovalue) occ += std::clamp((d2 - isovalue) * 2.0f, 0.1f, 1.0f);
+            if (d3 >= isovalue) occ += std::clamp((d3 - isovalue) * 2.0f, 0.1f, 1.0f);
+            if (d4 >= isovalue) occ += std::clamp((d4 - isovalue) * 2.0f, 0.1f, 1.0f);
+
+            return std::clamp(1.0f - (occ / 4.0f) * 0.25f, 0.75f, 1.0f);
+        };
+
+        auto sample_bilinear_tint = [&](float px, float pz, const Color* cache) -> Color {
+            float cx = std::clamp(px, 0.0f, (float)(size_x - 1));
+            float cz = std::clamp(pz, 0.0f, (float)(size_z - 1));
+            int x0 = (int)cx;
+            int z0 = (int)cz;
+            int x1 = std::min(x0 + 1, size_x - 1);
+            int z1 = std::min(z0 + 1, size_z - 1);
+            float tx = cx - (float)x0;
+            float tz = cz - (float)z0;
+
+            Color c00 = cache[z0 * size_x + x0];
+            Color c10 = cache[z0 * size_x + x1];
+            Color c01 = cache[z1 * size_x + x0];
+            Color c11 = cache[z1 * size_x + x1];
+
+            float r0 = (float)c00.r * (1.0f - tx) + (float)c10.r * tx;
+            float r1 = (float)c01.r * (1.0f - tx) + (float)c11.r * tx;
+            float r  = r0 * (1.0f - tz) + r1 * tz;
+
+            float g0 = (float)c00.g * (1.0f - tx) + (float)c10.g * tx;
+            float g1 = (float)c01.g * (1.0f - tx) + (float)c11.g * tx;
+            float g  = g0 * (1.0f - tz) + g1 * tz;
+
+            float b0 = (float)c00.b * (1.0f - tx) + (float)c10.b * tx;
+            float b1 = (float)c01.b * (1.0f - tx) + (float)c11.b * tx;
+            float b_val = b0 * (1.0f - tz) + b1 * tz;
+
+            return Color{ (unsigned char)r, (unsigned char)g, (unsigned char)b_val, 255 };
+        };
+
+        for (int y = start_y; y < end_y; y += lod) {
+            for (int z = 0; z < size_z - lod; z += lod) {
+                for (int x = 0; x < size_x - lod; x += lod) {
                     
-                    // Muestreo trilineal continuo de densidad para AO suave
-                    auto sample_smooth_density = [&](float sx, float sy, float sz) -> float {
-                        int ix = std::clamp((int)std::floor(sx), 0, size_x - 2);
-                        int iy = std::clamp((int)std::floor(sy), 0, size_y - 2);
-                        int iz = std::clamp((int)std::floor(sz), 0, size_z - 2);
-                        float fx = sx - (float)ix;
-                        float fy = sy - (float)iy;
-                        float fz = sz - (float)iz;
+                    float val[8];
+                    val[0] = get_val(x, y, z);
+                    val[1] = get_val(x + lod, y, z);
+                    val[2] = get_val(x + lod, y, z + lod);
+                    val[3] = get_val(x, y, z + lod);
+                    val[4] = get_val(x, y + lod, z);
+                    val[5] = get_val(x + lod, y + lod, z);
+                    val[6] = get_val(x + lod, y + lod, z + lod);
+                    val[7] = get_val(x, y + lod, z + lod);
 
-                        float d000 = get_val(ix,   iy,   iz);
-                        float d100 = get_val(ix+1, iy,   iz);
-                        float d010 = get_val(ix,   iy+1, iz);
-                        float d110 = get_val(ix+1, iy+1, iz);
-                        float d001 = get_val(ix,   iy,   iz+1);
-                        float d101 = get_val(ix+1, iy,   iz+1);
-                        float d011 = get_val(ix,   iy+1, iz+1);
-                        float d111 = get_val(ix+1, iy+1, iz+1);
+                    int cubeindex = 0;
+                    if (val[0] < isovalue) cubeindex |= 1;
+                    if (val[1] < isovalue) cubeindex |= 2;
+                    if (val[2] < isovalue) cubeindex |= 4;
+                    if (val[3] < isovalue) cubeindex |= 8;
+                    if (val[4] < isovalue) cubeindex |= 16;
+                    if (val[5] < isovalue) cubeindex |= 32;
+                    if (val[6] < isovalue) cubeindex |= 64;
+                    if (val[7] < isovalue) cubeindex |= 128;
 
-                        float c00 = d000 * (1.0f - fx) + d100 * fx;
-                        float c10 = d010 * (1.0f - fx) + d110 * fx;
-                        float c01 = d001 * (1.0f - fx) + d101 * fx;
-                        float c11 = d011 * (1.0f - fx) + d111 * fx;
-                        float c0  = c00  * (1.0f - fz) + c01  * fz;
-                        float c1  = c10  * (1.0f - fz) + c11  * fz;
-                        return c0 * (1.0f - fy) + c1 * fy;
+                    if (edge_table[cubeindex] == 0)
+                        continue;
+
+                    Vector3 p[8] = {
+                        {(float)x, (float)y, (float)z},
+                        {(float)x + lod, (float)y, (float)z},
+                        {(float)x + lod, (float)y, (float)z + lod},
+                        {(float)x, (float)y, (float)z + lod},
+                        {(float)x, (float)y + lod, (float)z},
+                        {(float)x + lod, (float)y + lod, (float)z},
+                        {(float)x + lod, (float)y + lod, (float)z + lod},
+                        {(float)x, (float)y + lod, (float)z + lod}
                     };
 
-                    // Oclusión Ambiental suave por vértice (gradiente continuo)
-                    auto calc_vertex_ao = [&](Vector3 v_pt, Vector3 n_vec) -> float {
-                        Vector3 tangent = (std::abs(n_vec.y) < 0.9f) ? Vector3Normalize(Vector3CrossProduct(n_vec, {0, 1, 0})) : Vector3Normalize(Vector3CrossProduct(n_vec, {1, 0, 0}));
-                        Vector3 bitangent = Vector3CrossProduct(n_vec, tangent);
+                    Vector3 vertlist[12];
+                    if (edge_table[cubeindex] & 1) vertlist[0] = interpolate(isovalue, p[0], p[1], val[0], val[1]);
+                    if (edge_table[cubeindex] & 2) vertlist[1] = interpolate(isovalue, p[1], p[2], val[1], val[2]);
+                    if (edge_table[cubeindex] & 4) vertlist[2] = interpolate(isovalue, p[2], p[3], val[2], val[3]);
+                    if (edge_table[cubeindex] & 8) vertlist[3] = interpolate(isovalue, p[3], p[0], val[3], val[0]);
+                    if (edge_table[cubeindex] & 16) vertlist[4] = interpolate(isovalue, p[4], p[5], val[4], val[5]);
+                    if (edge_table[cubeindex] & 32) vertlist[5] = interpolate(isovalue, p[5], p[6], val[5], val[6]);
+                    if (edge_table[cubeindex] & 64) vertlist[6] = interpolate(isovalue, p[6], p[7], val[6], val[7]);
+                    if (edge_table[cubeindex] & 128) vertlist[7] = interpolate(isovalue, p[7], p[4], val[7], val[4]);
+                    if (edge_table[cubeindex] & 256) vertlist[8] = interpolate(isovalue, p[0], p[4], val[0], val[4]);
+                    if (edge_table[cubeindex] & 512) vertlist[9] = interpolate(isovalue, p[1], p[5], val[1], val[5]);
+                    if (edge_table[cubeindex] & 1024) vertlist[10] = interpolate(isovalue, p[2], p[6], val[2], val[6]);
+                    if (edge_table[cubeindex] & 2048) vertlist[11] = interpolate(isovalue, p[3], p[7], val[3], val[7]);
 
-                        float r = 0.75f;
-                        float h = 0.35f;
-                        Vector3 p1 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(tangent, r)));
-                        Vector3 p2 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(tangent, -r)));
-                        Vector3 p3 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(bitangent, r)));
-                        Vector3 p4 = Vector3Add(v_pt, Vector3Add(Vector3Scale(n_vec, h), Vector3Scale(bitangent, -r)));
+                    for (int i = 0; triangle_table[cubeindex][i] != -1; i += 3) {
+                        Vector3 v1 = vertlist[triangle_table[cubeindex][i]];
+                        Vector3 v2 = vertlist[triangle_table[cubeindex][i + 1]];
+                        Vector3 v3 = vertlist[triangle_table[cubeindex][i + 2]];
 
-                        float occ = 0.0f;
-                        float d1 = sample_smooth_density(p1.x, p1.y, p1.z);
-                        float d2 = sample_smooth_density(p2.x, p2.y, p2.z);
-                        float d3 = sample_smooth_density(p3.x, p3.y, p3.z);
-                        float d4 = sample_smooth_density(p4.x, p4.y, p4.z);
+                        // Compute normal (winding order flipped later)
+                        Vector3 u = {v2.x - v3.x, v2.y - v3.y, v2.z - v3.z};
+                        Vector3 v = {v1.x - v3.x, v1.y - v3.y, v1.z - v3.z};
+                        Vector3 n = {
+                            u.y * v.z - u.z * v.y,
+                            u.z * v.x - u.x * v.z,
+                            u.x * v.y - u.y * v.x
+                        };
+                        float len = std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z);
+                        if (len > 0.0f) { n.x /= len; n.y /= len; n.z /= len; }
 
-                        if (d1 >= isovalue) occ += std::clamp((d1 - isovalue) * 2.0f, 0.1f, 1.0f);
-                        if (d2 >= isovalue) occ += std::clamp((d2 - isovalue) * 2.0f, 0.1f, 1.0f);
-                        if (d3 >= isovalue) occ += std::clamp((d3 - isovalue) * 2.0f, 0.1f, 1.0f);
-                        if (d4 >= isovalue) occ += std::clamp((d4 - isovalue) * 2.0f, 0.1f, 1.0f);
+                        float ao1 = calc_vertex_ao(v1, n);
+                        float ao2 = calc_vertex_ao(v2, n);
+                        float ao3 = calc_vertex_ao(v3, n);
 
-                        return std::clamp(1.0f - (occ / 4.0f) * 0.25f, 0.75f, 1.0f);
-                    };
+                        uint8_t b1 = get_v_block(v1);
+                        uint8_t b2 = get_v_block(v2);
+                        uint8_t b3 = get_v_block(v3);
 
-                    float ao1 = calc_vertex_ao(v1, n);
-                    float ao2 = calc_vertex_ao(v2, n);
-                    float ao3 = calc_vertex_ao(v3, n);
+                        bool has_trans = is_trans_terrain_block(b1) || is_trans_terrain_block(b2) || is_trans_terrain_block(b3);
 
-                    float dot_val = std::abs(n.x * light_dir.x + n.y * light_dir.y + n.z * light_dir.z);
-                    float base_lighting = dot_val * 0.15f + 0.85f;
-
-                    auto is_valid_terrain_block = [&](uint8_t blk) -> bool {
-                        if (blk == 255 || blk == 7 || blk == Config::TALL_GRASS) return false;
-                        if (Config::BLOCKS.find(blk) != Config::BLOCKS.end()) {
-                            return Config::BLOCKS.at(blk).shape == Config::SHAPE_TERRAIN;
+                        if (is_trans_pass) {
+                            if (!has_trans) continue;
+                            if (!is_trans_terrain_block(b1)) {
+                                if (is_trans_terrain_block(b2)) b1 = b2;
+                                else if (is_trans_terrain_block(b3)) b1 = b3;
+                                else b1 = Config::LEAVES;
+                            }
+                            if (!is_trans_terrain_block(b2)) b2 = b1;
+                            if (!is_trans_terrain_block(b3)) b3 = b1;
                         }
-                        return false;
-                    };
-
-                    auto get_v_block = [&](Vector3 v) -> uint8_t {
-                        int ix_f = std::floor(v.x); int iy_f = std::floor(v.y); int iz_f = std::floor(v.z);
-                        int ix_c = std::ceil(v.x);  int iy_c = std::ceil(v.y);  int iz_c = std::ceil(v.z);
-                        uint8_t b = get_raw_block(ix_f, iy_f, iz_f);
-                        if (!is_valid_terrain_block(b)) b = get_raw_block(ix_c, iy_c, iz_c);
-                        if (!is_valid_terrain_block(b)) b = get_raw_block(ix_f, iy_f - 1, iz_f);
-                        if (!is_valid_terrain_block(b)) b = default_block;
-                        return b;
-                    };
-
-                    uint8_t b1 = get_v_block(v1);
-                    uint8_t b2 = get_v_block(v2);
-                    uint8_t b3 = get_v_block(v3);
-                    
-                    uint8_t b_primary = b1;
-                    uint8_t b_secondary = b1;
-                    if (b2 != b1) b_secondary = b2;
-                    else if (b3 != b1) b_secondary = b3;
-
-                    // 1. Evitar que las antorchas se mezclen con el suelo
-                    auto is_terrain = [](uint8_t b) {
-                        return b != Config::TORCH;
-                    };
-                    
-                    if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {
-                        b_secondary = b_primary;
-                    } else if (b_primary > b_secondary) {
-                        std::swap(b_primary, b_secondary);
-                    }
-
-                    bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES || (Config::BLOCKS.count(b_primary) && (Config::BLOCKS.at(b_primary).is_foliage || Config::BLOCKS.at(b_primary).is_grass)));
-                    bool sec_is_foliage = (b_secondary == Config::GRASS || b_secondary == Config::LEAVES || (Config::BLOCKS.count(b_secondary) && (Config::BLOCKS.at(b_secondary).is_foliage || Config::BLOCKS.at(b_secondary).is_grass)));
-                    float foliage_pri_offset = pri_is_foliage ? 10.0f : 0.0f;
-                    float foliage_sec_offset = sec_is_foliage ? 10.0f : 0.0f;
-
-                    auto sample_bilinear_tint = [&](float px, float pz, const Color* cache) -> Color {
-                        float cx = std::clamp(px, 0.0f, (float)(size_x - 1));
-                        float cz = std::clamp(pz, 0.0f, (float)(size_z - 1));
-                        int x0 = (int)cx;
-                        int z0 = (int)cz;
-                        int x1 = std::min(x0 + 1, size_x - 1);
-                        int z1 = std::min(z0 + 1, size_z - 1);
-                        float tx = cx - (float)x0;
-                        float tz = cz - (float)z0;
-
-                        Color c00 = cache[z0 * size_x + x0];
-                        Color c10 = cache[z0 * size_x + x1];
-                        Color c01 = cache[z1 * size_x + x0];
-                        Color c11 = cache[z1 * size_x + x1];
-
-                        float r0 = (float)c00.r * (1.0f - tx) + (float)c10.r * tx;
-                        float r1 = (float)c01.r * (1.0f - tx) + (float)c11.r * tx;
-                        float r  = r0 * (1.0f - tz) + r1 * tz;
-
-                        float g0 = (float)c00.g * (1.0f - tx) + (float)c10.g * tx;
-                        float g1 = (float)c01.g * (1.0f - tx) + (float)c11.g * tx;
-                        float g  = g0 * (1.0f - tz) + g1 * tz;
-
-                        float b0 = (float)c00.b * (1.0f - tx) + (float)c10.b * tx;
-                        float b1 = (float)c01.b * (1.0f - tx) + (float)c11.b * tx;
-                        float b_val = b0 * (1.0f - tz) + b1 * tz;
-
-                        return Color{ (unsigned char)r, (unsigned char)g, (unsigned char)b_val, 255 };
-                    };
-
-                    // Color de tinte uniforme por triángulo para evitar cualquier halo o gradiente a blanco en los bordes
-                    Color tri_tint = { 255, 255, 255, 255 };
-                    if ((pri_is_foliage || sec_is_foliage) && grass_tint_cache && foliage_tint_cache) {
-                        float tri_x = (v1.x + v2.x + v3.x) / 3.0f;
-                        float tri_z = (v1.z + v2.z + v3.z) / 3.0f;
-                        const Color* target_cache = (b_primary == Config::LEAVES || b_secondary == Config::LEAVES) ? foliage_tint_cache : grass_tint_cache;
-                        tri_tint = sample_bilinear_tint(tri_x, tri_z, target_cache);
-                    }
-
-                    VoxelLighting::LightSample ls1 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v1.x, v1.y, v1.z, n);
-                    VoxelLighting::LightSample ls2 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v2.x, v2.y, v2.z, n);
-                    VoxelLighting::LightSample ls3 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v3.x, v3.y, v3.z, n);
-
-                    Config::BlockType b_info_pri = Config::BLOCKS.at(Config::GRASS);
-                    if (Config::BLOCKS.find(b_primary) != Config::BLOCKS.end()) {
-                        b_info_pri = Config::BLOCKS.at(b_primary);
-                    } else {
-                        b_info_pri.is_waving = false;
-                    }
-                    
-                    Config::BlockType b_info_sec = Config::BLOCKS.at(Config::GRASS);
-                    if (Config::BLOCKS.find(b_secondary) != Config::BLOCKS.end()) {
-                        b_info_sec = Config::BLOCKS.at(b_secondary);
-                    } else {
-                        b_info_sec.is_waving = false;
-                    }
-
-                    bool is_trans = b_info_pri.transparent || b_info_sec.transparent;
-                    auto& v_vec = is_trans ? t_vertices : vertices;
-                    auto& n_vec = is_trans ? t_normals : normals;
-                    auto& u_vec = is_trans ? t_uvs : uvs;
-                    auto& u2_vec = is_trans ? t_uvs2 : uvs2;
-                    auto& c_vec = is_trans ? t_colors : colors;
-
-                    // El orden de vertices es v3, v2, v1: x = AO, y = Luz Solar, z = Luz de Bloque
-                    v_vec.push_back(v3); v_vec.push_back(v2); v_vec.push_back(v1);
-                    n_vec.push_back({ ao3, ls3.sunlight, ls3.blocklight });
-                    n_vec.push_back({ ao2, ls2.sunlight, ls2.blocklight });
-                    n_vec.push_back({ ao1, ls1.sunlight, ls1.blocklight });
-
-                    Color col1 = tri_tint;
-                    Color col2 = tri_tint;
-                    Color col3 = tri_tint;
-                    col1.a = (b1 == b_primary) ? 255 : 0;
-                    col2.a = (b2 == b_primary) ? 255 : 0;
-                    col3.a = (b3 == b_primary) ? 255 : 0;
-
-                    c_vec.push_back(col3);
-                    c_vec.push_back(col2);
-                    c_vec.push_back(col1);
-
-                    float tex_w = 1.0f / (float)Config::TILES_ATLAS_COLS;
-                    float tex_h = 1.0f / (float)Config::TILES_ATLAS_ROWS;
-                    float offset_u_pri = b_info_pri.tex_x * tex_w;
-                    float offset_v_pri = (Config::TILES_ATLAS_ROWS - 1 - b_info_pri.tex_y) * tex_h;
-                    float offset_u_sec = b_info_sec.tex_x * tex_w;
-                    float offset_v_sec = (Config::TILES_ATLAS_ROWS - 1 - b_info_sec.tex_y) * tex_h;
-
-                    float min_x = std::min(v1.x, std::min(v2.x, v3.x));
-                    float min_y = std::min(v1.y, std::min(v2.y, v3.y));
-                    float min_z = std::min(v1.z, std::min(v2.z, v3.z));
-
-                    float abs_x = std::abs(n.x);
-                    float abs_y = std::abs(n.y);
-                    float abs_z = std::abs(n.z);
-                    
-                    auto check_sway = [&](Vector3 v) -> bool {
-                        bool has_waving = false;
-                        int base_x = std::floor(v.x);
-                        int base_y = std::floor(v.y);
-                        int base_z = std::floor(v.z);
                         
-                        for (int dx = 0; dx <= 1; dx++) {
-                            for (int dy = 0; dy <= 1; dy++) {
-                                for (int dz = 0; dz <= 1; dz++) {
-                                    uint8_t b = get_raw_block(base_x + dx, base_y + dy, base_z + dz);
-                                    if (b == 255 || b == 7 || b == Config::TALL_GRASS || b == Config::AIR) continue;
-                                    if (Config::BLOCKS.count(b)) {
-                                        if (!Config::BLOCKS.at(b).is_waving) return false;
-                                        has_waving = true;
+                        uint8_t b_primary = b1;
+                        uint8_t b_secondary = b1;
+                        if (b2 != b1) b_secondary = b2;
+                        else if (b3 != b1) b_secondary = b3;
+
+                        auto is_terrain = [](uint8_t b) {
+                            return b != Config::TORCH;
+                        };
+                        
+                        if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {
+                            b_secondary = b_primary;
+                        } else if (b_primary > b_secondary) {
+                            std::swap(b_primary, b_secondary);
+                        }
+
+                        bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES || (Config::BLOCKS.count(b_primary) && (Config::BLOCKS.at(b_primary).is_foliage || Config::BLOCKS.at(b_primary).is_grass)));
+                        bool sec_is_foliage = (b_secondary == Config::GRASS || b_secondary == Config::LEAVES || (Config::BLOCKS.count(b_secondary) && (Config::BLOCKS.at(b_secondary).is_foliage || Config::BLOCKS.at(b_secondary).is_grass)));
+                        float foliage_pri_offset = pri_is_foliage ? 10.0f : 0.0f;
+                        float foliage_sec_offset = sec_is_foliage ? 10.0f : 0.0f;
+
+                        Color tri_tint = { 255, 255, 255, 255 };
+                        if ((pri_is_foliage || sec_is_foliage) && grass_tint_cache && foliage_tint_cache) {
+                            float tri_x = (v1.x + v2.x + v3.x) / 3.0f;
+                            float tri_z = (v1.z + v2.z + v3.z) / 3.0f;
+                            const Color* target_cache = (b_primary == Config::LEAVES || b_secondary == Config::LEAVES) ? foliage_tint_cache : grass_tint_cache;
+                            tri_tint = sample_bilinear_tint(tri_x, tri_z, target_cache);
+                        }
+
+                        VoxelLighting::LightSample ls1 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v1.x, v1.y, v1.z, n);
+                        VoxelLighting::LightSample ls2 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v2.x, v2.y, v2.z, n);
+                        VoxelLighting::LightSample ls3 = VoxelLighting::sample_smooth_light(light_grid, size_x, size_y, size_z, v3.x, v3.y, v3.z, n);
+
+                        Config::BlockType b_info_pri = Config::BLOCKS.at(Config::GRASS);
+                        if (Config::BLOCKS.find(b_primary) != Config::BLOCKS.end()) {
+                            b_info_pri = Config::BLOCKS.at(b_primary);
+                        } else {
+                            b_info_pri.is_waving = false;
+                        }
+                        
+                        Config::BlockType b_info_sec = Config::BLOCKS.at(Config::GRASS);
+                        if (Config::BLOCKS.find(b_secondary) != Config::BLOCKS.end()) {
+                            b_info_sec = Config::BLOCKS.at(b_secondary);
+                        } else {
+                            b_info_sec.is_waving = false;
+                        }
+
+                        auto& v_vec = is_trans_pass ? t_vertices : vertices;
+                        auto& n_vec = is_trans_pass ? t_normals : normals;
+                        auto& u_vec = is_trans_pass ? t_uvs : uvs;
+                        auto& u2_vec = is_trans_pass ? t_uvs2 : uvs2;
+                        auto& c_vec = is_trans_pass ? t_colors : colors;
+
+                        // El orden de vertices es v3, v2, v1: x = AO, y = Luz Solar, z = Luz de Bloque
+                        v_vec.push_back(v3); v_vec.push_back(v2); v_vec.push_back(v1);
+                        n_vec.push_back({ ao3, ls3.sunlight, ls3.blocklight });
+                        n_vec.push_back({ ao2, ls2.sunlight, ls2.blocklight });
+                        n_vec.push_back({ ao1, ls1.sunlight, ls1.blocklight });
+
+                        Color col1 = tri_tint;
+                        Color col2 = tri_tint;
+                        Color col3 = tri_tint;
+                        col1.a = (b1 == b_primary) ? 255 : 0;
+                        col2.a = (b2 == b_primary) ? 255 : 0;
+                        col3.a = (b3 == b_primary) ? 255 : 0;
+
+                        c_vec.push_back(col3);
+                        c_vec.push_back(col2);
+                        c_vec.push_back(col1);
+
+                        float tex_w = 1.0f / (float)Config::TILES_ATLAS_COLS;
+                        float tex_h = 1.0f / (float)Config::TILES_ATLAS_ROWS;
+                        float offset_u_pri = b_info_pri.tex_x * tex_w;
+                        float offset_v_pri = (Config::TILES_ATLAS_ROWS - 1 - b_info_pri.tex_y) * tex_h;
+                        float offset_u_sec = b_info_sec.tex_x * tex_w;
+                        float offset_v_sec = (Config::TILES_ATLAS_ROWS - 1 - b_info_sec.tex_y) * tex_h;
+
+                        float min_x = std::min(v1.x, std::min(v2.x, v3.x));
+                        float min_y = std::min(v1.y, std::min(v2.y, v3.y));
+                        float min_z = std::min(v1.z, std::min(v2.z, v3.z));
+
+                        float abs_x = std::abs(n.x);
+                        float abs_y = std::abs(n.y);
+                        float abs_z = std::abs(n.z);
+                        
+                        auto check_sway = [&](Vector3 v) -> bool {
+                            bool has_waving = false;
+                            int base_x = std::floor(v.x);
+                            int base_y = std::floor(v.y);
+                            int base_z = std::floor(v.z);
+                            
+                            for (int dx = 0; dx <= 1; dx++) {
+                                for (int dy = 0; dy <= 1; dy++) {
+                                    for (int dz = 0; dz <= 1; dz++) {
+                                        uint8_t b = get_raw_block(base_x + dx, base_y + dy, base_z + dz);
+                                        if (b == 255 || b == 7 || b == Config::TALL_GRASS || b == Config::AIR) continue;
+                                        if (Config::BLOCKS.count(b)) {
+                                            if (!Config::BLOCKS.at(b).is_waving) return false;
+                                            has_waving = true;
+                                        }
                                     }
                                 }
                             }
-                        }
-                        return has_waving;
-                    };
+                            return has_waving;
+                        };
 
-                    for(int j=0; j<3; ++j) {
-                        Vector2 uv = {0, 0};
-                        Vector3 vert = (j == 0) ? v3 : (j == 1) ? v2 : v1;
-                        
-                        if (abs_y >= abs_x && abs_y >= abs_z) { // Dominante Y (Techos y suelos)
-                            uv.x = (vert.x - min_x) / (float)lod; 
-                            uv.y = (vert.z - min_z) / (float)lod; 
+                        for(int j=0; j<3; ++j) {
+                            Vector2 uv = {0, 0};
+                            Vector3 vert = (j == 0) ? v3 : (j == 1) ? v2 : v1;
+                            
+                            if (abs_y >= abs_x && abs_y >= abs_z) { // Dominante Y (Techos y suelos)
+                                uv.x = (vert.x - min_x) / (float)lod; 
+                                uv.y = (vert.z - min_z) / (float)lod; 
+                            }
+                            else if (abs_x >= abs_y && abs_x >= abs_z) { // Dominante X (Paredes)
+                                uv.x = (vert.z - min_z) / (float)lod; 
+                                uv.y = 1.0f - ((vert.y - min_y) / (float)lod);
+                            }
+                            else { // Dominante Z (Paredes frontales)
+                                uv.x = (vert.x - min_x) / (float)lod; 
+                                uv.y = 1.0f - ((vert.y - min_y) / (float)lod);
+                            }
+                            
+                            float sway = check_sway(vert) ? 10.0f : 0.0f;
+                            
+                            u_vec.push_back({uv.x * tex_w + offset_u_pri + sway, uv.y * tex_h + offset_v_pri + foliage_pri_offset});
+                            u2_vec.push_back({uv.x * tex_w + offset_u_sec + sway, uv.y * tex_h + offset_v_sec + foliage_sec_offset});
                         }
-                        else if (abs_x >= abs_y && abs_x >= abs_z) { // Dominante X (Paredes)
-                            uv.x = (vert.z - min_z) / (float)lod; 
-                            uv.y = 1.0f - ((vert.y - min_y) / (float)lod);
-                        }
-                        else { // Dominante Z (Paredes frontales)
-                            uv.x = (vert.x - min_x) / (float)lod; 
-                            uv.y = 1.0f - ((vert.y - min_y) / (float)lod);
-                        }
-                        
-                        float sway = check_sway(vert) ? 10.0f : 0.0f;
-                        
-                        u_vec.push_back({uv.x * tex_w + offset_u_pri + sway, uv.y * tex_h + offset_v_pri + foliage_pri_offset});
-                        u2_vec.push_back({uv.x * tex_w + offset_u_sec + sway, uv.y * tex_h + offset_v_sec + foliage_sec_offset});
                     }
                 }
             }
