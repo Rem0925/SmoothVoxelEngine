@@ -26,9 +26,16 @@ void UI::draw_block_icon(uint8_t block_id, int x, int y, int size) {
     float th = (float)spritesheet.height / (float)Config::TILES_ATLAS_ROWS;
     float correct_y = (float)Config::TILES_ATLAS_ROWS - 1.0f - (float)ty;
     
+    Color tint = WHITE;
+    if (b.is_foliage || block_id == Config::LEAVES) {
+        tint = Color{ 85, 168, 55, 255 };
+    } else if (b.is_grass || block_id == Config::GRASS || block_id == Config::TALL_GRASS) {
+        tint = Color{ 117, 185, 68, 255 };
+    }
+
     Rectangle src = { (float)tx * tw, correct_y * th, tw, th };
     Rectangle dst = { (float)x, (float)y, (float)size, (float)size };
-    DrawTexturePro(spritesheet, src, dst, {0, 0}, 0.0f, WHITE);
+    DrawTexturePro(spritesheet, src, dst, {0, 0}, 0.0f, tint);
 }
 
 void UI::draw_tool_icon(Config::ToolType type, Config::ToolTier tier, int x, int y, int size) {

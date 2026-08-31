@@ -322,6 +322,27 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, float light, float alpha
                     unsigned char c_ls = (unsigned char)(160 * light);
                     unsigned char c_b = (unsigned char)(120 * light);
 
+                    Color block_tint = WHITE;
+                    if (bt.is_foliage || d.id == Config::LEAVES) {
+                        block_tint = Color{ 85, 168, 55, 255 };
+                    } else if (bt.is_grass || d.id == Config::GRASS || d.id == Config::TALL_GRASS) {
+                        block_tint = Color{ 117, 185, 68, 255 };
+                    }
+
+                    auto tint_c = [&](unsigned char light_v, Color t) -> Color {
+                        return Color{
+                            (unsigned char)((light_v * t.r) / 255),
+                            (unsigned char)((light_v * t.g) / 255),
+                            (unsigned char)((light_v * t.b) / 255),
+                            255
+                        };
+                    };
+
+                    Color col_t = tint_c(c_t, block_tint);
+                    Color col_s = tint_c(c_s, block_tint);
+                    Color col_ls = (d.id == Config::GRASS) ? Color{ c_ls, c_ls, c_ls, 255 } : tint_c(c_ls, block_tint);
+                    Color col_b = (d.id == Config::GRASS) ? Color{ c_b, c_b, c_b, 255 } : tint_c(c_b, block_tint);
+
                     rlSetTexture(spritesheet_tiles.id);
                     rlBegin(RL_QUADS);
                         // 1. Tapa Superior
@@ -336,7 +357,7 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, float light, float alpha
                             float uv_x1 = u_cen_top + std::cos(a1) * (tw * 0.45f);
                             float uv_y1 = v_cen_top - std::sin(a1) * (th * 0.45f);
 
-                            rlColor4ub(c_t, c_t, c_t, 255);
+                            rlColor4ub(col_t.r, col_t.g, col_t.b, 255);
                             rlTexCoord2f(u_cen_top, v_cen_top); rlVertex3f(0.0f, y_peak, 0.0f);
                             rlTexCoord2f(u_cen_top, v_cen_top); rlVertex3f(0.0f, y_peak, 0.0f);
                             rlTexCoord2f(uv_x1, uv_y1); rlVertex3f(r_top * std::cos(a1), y_top, r_top * std::sin(a1));
@@ -347,7 +368,7 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, float light, float alpha
                             int next = (k+1)%8;
                             float a0 = k * (PI / 4.0f);
                             float a1 = next * (PI / 4.0f);
-                            rlColor4ub(c_s, c_s, c_s, 255);
+                            rlColor4ub(col_s.r, col_s.g, col_s.b, 255);
                             rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(r_top * std::cos(a0), y_top, r_top * std::sin(a0));
                             rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(r_top * std::cos(a1), y_top, r_top * std::sin(a1));
                             rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(r_mid * std::cos(a1), y_mid, r_mid * std::sin(a1));
@@ -358,7 +379,7 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, float light, float alpha
                             int next = (k+1)%8;
                             float a0 = k * (PI / 4.0f);
                             float a1 = next * (PI / 4.0f);
-                            rlColor4ub(c_ls, c_ls, c_ls, 255);
+                            rlColor4ub(col_ls.r, col_ls.g, col_ls.b, 255);
                             rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(r_mid * std::cos(a0), y_mid, r_mid * std::sin(a0));
                             rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(r_mid * std::cos(a1), y_mid, r_mid * std::sin(a1));
                             rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(r_bot * std::cos(a1), y_bot, r_bot * std::sin(a1));
@@ -376,7 +397,7 @@ void ItemDropManager::draw(Texture2D spritesheet_tiles, float light, float alpha
                             float uv_x1 = u_cen_bot + std::cos(a1) * (tw * 0.45f);
                             float uv_y1 = v_cen_bot - std::sin(a1) * (th * 0.45f);
 
-                            rlColor4ub(c_b, c_b, c_b, 255);
+                            rlColor4ub(col_b.r, col_b.g, col_b.b, 255);
                             rlTexCoord2f(u_cen_bot, v_cen_bot); rlVertex3f(0.0f, y_bot, 0.0f);
                             rlTexCoord2f(u_cen_bot, v_cen_bot); rlVertex3f(0.0f, y_bot, 0.0f);
                             rlTexCoord2f(uv_x0, uv_y0); rlVertex3f(r_bot * std::cos(a0), y_bot, r_bot * std::sin(a0));

@@ -240,9 +240,26 @@ void DrawFirstPersonViewmodel(
             const auto& bt = Config::BLOCKS.at(held_block);
             bool is_plant = bt.transparent && (held_block == Config::TALL_GRASS || held_block == Config::RED_MUSHROOM || held_block == Config::BROWN_MUSHROOM || held_block == Config::DEAD_BUSH);
 
+            Color block_tint = WHITE;
+            if (bt.is_foliage || held_block == Config::LEAVES) {
+                block_tint = Color{ 85, 168, 55, 255 };
+            } else if (bt.is_grass || held_block == Config::GRASS || held_block == Config::TALL_GRASS) {
+                block_tint = Color{ 117, 185, 68, 255 };
+            }
+
+            auto tint_c = [&](unsigned char light_v, Color t) -> Color {
+                return Color{
+                    (unsigned char)((light_v * t.r) / 255),
+                    (unsigned char)((light_v * t.g) / 255),
+                    (unsigned char)((light_v * t.b) / 255),
+                    255
+                };
+            };
+
             if (is_plant) {
                 auto uvs = Config::get_tile_uv(bt.tex_x, bt.tex_y);
                 unsigned char c_plant = (unsigned char)(255 * light);
+                Color col_p = tint_c(c_plant, block_tint);
 
                 rlPushMatrix();
                     rlTranslatef(0.01f, 0.06f, 0.04f);
@@ -250,7 +267,7 @@ void DrawFirstPersonViewmodel(
                     float ps_h = 0.28f;
                     rlSetTexture(spritesheet_tiles.id);
                     rlBegin(RL_QUADS);
-                        rlColor4ub(c_plant, c_plant, c_plant, 255);
+                        rlColor4ub(col_p.r, col_p.g, col_p.b, 255);
                         rlTexCoord2f(uvs[0].x, uvs[0].y); rlVertex3f(-ps_w*0.5f, 0.0f, -ps_w*0.5f);
                         rlTexCoord2f(uvs[1].x, uvs[1].y); rlVertex3f( ps_w*0.5f, 0.0f,  ps_w*0.5f);
                         rlTexCoord2f(uvs[2].x, uvs[2].y); rlVertex3f( ps_w*0.5f, ps_h,  ps_w*0.5f);
@@ -366,6 +383,11 @@ void DrawFirstPersonViewmodel(
                     unsigned char c_ls = (unsigned char)(160 * light);
                     unsigned char c_b = (unsigned char)(120 * light);
 
+                    Color col_t = tint_c(c_t, block_tint);
+                    Color col_s = tint_c(c_s, block_tint);
+                    Color col_ls = (held_block == Config::GRASS) ? Color{ c_ls, c_ls, c_ls, 255 } : tint_c(c_ls, block_tint);
+                    Color col_b = (held_block == Config::GRASS) ? Color{ c_b, c_b, c_b, 255 } : tint_c(c_b, block_tint);
+
                     rlSetTexture(spritesheet_tiles.id);
                     rlBegin(RL_QUADS);
 
@@ -381,7 +403,7 @@ void DrawFirstPersonViewmodel(
                         float uv_x1 = u_cen_top + std::cos(a1) * (tw * 0.45f);
                         float uv_y1 = v_cen_top - std::sin(a1) * (th * 0.45f);
 
-                        rlColor4ub(c_t, c_t, c_t, 255);
+                        rlColor4ub(col_t.r, col_t.g, col_t.b, 255);
                         rlTexCoord2f(u_cen_top, v_cen_top); rlVertex3f(0.0f, y_peak, 0.0f);
                         rlTexCoord2f(u_cen_top, v_cen_top); rlVertex3f(0.0f, y_peak, 0.0f);
                         rlTexCoord2f(uv_x1, uv_y1); rlVertex3f(r_top * std::cos(a1), y_top, r_top * std::sin(a1));
@@ -393,7 +415,7 @@ void DrawFirstPersonViewmodel(
                         float a0 = i * (PI / 4.0f);
                         float a1 = next * (PI / 4.0f);
 
-                        rlColor4ub(c_s, c_s, c_s, 255);
+                        rlColor4ub(col_s.r, col_s.g, col_s.b, 255);
                         rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(r_top * std::cos(a0), y_top, r_top * std::sin(a0));
                         rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(r_top * std::cos(a1), y_top, r_top * std::sin(a1));
                         rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(r_mid * std::cos(a1), y_mid, r_mid * std::sin(a1));
@@ -405,7 +427,7 @@ void DrawFirstPersonViewmodel(
                         float a0 = i * (PI / 4.0f);
                         float a1 = next * (PI / 4.0f);
 
-                        rlColor4ub(c_ls, c_ls, c_ls, 255);
+                        rlColor4ub(col_ls.r, col_ls.g, col_ls.b, 255);
                         rlTexCoord2f(uvs_mid[3].x, uvs_mid[3].y); rlVertex3f(r_mid * std::cos(a0), y_mid, r_mid * std::sin(a0));
                         rlTexCoord2f(uvs_mid[2].x, uvs_mid[2].y); rlVertex3f(r_mid * std::cos(a1), y_mid, r_mid * std::sin(a1));
                         rlTexCoord2f(uvs_mid[1].x, uvs_mid[1].y); rlVertex3f(r_bot * std::cos(a1), y_bot, r_bot * std::sin(a1));
@@ -424,7 +446,7 @@ void DrawFirstPersonViewmodel(
                         float uv_x1 = u_cen_bot + std::cos(a1) * (tw * 0.45f);
                         float uv_y1 = v_cen_bot - std::sin(a1) * (th * 0.45f);
 
-                        rlColor4ub(c_b, c_b, c_b, 255);
+                        rlColor4ub(col_b.r, col_b.g, col_b.b, 255);
                         rlTexCoord2f(u_cen_bot, v_cen_bot); rlVertex3f(0.0f, y_bot, 0.0f);
                         rlTexCoord2f(u_cen_bot, v_cen_bot); rlVertex3f(0.0f, y_bot, 0.0f);
                         rlTexCoord2f(uv_x0, uv_y0); rlVertex3f(r_bot * std::cos(a0), y_bot, r_bot * std::sin(a0));
