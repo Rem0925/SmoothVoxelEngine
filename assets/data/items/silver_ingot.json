@@ -1,8 +1,5 @@
 {
   "id": 5,
-  "name": "Ingoto de Plata",
-  "texture": [
-    4,
-    1
-  ]
+  "name": "Lingote de Plata",
+  "texture": "item/netherite_ingot"
 }

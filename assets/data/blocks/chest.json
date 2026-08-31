@@ -14,45 +14,76 @@
     "id": 28,
     "is_item": false
   },
-  "icon": [
-    1,
-    9
-  ],
+  "icon": "block/oak_planks",
   "textures": {
-    "default": [
-      1,
-      9
-    ],
-    "latch": [
-      0,
-      8
-    ]
+    "default": "block/oak_planks",
+    "latch": "block/iron_block"
   },
   "elements": [
     {
       "name": "body",
-      "from": [1.0, 0.0, 1.0],
-      "to": [15.0, 14.0, 15.0],
+      "from": [
+        1.0,
+        0.0,
+        1.0
+      ],
+      "to": [
+        15.0,
+        14.0,
+        15.0
+      ],
       "faces": {
-        "down":  { "texture": "#default" },
-        "up":    { "texture": "#default" },
-        "north": { "texture": "#default" },
-        "south": { "texture": "#default" },
-        "west":  { "texture": "#default" },
-        "east":  { "texture": "#default" }
+        "down": {
+          "texture": "#default"
+        },
+        "up": {
+          "texture": "#default"
+        },
+        "north": {
+          "texture": "#default"
+        },
+        "south": {
+          "texture": "#default"
+        },
+        "west": {
+          "texture": "#default"
+        },
+        "east": {
+          "texture": "#default"
+        }
       }
     },
     {
       "name": "latch",
-      "from": [7.0, 7.0, 15.0],
-      "to": [9.0, 10.0, 16.0],
+      "from": [
+        7.0,
+        7.0,
+        15.0
+      ],
+      "to": [
+        9.0,
+        10.0,
+        16.0
+      ],
       "faces": {
-        "down":  { "texture": "#latch" },
-        "up":    { "texture": "#latch" },
-        "north": { "texture": "#latch" },
-        "south": { "texture": "#latch" },
-        "west":  { "texture": "#latch" },
-        "east":  { "texture": "#latch" }
+        "down": {
+          "texture": "#latch"
+        },
+        "up": {
+          "texture": "#latch"
+        },
+        "north": {
+          "texture": "#latch"
+        },
+        "south": {
+          "texture": "#latch"
+        },
+        "west": {
+          "texture": "#latch"
+        },
+        "east": {
+          "texture": "#latch"
+        }
       }
     }
   ]

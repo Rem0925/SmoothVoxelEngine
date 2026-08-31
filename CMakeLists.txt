@@ -31,22 +31,40 @@ endif()
 
 
 set(SOURCES
-    src/Biome.cpp
-    src/BlockRegistry.cpp
-    src/Caves.cpp
-    src/Chat.cpp
-    src/CommandHandler.cpp
-    src/Chunk.cpp
-    src/DatabaseIO.cpp
-    src/ItemDrop.cpp
-    src/ItemModel3D.cpp
-    src/MarchingCubes.cpp
-    src/Noise.cpp
-    src/UI.cpp
-    src/VoxelLighting.cpp
-    src/World.cpp
+    src/core/sqlite3.c
+    src/world/Chunk.cpp
+    src/world/World.cpp
+    src/world/FluidSimulation.cpp
+    src/world/VoxelLighting.cpp
+    src/world/MarchingCubes.cpp
+    src/generation/Biome.cpp
+    src/generation/Caves.cpp
+    src/generation/Noise.cpp
+    src/data/BlockRegistry.cpp
+    src/data/ResourcePackManager.cpp
+    src/data/DatabaseIO.cpp
+    src/gameplay/ItemDrop.cpp
+    src/gameplay/ItemModel3D.cpp
+    src/gameplay/CommandHandler.cpp
+    src/gameplay/PlayerPhysics.cpp
+    src/gameplay/PlayerSaveData.cpp
+    src/ui/UI.cpp
+    src/ui/UIInventory.cpp
+    src/ui/UICrafting.cpp
+    src/ui/UIDrawing.cpp
+    src/ui/Chat.cpp
+    src/ui/MenuManager.cpp
+    src/ui/MenuPause.cpp
+    src/ui/MenuOptions.cpp
+    src/ui/MenuResourcePacks.cpp
+    src/ui/DebugOverlay.cpp
+    src/rendering/Raycast.cpp
+    src/rendering/Skybox.cpp
+    src/rendering/Viewmodel.cpp
+    src/rendering/BlockHighlight.cpp
+    src/rendering/CelestialRenderer.cpp
+    src/rendering/ChunkDebugDraw.cpp
     src/main.cpp
-    src/sqlite3.c
 )
 
 # Definir el ejecutable principal

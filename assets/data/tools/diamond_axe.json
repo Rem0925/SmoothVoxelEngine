@@ -4,8 +4,5 @@
   "name": "Hacha de Diamante",
   "durability": 1500,
   "mining_speed": 4.5,
-  "texture": [
-    1,
-    2
-  ]
+  "texture": "item/diamond_axe"
 }

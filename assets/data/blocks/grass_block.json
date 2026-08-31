@@ -1,0 +1,21 @@
+{
+  "id": 0,
+  "name": "Pasto",
+  "shape": "terrain",
+  "hardness": 0.5,
+  "transparent": false,
+  "is_grass": true,
+  "is_waving": false,
+  "tool": {
+    "ideal": "shovel",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 2,
+    "is_item": false
+  },
+  "textures": {
+    "default": "block/grass_block_top"
+  }
+}

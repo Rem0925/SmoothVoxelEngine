@@ -14,40 +14,51 @@
     "id": 29,
     "is_item": false
   },
-  "icon": [
-    4,
-    5
-  ],
+  "icon": "block/furnace_front",
   "textures": {
-    "default": [
-      3,
-      5
-    ],
-    "top": [
-      3,
-      5
-    ],
-    "bottom": [
-      3,
-      5
-    ],
-    "front": [
-      4,
-      5
-    ]
+    "default": "block/cobblestone",
+    "top": "block/furnace_top",
+    "bottom": "block/cobblestone",
+    "front": "block/furnace_front"
   },
   "elements": [
     {
       "name": "cube",
-      "from": [0, 0, 0],
-      "to": [16, 16, 16],
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
       "faces": {
-        "up":    { "texture": "#top", "cullface": "up" },
-        "down":  { "texture": "#bottom", "cullface": "down" },
-        "north": { "texture": "#default", "cullface": "north" },
-        "south": { "texture": "#front", "cullface": "south" },
-        "west":  { "texture": "#default", "cullface": "west" },
-        "east":  { "texture": "#default", "cullface": "east" }
+        "up": {
+          "texture": "#top",
+          "cullface": "up"
+        },
+        "down": {
+          "texture": "#bottom",
+          "cullface": "down"
+        },
+        "north": {
+          "texture": "#default",
+          "cullface": "north"
+        },
+        "south": {
+          "texture": "#front",
+          "cullface": "south"
+        },
+        "west": {
+          "texture": "#default",
+          "cullface": "west"
+        },
+        "east": {
+          "texture": "#default",
+          "cullface": "east"
+        }
       }
     }
   ]

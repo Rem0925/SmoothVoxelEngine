@@ -4,8 +4,5 @@
   "name": "Martillo de Madera",
   "durability": 150,
   "mining_speed": 1.0,
-  "texture": [
-    3,
-    7
-  ]
+  "texture": "item/wooden_hoe"
 }

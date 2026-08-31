@@ -1,0 +1,22 @@
+{
+  "id": 5,
+  "name": "Hojas",
+  "shape": "terrain",
+  "hardness": 0.2,
+  "transparent": true,
+  "is_foliage": true,
+  "is_waving": true,
+  "light_filter": 1,
+  "tool": {
+    "ideal": "none",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 5,
+    "is_item": false
+  },
+  "textures": {
+    "default": "block/oak_leaves"
+  }
+}

@@ -5,8 +5,8 @@
   "hardness": 0.1,
   "transparent": true,
   "is_waving": false,
-  "light_emission": 14,
-   "light_filter": 0,
+  "light_emission": 15,
+  "light_filter": 0,
   "tool": {
     "ideal": "none",
     "required_tool": "none",
@@ -15,36 +15,77 @@
   "drop": {
     "id": 3,
     "is_item": false
-  },
+  }
+  ,"icon": "block/torch",
   "textures": {
-    "default": [1, 9],
-    "flame": [5, 7]
+    "default": "block/oak_log",
+    "flame": "block/red_terracotta"
   },
   "elements": [
     {
       "name": "stick",
-      "from": [-0.06, -0.5, -0.06],
-      "to": [0.06, 0.25, 0.06],
+      "from": [
+        -0.03,
+        -0.5,
+        -0.03
+      ],
+      "to": [
+        0.03,
+        -0.2,
+        0.03
+      ],
       "faces": {
-        "down":  { "texture": "#default" },
-        "up":    { "texture": "#default" },
-        "north": { "texture": "#default" },
-        "south": { "texture": "#default" },
-        "west":  { "texture": "#default" },
-        "east":  { "texture": "#default" }
+        "down": {
+          "texture": "#default"
+        },
+        "up": {
+          "texture": "#default"
+        },
+        "north": {
+          "texture": "#default"
+        },
+        "south": {
+          "texture": "#default"
+        },
+        "west": {
+          "texture": "#default"
+        },
+        "east": {
+          "texture": "#default"
+        }
       }
     },
     {
       "name": "flame",
-      "from": [-0.08, 0.25, -0.08],
-      "to": [0.08, 0.5, 0.08],
+      "from": [
+        -0.06,
+        -0.2,
+        -0.06
+      ],
+      "to": [
+        0.06,
+        0,
+        0.06
+      ],
       "faces": {
-        "down":  { "texture": "#flame" },
-        "up":    { "texture": "#flame" },
-        "north": { "texture": "#flame" },
-        "south": { "texture": "#flame" },
-        "west":  { "texture": "#flame" },
-        "east":  { "texture": "#flame" }
+        "down": {
+          "texture": "#flame"
+        },
+        "up": {
+          "texture": "#flame"
+        },
+        "north": {
+          "texture": "#flame"
+        },
+        "south": {
+          "texture": "#flame"
+        },
+        "west": {
+          "texture": "#flame"
+        },
+        "east": {
+          "texture": "#flame"
+        }
       }
     }
   ]

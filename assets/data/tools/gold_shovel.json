@@ -4,8 +4,5 @@
   "name": "Pala de Oro",
   "durability": 50,
   "mining_speed": 7.0,
-  "texture": [
-    2,
-    3
-  ]
+  "texture": "item/golden_shovel"
 }

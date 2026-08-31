@@ -4,8 +4,5 @@
   "name": "Martillo de Piedra",
   "durability": 300,
   "mining_speed": 1.5,
-  "texture": [
-    3,
-    6
-  ]
+  "texture": "item/stone_hoe"
 }

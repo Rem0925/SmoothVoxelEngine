@@ -1,0 +1,20 @@
+{
+  "id": 14,
+  "name": "Madera Abedul",
+  "shape": "terrain",
+  "hardness": 2.0,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 14,
+    "is_item": false
+  },
+  "textures": {
+    "default": "block/birch_log"
+  }
+}

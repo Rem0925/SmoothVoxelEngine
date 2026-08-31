@@ -15,9 +15,6 @@
     "is_item": false
   },
   "textures": {
-    "default": [
-      6,
-      7
-    ]
+    "default": "block/dead_bush"
   }
 }

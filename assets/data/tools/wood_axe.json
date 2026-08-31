@@ -4,8 +4,5 @@
   "name": "Hacha de Madera",
   "durability": 100,
   "mining_speed": 1.5,
-  "texture": [
-    1,
-    7
-  ]
+  "texture": "item/wooden_axe"
 }

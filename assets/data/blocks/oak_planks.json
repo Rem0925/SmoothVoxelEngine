@@ -1,0 +1,61 @@
+{
+  "id": 22,
+  "name": "Tablas de Madera",
+  "shape": "cube",
+  "hardness": 1.2,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 22,
+    "is_item": false
+  },
+  "textures": {
+    "default": "block/oak_planks"
+  },
+  "elements": [
+    {
+      "name": "cube",
+      "from": [
+        0,
+        0,
+        0
+      ],
+      "to": [
+        16,
+        16,
+        16
+      ],
+      "faces": {
+        "up": {
+          "texture": "#default",
+          "cullface": "up"
+        },
+        "down": {
+          "texture": "#default",
+          "cullface": "down"
+        },
+        "north": {
+          "texture": "#default",
+          "cullface": "north"
+        },
+        "south": {
+          "texture": "#default",
+          "cullface": "south"
+        },
+        "west": {
+          "texture": "#default",
+          "cullface": "west"
+        },
+        "east": {
+          "texture": "#default",
+          "cullface": "east"
+        }
+      }
+    }
+  ]
+}

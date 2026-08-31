@@ -1,0 +1,25 @@
+{
+  "id": 27,
+  "name": "Puerta de Madera",
+  "shape": "door",
+  "hardness": 1.5,
+  "transparent": true,
+  "is_waving": false,
+  "light_filter": 1,
+  "tool": {
+    "ideal": "axe",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 27,
+    "is_item": false
+  },
+  "icon": "block/oak_door_top",
+  "textures": {
+    "default": "block/oak_door_bottom",
+    "top": "block/oak_door_top",
+    "bottom": "block/oak_door_bottom",
+    "front": "block/oak_door_bottom"
+  }
+}

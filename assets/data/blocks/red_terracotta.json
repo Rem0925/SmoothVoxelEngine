@@ -1,0 +1,20 @@
+{
+  "id": 13,
+  "name": "Arcilla Roja",
+  "shape": "terrain",
+  "hardness": 0.6,
+  "transparent": false,
+  "is_waving": false,
+  "tool": {
+    "ideal": "shovel",
+    "required_tool": "none",
+    "required_tier": 0
+  },
+  "drop": {
+    "id": 13,
+    "is_item": false
+  },
+  "textures": {
+    "default": "block/red_terracotta"
+  }
+}

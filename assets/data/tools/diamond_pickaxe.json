@@ -4,8 +4,5 @@
   "name": "Pico de Diamante",
   "durability": 1500,
   "mining_speed": 3.0,
-  "texture": [
-    0,
-    2
-  ]
+  "texture": "item/diamond_pickaxe"
 }

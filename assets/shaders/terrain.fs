@@ -78,6 +78,9 @@ void main()
         blockColor = (outFoliageFlags.y > 0.5) ? fragColor.rgb : vec3(1.0);
     }
 
+    // EARLY DISCARD: Si el texel resultante es transparente, descartar inmediatamente antes de calcular luces, AO y niebla
+    if (blendedTex.a * colDiffuse.a < 0.5) discard;
+
     // --- ILUMINACIÓN FLAT SHADING CON AO Y LUZ VOXEL ---
     vec3 dpdx = dFdx(fragPosition);
     vec3 dpdy = dFdy(fragPosition);
@@ -133,7 +136,4 @@ void main()
     vec3 dynamicFogColor = fogColor + sunsetColor;
     
     finalColor.rgb = mix(finalColor.rgb, dynamicFogColor, fogFactor);
-    
-    // Discard transparent pixels
-    if (finalColor.a < 0.1) discard;
 }
