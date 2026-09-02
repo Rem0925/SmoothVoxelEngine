@@ -612,14 +612,19 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         if (b2 != b1) b_secondary = b2;
                         else if (b3 != b1) b_secondary = b3;
 
-                        auto is_terrain = [](uint8_t b) {
-                            return b != Config::TORCH && b != Config::WATER && b != Config::AIR;
-                        };
-                        
-                        if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {
-                            b_secondary = b_primary;
-                        } else if (b_primary > b_secondary) {
-                            std::swap(b_primary, b_secondary);
+                        if (default_block == Config::WATER) {
+                            b_primary = Config::WATER;
+                            b_secondary = Config::WATER;
+                        } else {
+                            auto is_terrain = [](uint8_t b) {
+                                return b != Config::TORCH && b != Config::WATER && b != Config::AIR;
+                            };
+                            
+                            if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {
+                                b_secondary = b_primary;
+                            } else if (b_primary > b_secondary) {
+                                std::swap(b_primary, b_secondary);
+                            }
                         }
 
                         bool pri_is_foliage = (b_primary == Config::GRASS || b_primary == Config::LEAVES || (Config::BLOCKS.count(b_primary) && (Config::BLOCKS.at(b_primary).is_foliage || Config::BLOCKS.at(b_primary).is_grass)));

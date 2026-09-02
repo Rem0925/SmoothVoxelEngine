@@ -1534,21 +1534,64 @@ void Chunk::build_water_mesh(const Config::VoxelData* voxels_ptr, int lod, uint8
         return (unsigned char)((1.0f - normalized) * 255.0f);
     };
 
+    auto is_flowing_water = [&](int x, int y, int z) -> bool {
+        if (x < 0 || x > Config::CHUNK_SIZE || z < 0 || z > Config::CHUNK_SIZE || y < 0 || y >= Config::GRID_Y) return false;
+        int idx = y * wx * wx + z * wx + x;
+        if (voxels_ptr[idx].block != Config::WATER) return false;
+        if (voxels_ptr[idx].water < 8) return true;
+        if (y > 0) {
+            int down_idx = (y - 1) * wx * wx + z * wx + x;
+            if (voxels_ptr[down_idx].block == Config::AIR) return true;
+        }
+        return false;
+    };
+
     for (size_t i = 0; i < lw_vertices.size(); i += 3) {
         Vector3 v0 = lw_vertices[i];
         Vector3 v1 = lw_vertices[i+1];
         Vector3 v2 = lw_vertices[i+2];
 
-        auto apply_slant = [&](Vector3& v) {
-            float sh = sample_height(v.x, v.z);
-            if (sh > 0.0f && v.y > sh - 0.5f) {
-                v.y = sh;
-            }
+        Vector3 u_init = { v1.x - v0.x, v1.y - v0.y, v1.z - v0.z };
+        Vector3 v_init = { v2.x - v0.x, v2.y - v0.y, v2.z - v0.z };
+        Vector3 n_init = {
+            u_init.y * v_init.z - u_init.z * v_init.y,
+            u_init.z * v_init.x - u_init.x * v_init.z,
+            u_init.x * v_init.y - u_init.y * v_init.x
         };
+        float len_init = std::sqrt(n_init.x * n_init.x + n_init.y * n_init.y + n_init.z * n_init.z);
+        if (len_init < 0.0001f) continue;
+        n_init.x /= len_init; n_init.y /= len_init; n_init.z /= len_init;
 
-        apply_slant(v0);
-        apply_slant(v1);
-        apply_slant(v2);
+        Vector3 vc = { (v0.x + v1.x + v2.x) / 3.0f, (v0.y + v1.y + v2.y) / 3.0f, (v0.z + v1.z + v2.z) / 3.0f };
+        int ix = std::clamp((int)std::floor(vc.x), 0, Config::CHUNK_SIZE);
+        int iy = std::clamp((int)std::floor(vc.y), 0, Config::GRID_Y - 1);
+        int iz = std::clamp((int)std::floor(vc.z), 0, Config::CHUNK_SIZE);
+
+        bool flowing = is_flowing_water(ix, iy, iz);
+
+        // En lagos (agua en reposo): eliminar toda la geometría 3D (paredes laterales y fondo)
+        // Conservar EXCLUSIVAMENTE la superficie superior horizontal
+        if (!flowing) {
+            float sh = sample_height(vc.x, vc.z);
+            bool is_top_surface = (n_init.y < -0.5f && vc.y > sh - 0.5f);
+            if (!is_top_surface) {
+                continue;
+            }
+            v0.y = sample_height(v0.x, v0.z);
+            v1.y = sample_height(v1.x, v1.z);
+            v2.y = sample_height(v2.x, v2.z);
+        } else {
+            auto apply_slant = [&](Vector3& v) {
+                float sh = sample_height(v.x, v.z);
+                if (sh > 0.0f && v.y > sh - 0.5f) {
+                    v.y = sh;
+                }
+            };
+
+            apply_slant(v0);
+            apply_slant(v1);
+            apply_slant(v2);
+        }
 
         // Recalculate normal for triangles
         Vector3 u = { v1.x - v0.x, v1.y - v0.y, v1.z - v0.z };
