@@ -39,6 +39,7 @@ static Config::BlockShape parse_block_shape(const std::string& str) {
     if (str == "furnace") return Config::SHAPE_FURNACE;
     if (str == "crafting_table") return Config::SHAPE_CRAFTING_TABLE;
     if (str == "glass") return Config::SHAPE_GLASS;
+    if (str == "fluid") return Config::SHAPE_FLUID;
     return Config::SHAPE_CUBE;
 }
 

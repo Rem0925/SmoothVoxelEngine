@@ -339,7 +339,7 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
         is_trans_lut[Config::LEAVES] = true;
         for (const auto& [id, bt] : Config::BLOCKS) {
             if (id < 256) {
-                if (bt.shape == Config::SHAPE_TERRAIN) {
+                if (id != Config::WATER && bt.shape == Config::SHAPE_TERRAIN) {
                     is_terrain_lut[id] = true;
                     if (bt.transparent || bt.is_foliage) {
                         is_trans_lut[id] = true;
@@ -347,6 +347,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                 }
             }
         }
+        is_terrain_lut[Config::WATER] = false;
+        is_trans_lut[Config::WATER] = false;
         luts_initialized = true;
     }
 
@@ -415,6 +417,8 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
             uint8_t b = get_raw_block(ix_f, iy_f, iz_f);
             if (!is_terrain_lut[b]) b = get_raw_block(ix_c, iy_c, iz_c);
             if (!is_terrain_lut[b]) b = get_raw_block(ix_f, iy_f - 1, iz_f);
+            if (!is_terrain_lut[b]) b = get_raw_block(ix_c, iy_c - 1, iz_c);
+            if (!is_terrain_lut[b]) b = get_raw_block(ix_f, iy_f - 2, iz_f);
             if (!is_terrain_lut[b]) b = get_raw_block(ix_f, iy_f + 1, iz_f);
             if (!is_terrain_lut[b]) b = default_block;
             return b;
@@ -609,7 +613,7 @@ void generate(const Config::VoxelData* voxels, const float* custom_density, int 
                         else if (b3 != b1) b_secondary = b3;
 
                         auto is_terrain = [](uint8_t b) {
-                            return b != Config::TORCH;
+                            return b != Config::TORCH && b != Config::WATER && b != Config::AIR;
                         };
                         
                         if (!is_terrain(b_primary) || !is_terrain(b_secondary)) {

@@ -1,7 +1,7 @@
 {
   "id": 7,
   "name": "Agua",
-  "shape": "terrain",
+  "shape": "fluid",
   "hardness": 999.0,
   "transparent": true,
   "is_waving": false,

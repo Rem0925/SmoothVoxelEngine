@@ -71,7 +71,8 @@ namespace Config {
         SHAPE_CHEST = 6,          // Cofre (interactivo con almacenamiento)
         SHAPE_FURNACE = 7,        // Horno de piedra con boca frontal
         SHAPE_CRAFTING_TABLE = 8, // Mesa de crafteo con tablero
-        SHAPE_GLASS = 9           // Cubo de cristal
+        SHAPE_GLASS = 9,          // Cubo de cristal
+        SHAPE_FLUID = 10          // Fluidos (agua, lava, etc.)
     };
 
     enum BlockID : uint8_t {
