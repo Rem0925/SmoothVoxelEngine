@@ -60,7 +60,7 @@ void FluidSimulator::activate(int wx, int wy, int wz) {
     if (wx < -(1 << 19) || wx >= (1 << 19) || wz < -(1 << 19) || wz >= (1 << 19)) return;
     if (wy < 0 || wy >= Config::GRID_Y) return;
     std::lock_guard<std::mutex> lock(active_mutex);
-    if (active_cells.size() < 5000) {
+    if (active_cells.size() < 50000) {
         active_cells.push_back(cell_key(wx, wy, wz));
     }
 }
@@ -139,7 +139,10 @@ void FluidSimulator::simulate_water_pass() {
         int ccx = std::floor((float)wx / Config::CHUNK_SIZE);
         int ccz = std::floor((float)wz / Config::CHUNK_SIZE);
         std::shared_ptr<Chunk>* found = snap_find(ccx, ccz);
-        if (!found) continue;
+        if (!found) {
+            next_active.push_back(k); // Preservar celda activa hasta que el chunk esté cargado
+            continue;
+        }
         Chunk* c = found->get();
         int lx = wx - ccx * Config::CHUNK_SIZE;
         int lz = wz - ccz * Config::CHUNK_SIZE;
@@ -163,7 +166,7 @@ void FluidSimulator::simulate_water_pass() {
             else if (tl > Config::CHUNK_SIZE) { target = get_target(wx2, wz2); tl -= Config::CHUNK_SIZE; }
             if (tlz < 0) { target = get_target(wx2, wz2); tlz += Config::CHUNK_SIZE; }
             else if (tlz > Config::CHUNK_SIZE) { target = get_target(wx2, wz2); tlz -= Config::CHUNK_SIZE; }
-            if (!target) return Config::AIR;
+            if (!target) return Config::STONE;
             return target->get_block(tl, wy2, tlz);
         };
 
@@ -207,11 +210,18 @@ void FluidSimulator::simulate_water_pass() {
                 if (above > 0) {
                     expected = 7;
                 } else {
+                    uint8_t max_parent = 0;
                     for (int d = 0; d < 4; ++d) {
                         uint8_t nL = read_level(wx + dirs[d][0], wy, wz + dirs[d][1]);
-                        if (nL == 8) expected = std::max(expected, (uint8_t)7);
-                        else if (nL > 1 && nL <= 7) expected = std::max(expected, (uint8_t)(nL - 1));
+                        // Regla Minecraft: un vecino solo puede alimentar agua si su nivel es estrictamente mayor que el actual.
+                        // Esto rompe los bucles circulares y hace que al tapar el origen el agua se seque completamente.
+                        if (nL > L || L == 0) {
+                            if (nL > max_parent) max_parent = nL;
+                        }
                     }
+                    if (max_parent == 8) expected = 7;
+                    else if (max_parent > 1) expected = max_parent - 1;
+                    else expected = 0;
                 }
             }
         }
@@ -256,7 +266,7 @@ void FluidSimulator::simulate_water_pass() {
         std::sort(next_active.begin(), next_active.end());
         next_active.erase(std::unique(next_active.begin(), next_active.end()), next_active.end());
         for (uint64_t k : next_active) {
-            if (active_cells.size() < 5000) active_cells.push_back(k);
+            if (active_cells.size() < 50000) active_cells.push_back(k);
         }
     }
 }

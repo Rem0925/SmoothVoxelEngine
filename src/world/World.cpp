@@ -204,13 +204,8 @@ void World::draw(Camera3D camera) {
     rlEnableBackfaceCulling();
 
     // Pass 3: Blended transparent geometry (Water)
-    int cam_x = std::floor(camera.position.x);
-    int cam_y = std::floor(camera.position.y);
-    int cam_z = std::floor(camera.position.z);
-    bool is_underwater = (get_block(cam_x, cam_y, cam_z) == Config::WATER);
-
-    rlEnableBackfaceCulling();
-    rlSetCullFace(is_underwater ? RL_CULL_FACE_BACK : RL_CULL_FACE_FRONT);
+    // El agua debe verse por ambas caras (tanto desde fuera del agua como desde dentro al sumergirse)
+    rlDisableBackfaceCulling();
     rlDisableDepthMask();
 
     for (auto& c : snapshot) {
@@ -226,6 +221,7 @@ void World::draw(Camera3D camera) {
     }
 
     rlEnableDepthMask();
+    rlEnableBackfaceCulling();
     rlSetCullFace(RL_CULL_FACE_BACK);
 }
 
