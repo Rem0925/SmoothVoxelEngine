@@ -32,6 +32,7 @@ endif()
 
 set(SOURCES
     src/core/sqlite3.c
+    src/core/AudioManager.cpp
     src/world/Chunk.cpp
     src/world/World.cpp
     src/world/FluidSimulation.cpp

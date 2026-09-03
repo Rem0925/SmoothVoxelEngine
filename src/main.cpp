@@ -34,6 +34,7 @@
 #include "ui/DebugOverlay.hpp"
 #include "gameplay/PlayerSaveData.hpp"
 #include "gameplay/PlayerPhysics.hpp"
+#include "core/AudioManager.hpp"
 
 using json = nlohmann::json;
 using namespace Config;
@@ -46,6 +47,7 @@ int main() {
     SetExitKey(0);
     SetTargetFPS(MAX_FPS); 
     DisableCursor();
+    AudioManager::get().init();
 
     BlockRegistry::load_all("assets/data");
     
@@ -188,6 +190,7 @@ int main() {
         std::string last_pack_path;
         float autosave_timer = 0.0f;
         float tick_accumulator = 0.0f;
+        float mining_hit_timer = 0.0f;
     };
     GameState gs;
     gs.last_pack_path = MenuResourcePacks::get_active_pack_path();
@@ -315,6 +318,29 @@ int main() {
                 gs.player_vel_y = pp_state.player_vel_y;
                 gs.is_grounded = pp_state.is_grounded;
                 gs.smooth_step_offset = pp_state.smooth_step_offset;
+
+                if (!gs.spectator_mode) {
+                    float dx = camera.position.x - old_pos.x;
+                    float dz = camera.position.z - old_pos.z;
+                    float horiz_dist = std::sqrt(dx * dx + dz * dz);
+                    float horiz_speed = (dt_cam > 1e-4f) ? (horiz_dist / dt_cam) : 0.0f;
+
+                    int cam_x = std::floor(camera.position.x);
+                    int cam_y = std::floor(camera.position.y);
+                    int cam_z = std::floor(camera.position.z);
+                    int feet_y = std::floor(camera.position.y - Config::PLAYER_EYE_HEIGHT);
+
+                    bool in_water = (world.get_block(cam_x, feet_y, cam_z) == Config::WATER ||
+                                     world.get_block(cam_x, cam_y, cam_z) == Config::WATER ||
+                                     camera.position.y < (Config::WATER_LEVEL + 0.1f));
+
+                    uint8_t block_below = world.get_block(cam_x, std::floor(camera.position.y - Config::PLAYER_EYE_HEIGHT - 0.1f), cam_z);
+                    if (block_below == Config::AIR) {
+                        block_below = world.get_block(cam_x, std::floor(camera.position.y - Config::PLAYER_EYE_HEIGHT - 0.5f), cam_z);
+                    }
+
+                    AudioManager::get().update_footsteps(dt_cam, gs.is_grounded, in_water, horiz_speed, block_below);
+                }
             }
 
             Vector3 forward = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
@@ -333,6 +359,8 @@ int main() {
                             gs.mining_block.y = (float)(int)target_solid.y;
                             gs.mining_block.z = (float)(int)target_solid.z;
                             gs.is_mining = true;
+                            gs.mining_hit_timer = 0.0f;
+                            AudioManager::get().play_hit(target_block);
                         }
                     }
                     
@@ -368,12 +396,14 @@ int main() {
                                 if (target_empty.y + 1 < Config::GRID_Y && world.get_block(target_empty.x, target_empty.y + 1, target_empty.z) == Config::AIR) {
                                     world.set_block(target_empty.x, target_empty.y, target_empty.z, Config::DOOR_WOOD, rot);
                                     world.set_block(target_empty.x, target_empty.y + 1, target_empty.z, Config::DOOR_WOOD, rot | 8);
+                                    AudioManager::get().play_place(Config::DOOR_WOOD);
                                     ui.consume_held_item();
                                 } else {
                                     chat.add_message("[Puerta] Requiere 2 bloques de altura libre para colocarse.");
                                 }
                             } else {
                                 world.set_block(target_empty.x, target_empty.y, target_empty.z, ui.slots[ui.selected_slot].id, rot);
+                                AudioManager::get().play_place(ui.slots[ui.selected_slot].id);
                                 ui.consume_held_item();
                             }
                         }
@@ -394,15 +424,22 @@ int main() {
                     }
 
                     if (look_b == Config::CHEST) {
+                        AudioManager::get().play(SoundType::CHEST_OPEN);
                         ui.open_chest({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::CRAFTING_TABLE) {
+                        AudioManager::get().play(SoundType::STEP_WOOD);
                         ui.open_crafting_table({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::FURNACE) {
+                        AudioManager::get().play(SoundType::STEP_STONE);
                         ui.open_furnace({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::DOOR_WOOD) {
                         uint8_t rot = world.get_rotation(bx, by, bz);
                         uint8_t new_rot = rot ^ 4; // Toggle open/close bit
                         world.set_block(bx, by, bz, Config::DOOR_WOOD, new_rot);
+                        bool is_opening = !(new_rot & 4);
+                        if (is_opening) AudioManager::get().play(SoundType::DOOR_OPEN);
+                        else AudioManager::get().play(SoundType::DOOR_CLOSE);
+
                         if (by + 1 < Config::GRID_Y && world.get_block(bx, by + 1, bz) == Config::DOOR_WOOD) {
                             uint8_t top_rot = world.get_rotation(bx, by + 1, bz);
                             world.set_block(bx, by + 1, bz, Config::DOOR_WOOD, (top_rot & ~4) | (new_rot & 4));
@@ -464,6 +501,12 @@ int main() {
             if (gs.is_mining && IsMouseButtonDown(MOUSE_LEFT_BUTTON) && ui.selected_slot == 0) {
                 uint8_t target_block = world.get_block((int)gs.mining_block.x, (int)gs.mining_block.y, (int)gs.mining_block.z);
                 if (target_block != AIR && target_block != WATER) {
+                    gs.mining_hit_timer += TICK_TIME;
+                    if (gs.mining_hit_timer >= 0.28f) {
+                        gs.mining_hit_timer = 0.0f;
+                        AudioManager::get().play_hit(target_block);
+                    }
+
                     const BlockType& bt = BLOCKS.at(target_block);
                     ToolSlot* tool = ui.get_active_tool();
                     bool can_break = (bt.require_tier != 255);
@@ -509,6 +552,7 @@ int main() {
                         gs.mining_progress += damage_per_tick;
 
                         if (gs.mining_progress >= 1.0f) {
+                            AudioManager::get().play_break(target_block);
                             if (tool && tool->type == TOOL_HAMMER) {
                                 int broken = world.flatten_terrain((int)gs.mining_block.x, (int)gs.mining_block.y, (int)gs.mining_block.z, hammer_area, (int)tool->tier, &item_drops);
                                 int uses = std::max(1, broken);
@@ -731,6 +775,7 @@ int main() {
     UnloadTexture(sky_top);
     UnloadTexture(sky_bottom);
     
+    AudioManager::get().cleanup();
     CloseWindow();
     return 0;
 }

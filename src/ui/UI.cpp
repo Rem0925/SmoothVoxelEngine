@@ -1,4 +1,5 @@
 #include "ui/UI.hpp"
+#include "core/AudioManager.hpp"
 #include <algorithm>
 
 using namespace Config;
@@ -56,6 +57,9 @@ void UI::open_furnace(Vector3 pos) {
 }
 
 void UI::close_ui() {
+    if (mode == UI_MODE_CHEST) {
+        AudioManager::get().play(SoundType::CHEST_CLOSE);
+    }
     cancel_drag();
     mode = UI_MODE_CLOSED;
     is_open = false;

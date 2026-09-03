@@ -1,6 +1,7 @@
 #include "gameplay/ItemDrop.hpp"
 #include "gameplay/ItemModel3D.hpp"
 #include "world/World.hpp"
+#include "core/AudioManager.hpp"
 #include <rlgl.h>
 #include <raymath.h>
 #include <cmath>
@@ -161,6 +162,7 @@ void ItemDropManager::update(float dt, World& world, Vector3 player_pos, UI& ui)
             } else {
                 for (int c = 0; c < d.count; ++c) ui.add_resource(d.id);
             }
+            AudioManager::get().play(SoundType::PICKUP_ITEM, 0.75f, 0.15f);
             drops.erase(drops.begin() + i);
         } else {
             ++i;
