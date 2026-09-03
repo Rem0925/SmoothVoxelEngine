@@ -8,6 +8,9 @@ struct PlayerPhysicsState {
     bool is_grounded = false;
     float smooth_step_offset = 0.0f;
     bool spectator_mode = false;
+    float fall_distance = 0.0f;
+    bool just_landed = false;
+    float landed_fall_distance = 0.0f;
 };
 
 // pre_move_pos = position before WASD (for collision fallback)

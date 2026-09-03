@@ -8,7 +8,7 @@
 
 using json = nlohmann::json;
 
-void load_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, float& day_time) {
+void load_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, float& day_time, int& health) {
     std::ifstream file(save_dir + "/player.json");
     if (file.is_open()) {
         try {
@@ -22,6 +22,7 @@ void load_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, flo
             camera.target.z = pj.value("target_z", camera.position.z + 1.0f);
 
             day_time = pj.value("day_time", 1.5f);
+            health = pj.value("health", 20);
 
             for (size_t i = 0; i < ui.slots.size(); i++) {
                 std::string k_id = "slot_" + std::to_string(i) + "_id";
@@ -81,7 +82,7 @@ void load_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, flo
     }
 }
 
-void save_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, float day_time) {
+void save_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, float day_time, int health) {
     std::ofstream out(save_dir + "/player.json");
     if (out.is_open()) {
         json pj;
@@ -92,6 +93,7 @@ void save_player_data(const std::string& save_dir, Camera3D& camera, UI& ui, flo
         pj["target_y"] = camera.target.y;
         pj["target_z"] = camera.target.z;
         pj["day_time"] = day_time;
+        pj["health"] = health;
 
         for (size_t i = 0; i < ui.slots.size(); i++) {
             pj["slot_" + std::to_string(i) + "_id"] = (int)ui.slots[i].id;

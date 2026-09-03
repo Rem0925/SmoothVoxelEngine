@@ -54,6 +54,9 @@ void AudioManager::init() {
     load_sound(SoundType::CHEST_OPEN,  "assets/audio/chest_open.wav");
     load_sound(SoundType::CHEST_CLOSE, "assets/audio/chest_close.wav");
 
+    load_sound(SoundType::PLAYER_HURT, "assets/audio/hurt.wav");
+    load_sound(SoundType::PLAYER_EAT,  "assets/audio/eat.wav");
+
     std::cout << "[Audio] Sistema de audio inicializado con exito (" << sounds.size() << " sonidos cargados)." << std::endl;
 }
 

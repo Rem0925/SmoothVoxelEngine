@@ -86,6 +86,7 @@ public:
     void update();
     void tick_furnaces();                    // Ejecutado en cada tick de 20 TPS
     void draw();
+    void draw_survival_hud(int health, int max_health, float air_supply, float max_air, bool in_water, float hurt_flash_timer);
     
     void toggle_inventory();
     void open_crafting_table(Vector3 pos);

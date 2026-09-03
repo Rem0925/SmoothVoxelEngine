@@ -22,7 +22,9 @@ enum class SoundType {
     DOOR_OPEN,
     DOOR_CLOSE,
     CHEST_OPEN,
-    CHEST_CLOSE
+    CHEST_CLOSE,
+    PLAYER_HURT,
+    PLAYER_EAT
 };
 
 enum class MaterialCategory {

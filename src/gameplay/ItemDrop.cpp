@@ -94,6 +94,14 @@ void ItemDropManager::update(float dt, World& world, Vector3 player_pos, UI& ui)
     // 1. Físicas y movimiento de cada drop
     for (size_t i = 0; i < drops.size(); ++i) {
         auto& d = drops[i];
+
+        int drop_cx = (int)std::floor(d.position.x / Config::CHUNK_SIZE);
+        int drop_cz = (int)std::floor(d.position.z / Config::CHUNK_SIZE);
+        if (!world.get_chunk(drop_cx, drop_cz)) {
+            // Chunk descargado: congelar físicas y tiempo para evitar caída al vacío
+            continue;
+        }
+
         d.prev_position = d.position;
         d.lifetime += dt;
         d.rot_y += 75.0f * dt;

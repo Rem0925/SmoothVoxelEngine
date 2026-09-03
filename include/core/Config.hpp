@@ -56,6 +56,7 @@ namespace Config {
         ITEM_SILVER_INGOT = 5,
         ITEM_GOLD_INGOT = 6,
         ITEM_DIAMOND_INGOT = 7,
+        ITEM_APPLE = 8,
         ITEM_COUNT
     };
 

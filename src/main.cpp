@@ -191,11 +191,35 @@ int main() {
         float autosave_timer = 0.0f;
         float tick_accumulator = 0.0f;
         float mining_hit_timer = 0.0f;
+
+        // Supervivencia (estilo Minecraft Beta pre-adventure)
+        int health = 20;
+        int max_health = 20;
+        float hurt_timer = 0.0f;
+        float hurt_flash_timer = 0.0f;
+        float air_supply = 15.0f;
+        float max_air = 15.0f;
+        float drown_damage_timer = 0.0f;
+        float fall_distance = 0.0f;
+        bool has_landed_initial = false;
+        bool is_dead = false;
+        std::string death_reason = "";
     };
     GameState gs;
     gs.last_pack_path = MenuResourcePacks::get_active_pack_path();
 
-    load_player_data(save_dir, camera, ui, gs.day_time);
+    load_player_data(save_dir, camera, ui, gs.day_time, gs.health);
+
+    // Si la posición guardada estaba en el aire (ej. y >= 90.0f o primera vez), posicionar en la superficie sólida
+    world.update(camera.position);
+    if (camera.position.y >= 85.0f) {
+        float surface_y = world.get_spawn_surface_y(camera.position.x, camera.position.z);
+        camera.position.y = surface_y + Config::PLAYER_EYE_HEIGHT;
+        camera.target.y = camera.position.y;
+    }
+    gs.player_vel_y = 0.0f;
+    gs.is_grounded = true;
+    gs.has_landed_initial = false;
 
     while (!WindowShouldClose()) {
         bool ray_hit_valid = false;
@@ -259,10 +283,60 @@ int main() {
         if (gs.autosave_timer >= 5.0f) {
             gs.autosave_timer = 0.0f;
             world.save_all();
-            save_player_data(save_dir, camera, ui, gs.day_time);
+            save_player_data(save_dir, camera, ui, gs.day_time, gs.health);
         }
 
-        if (!ui.is_open && !chat.is_open && !menu.is_paused()) {
+        auto drop_all_inventory = [&]() {
+            for (size_t i = 0; i < ui.slots.size(); ++i) {
+                if (ui.slots[i].count > 0 && ui.slots[i].id != Config::AIR) {
+                    Vector3 drop_pos = camera.position;
+                    Vector3 drop_vel = { Config::rand_float(-2.0f, 2.0f), Config::rand_float(3.0f, 5.0f), Config::rand_float(-2.0f, 2.0f) };
+                    item_drops.spawn(drop_pos, ui.slots[i].id, (ui.slots[i].id == 254), ui.slots[i].count, drop_vel, 2.0f);
+                    ui.slots[i].count = 0;
+                    ui.slots[i].id = Config::AIR;
+                    ui.slots[i].name = "";
+                }
+            }
+            for (size_t i = 0; i < ui.storage.size(); ++i) {
+                if (ui.storage[i].count > 0 && ui.storage[i].id != Config::AIR) {
+                    Vector3 drop_pos = camera.position;
+                    Vector3 drop_vel = { Config::rand_float(-2.0f, 2.0f), Config::rand_float(3.0f, 5.0f), Config::rand_float(-2.0f, 2.0f) };
+                    item_drops.spawn(drop_pos, ui.storage[i].id, (ui.storage[i].id == 254), ui.storage[i].count, drop_vel, 2.0f);
+                    ui.storage[i].count = 0;
+                    ui.storage[i].id = Config::AIR;
+                    ui.storage[i].name = "";
+                }
+            }
+            for (auto& t : ui.tool_inventory) {
+                Vector3 drop_pos = camera.position;
+                Vector3 drop_vel = { Config::rand_float(-2.0f, 2.0f), Config::rand_float(3.0f, 5.0f), Config::rand_float(-2.0f, 2.0f) };
+                item_drops.spawn_tool(drop_pos, t.type, t.tier, t.durability_current, drop_vel, 2.0f);
+            }
+            ui.tool_inventory.clear();
+            ui.selected_tool_idx = -1;
+        };
+
+        auto apply_damage = [&](int amount, const std::string& reason) {
+            if (gs.spectator_mode || gs.is_dead || gs.hurt_timer > 0.0f || amount <= 0) return;
+            gs.health -= amount;
+            gs.hurt_timer = 0.4f;
+            gs.hurt_flash_timer = 0.25f;
+            AudioManager::get().play(SoundType::PLAYER_HURT, 0.9f, 0.15f);
+            if (gs.health <= 0) {
+                gs.health = 0;
+                gs.is_dead = true;
+                gs.death_reason = reason;
+                drop_all_inventory();
+                EnableCursor();
+                chat.add_message(TextFormat("[Muerte] %s", reason.c_str()));
+            }
+        };
+
+        float dt_frame = GetFrameTime();
+        if (gs.hurt_timer > 0.0f) gs.hurt_timer -= dt_frame;
+        if (gs.hurt_flash_timer > 0.0f) gs.hurt_flash_timer -= dt_frame;
+
+        if (!ui.is_open && !chat.is_open && !menu.is_paused() && !gs.is_dead) {
             if (IsKeyPressed(KEY_Q)) {
                 Vector3 forward_dir = Vector3Normalize(Vector3Subtract(camera.target, camera.position));
                 Vector3 throw_pos = Vector3Add(camera.position, Vector3Scale(forward_dir, 0.6f));
@@ -310,14 +384,24 @@ int main() {
                 UpdateCameraPro(&camera, movement, rotation, 0.0f);
             }
 
-
             {
                 Vector3 post_update_pos = camera.position;
-                PlayerPhysicsState pp_state = { gs.player_vel_y, gs.is_grounded, gs.smooth_step_offset, gs.spectator_mode };
+                PlayerPhysicsState pp_state = { gs.player_vel_y, gs.is_grounded, gs.smooth_step_offset, gs.spectator_mode, gs.fall_distance };
                 UpdatePlayerPhysics(world, camera, pp_state, old_pos, post_update_pos);
                 gs.player_vel_y = pp_state.player_vel_y;
                 gs.is_grounded = pp_state.is_grounded;
                 gs.smooth_step_offset = pp_state.smooth_step_offset;
+                gs.fall_distance = pp_state.fall_distance;
+
+                // Daño por caída al tocar el suelo
+                if (pp_state.just_landed && !gs.spectator_mode) {
+                    if (!gs.has_landed_initial) {
+                        gs.has_landed_initial = true;
+                    } else if (pp_state.landed_fall_distance > 3.0f) {
+                        int fall_dmg = (int)std::floor(pp_state.landed_fall_distance - 3.0f);
+                        apply_damage(fall_dmg, "Caída desde gran altura");
+                    }
+                }
 
                 if (!gs.spectator_mode) {
                     float dx = camera.position.x - old_pos.x;
@@ -340,6 +424,31 @@ int main() {
                     }
 
                     AudioManager::get().update_footsteps(dt_cam, gs.is_grounded, in_water, horiz_speed, block_below);
+
+                    // Daño por ahogamiento
+                    int head_x = std::floor(camera.position.x);
+                    int head_y = std::floor(camera.position.y);
+                    int head_z = std::floor(camera.position.z);
+                    bool head_in_water = (world.get_block(head_x, head_y, head_z) == Config::WATER);
+                    if (head_in_water && !gs.is_dead) {
+                        gs.air_supply -= dt_cam;
+                        if (gs.air_supply <= 0.0f) {
+                            gs.air_supply = 0.0f;
+                            gs.drown_damage_timer += dt_cam;
+                            if (gs.drown_damage_timer >= 1.0f) {
+                                gs.drown_damage_timer = 0.0f;
+                                apply_damage(2, "Ahogado");
+                            }
+                        }
+                    } else {
+                        gs.air_supply = gs.max_air;
+                        gs.drown_damage_timer = 0.0f;
+                    }
+
+                    // Daño por vacío
+                    if (camera.position.y < -15.0f && !gs.is_dead) {
+                        apply_damage(4, "Caído al vacío");
+                    }
                 }
             }
 
@@ -423,16 +532,21 @@ int main() {
                         look_b = world.get_block(bx, by, bz);
                     }
 
+                    bool interacted = false;
                     if (look_b == Config::CHEST) {
+                        interacted = true;
                         AudioManager::get().play(SoundType::CHEST_OPEN);
                         ui.open_chest({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::CRAFTING_TABLE) {
+                        interacted = true;
                         AudioManager::get().play(SoundType::STEP_WOOD);
                         ui.open_crafting_table({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::FURNACE) {
+                        interacted = true;
                         AudioManager::get().play(SoundType::STEP_STONE);
                         ui.open_furnace({ (float)bx, (float)by, (float)bz });
                     } else if (look_b == Config::DOOR_WOOD) {
+                        interacted = true;
                         uint8_t rot = world.get_rotation(bx, by, bz);
                         uint8_t new_rot = rot ^ 4; // Toggle open/close bit
                         world.set_block(bx, by, bz, Config::DOOR_WOOD, new_rot);
@@ -448,6 +562,33 @@ int main() {
                             world.set_block(bx, by - 1, bz, Config::DOOR_WOOD, (bot_rot & ~4) | (new_rot & 4));
                         }
                     }
+
+                    // Comer comida (clic derecho) estilo Minecraft Beta (sin hambre, cura vida directa)
+                    if (!interacted && ui.selected_slot != 0 && ui.slots[ui.selected_slot].count > 0) {
+                        uint8_t held_id = ui.slots[ui.selected_slot].id;
+                        const std::string& held_name = ui.slots[ui.selected_slot].name;
+                        int heal_val = 0;
+                        if (held_id == Config::RED_MUSHROOM || held_id == Config::BROWN_MUSHROOM) heal_val = 2;
+                        else if (held_id == Config::ITEM_APPLE || held_name == "Manzana" || held_name == "Apple") heal_val = 4;
+
+                        if (heal_val > 0 && gs.health < gs.max_health) {
+                            gs.health = std::min(gs.max_health, gs.health + heal_val);
+                            ui.consume_held_item();
+                            AudioManager::get().play(SoundType::PLAYER_EAT);
+                        }
+                    }
+                }
+            } else if (!ray_hit_valid && IsMouseButtonPressed(MOUSE_RIGHT_BUTTON) && ui.selected_slot != 0 && ui.slots[ui.selected_slot].count > 0) {
+                uint8_t held_id = ui.slots[ui.selected_slot].id;
+                const std::string& held_name = ui.slots[ui.selected_slot].name;
+                int heal_val = 0;
+                if (held_id == Config::RED_MUSHROOM || held_id == Config::BROWN_MUSHROOM) heal_val = 2;
+                else if (held_id == Config::ITEM_APPLE || held_name == "Manzana" || held_name == "Apple") heal_val = 4;
+
+                if (heal_val > 0 && gs.health < gs.max_health) {
+                    gs.health = std::min(gs.max_health, gs.health + heal_val);
+                    ui.consume_held_item();
+                    AudioManager::get().play(SoundType::PLAYER_EAT);
                 }
             }
         }
@@ -491,8 +632,9 @@ int main() {
             gs.day_time += (PI / 12000.0f);
             if (gs.day_time >= 2.0f * PI) gs.day_time -= 2.0f * PI;
 
-            // 2. Físicas y recolección de Item Drops
-            item_drops.update(TICK_TIME, world, camera.position, ui);
+            // 2. Físicas y recolección de Item Drops (si está muerto, no se magnetizan ni se recogen)
+            Vector3 collect_pos = gs.is_dead ? Vector3{ -99999.0f, -99999.0f, -99999.0f } : camera.position;
+            item_drops.update(TICK_TIME, world, collect_pos, ui);
 
             // 3. Procesamiento de hornos en tiempo real
             ui.tick_furnaces();
@@ -567,6 +709,13 @@ int main() {
                                         Config::rand_float(-1.0f, 1.0f)
                                     };
                                     item_drops.spawn(drop_pos, bt.drop_id, bt.drop_is_item, 1, drop_vel, 0.1f);
+                                }
+                                if (target_block == Config::LEAVES) {
+                                    if (Config::rand_float(0.0f, 1.0f) < 0.25f) {
+                                        Vector3 apple_pos = { (float)gs.mining_block.x + 0.5f, (float)gs.mining_block.y + 0.5f, (float)gs.mining_block.z + 0.5f };
+                                        Vector3 apple_vel = { Config::rand_float(-0.6f, 0.6f), 2.5f, Config::rand_float(-0.6f, 0.6f) };
+                                        item_drops.spawn(apple_pos, Config::ITEM_APPLE, true, 1, apple_vel, 0.1f);
+                                    }
                                 }
                                 world.set_block((int)gs.mining_block.x, (int)gs.mining_block.y, (int)gs.mining_block.z, AIR);
                                 if (target_block == Config::DOOR_WOOD) {
@@ -687,7 +836,21 @@ int main() {
             DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), { 10, 50, 150, 100 });
         }
 
+        // Destello rojo de daño en pantalla
+        if (gs.hurt_flash_timer > 0.0f) {
+            float flash_alpha = (gs.hurt_flash_timer / 0.25f) * 0.35f;
+            DrawRectangle(0, 0, GetScreenWidth(), GetScreenHeight(), Fade(RED, flash_alpha));
+        }
+
         ui.draw();
+
+        // HUD de supervivencia (Corazones puros estilo Beta y burbujas)
+        if (!gs.spectator_mode) {
+            bool in_water = (world.get_block(cam_x, cam_y, cam_z) == Config::WATER ||
+                             world.get_block(cam_x, std::floor(camera.position.y - Config::PLAYER_EYE_HEIGHT), cam_z) == Config::WATER ||
+                             camera.position.y < (Config::WATER_LEVEL + 0.1f));
+            ui.draw_survival_hud(gs.health, gs.max_health, gs.air_supply, gs.max_air, in_water, gs.hurt_flash_timer);
+        }
         
         // Barra de progreso de minado
         if (gs.is_mining && gs.mining_progress > 0.0f && gs.mining_progress < 1.0f) {
@@ -710,6 +873,62 @@ int main() {
             menu.draw();
         }
 
+        // Pantalla de Game Over si el jugador ha muerto
+        if (gs.is_dead) {
+            int sw = GetScreenWidth();
+            int sh = GetScreenHeight();
+            DrawRectangle(0, 0, sw, sh, Color{ 110, 0, 0, 190 });
+
+            const char* dead_title = "¡HAS MUERTO!";
+            int title_fs = 44;
+            int tw = MeasureText(dead_title, title_fs);
+            DrawText(dead_title, sw / 2 - tw / 2 + 2, sh / 2 - 98, title_fs, BLACK);
+            DrawText(dead_title, sw / 2 - tw / 2, sh / 2 - 100, title_fs, Color{ 255, 60, 60, 255 });
+
+            if (!gs.death_reason.empty()) {
+                int rtw = MeasureText(gs.death_reason.c_str(), 18);
+                DrawText(gs.death_reason.c_str(), sw / 2 - rtw / 2, sh / 2 - 40, 18, Color{ 220, 220, 220, 255 });
+            }
+
+            int bw = 220;
+            int bh = 48;
+            int bx = sw / 2 - bw / 2;
+            int by = sh / 2 + 25;
+            Vector2 m = GetMousePosition();
+            bool hover = (m.x >= bx && m.x <= bx + bw && m.y >= by && m.y <= by + bh);
+
+            DrawRectangle(bx, by, bw, bh, hover ? Color{ 70, 85, 105, 255 } : Color{ 35, 42, 54, 255 });
+            DrawRectangleLines(bx, by, bw, bh, hover ? GOLD : Color{ 110, 130, 160, 255 });
+
+            const char* respawn_txt = "Reaparecer";
+            int r_tw = MeasureText(respawn_txt, 20);
+            DrawText(respawn_txt, bx + (bw - r_tw) / 2, by + 14, 20, WHITE);
+
+            if (hover && IsMouseButtonPressed(MOUSE_LEFT_BUTTON)) {
+                // Asegurar inventario vacío al reaparecer (los drops quedan en el sitio de muerte)
+                for (auto& s : ui.slots) { s.count = 0; s.id = Config::AIR; s.name = ""; }
+                for (auto& s : ui.storage) { s.count = 0; s.id = Config::AIR; s.name = ""; }
+                ui.tool_inventory.clear();
+                ui.selected_tool_idx = -1;
+
+                // Respawn seguro exactamente en la superficie sólida
+                float safe_y = world.get_spawn_surface_y(0.0f, 0.0f);
+                camera.position = { 0.5f, safe_y + Config::PLAYER_EYE_HEIGHT, 0.5f };
+                camera.target = { 0.5f, safe_y + Config::PLAYER_EYE_HEIGHT, 1.5f };
+                gs.player_vel_y = 0.0f;
+                gs.is_grounded = true;
+                gs.has_landed_initial = false;
+                gs.fall_distance = 0.0f;
+                gs.health = gs.max_health;
+                gs.air_supply = gs.max_air;
+                gs.hurt_timer = 0.0f;
+                gs.hurt_flash_timer = 0.0f;
+                gs.is_dead = false;
+                DisableCursor();
+                chat.add_message("[Supervivencia] ¡Has reaparecido en la superficie!");
+            }
+        }
+
         EndDrawing();
         
         // Restore physical camera position
@@ -717,7 +936,7 @@ int main() {
         camera.target.y -= gs.smooth_step_offset;
     }
     
-    save_player_data(save_dir, camera, ui, gs.day_time);
+    save_player_data(save_dir, camera, ui, gs.day_time, gs.health);
     
     world.stop_simulation();
     global_thread_pool.clear_queue();

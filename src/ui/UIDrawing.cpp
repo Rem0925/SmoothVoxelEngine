@@ -62,6 +62,107 @@ void UI::draw_item_icon(uint8_t item_id, int x, int y, int size) {
     DrawTexturePro(spritesheet_items, src, dst, {0, 0}, 0.0f, WHITE);
 }
 
+static void draw_beta_heart(int px, int py, int state, bool flash) {
+    static const uint8_t heart_map[9][9] = {
+        { 0, 1, 1, 0, 0, 0, 1, 1, 0 },
+        { 1, 2, 4, 1, 0, 1, 3, 3, 1 },
+        { 1, 5, 2, 2, 1, 3, 3, 3, 1 },
+        { 1, 2, 2, 2, 2, 3, 3, 3, 1 },
+        { 1, 2, 2, 2, 2, 3, 3, 3, 1 },
+        { 0, 1, 2, 2, 2, 3, 3, 1, 0 },
+        { 0, 0, 1, 2, 2, 3, 1, 0, 0 },
+        { 0, 0, 0, 1, 2, 1, 0, 0, 0 },
+        { 0, 0, 0, 0, 1, 0, 0, 0, 0 }
+    };
+
+    Color border_col = Color{ 35, 5, 5, 240 };
+    Color red_col    = flash ? Color{ 255, 255, 255, 255 } : Color{ 220, 20, 20, 255 };
+    Color dark_red   = flash ? Color{ 240, 240, 240, 255 } : Color{ 160, 12, 12, 255 };
+    Color shine_col  = flash ? Color{ 255, 255, 255, 255 } : Color{ 255, 185, 185, 255 };
+    Color empty_col  = Color{ 48, 48, 54, 200 };
+    Color empty_dk   = Color{ 32, 34, 38, 200 };
+
+    for (int r = 0; r < 9; ++r) {
+        for (int c = 0; c < 9; ++c) {
+            uint8_t val = heart_map[r][c];
+            if (val == 0) continue;
+
+            Color col = border_col;
+            if (val == 1) {
+                col = border_col;
+            } else if (val == 2) {
+                col = (state >= 1) ? red_col : empty_col;
+            } else if (val == 3) {
+                col = (state == 2) ? red_col : empty_col;
+            } else if (val == 4) {
+                col = (state >= 1) ? dark_red : empty_dk;
+            } else if (val == 5) {
+                col = (state >= 1) ? shine_col : empty_col;
+            }
+
+            DrawRectangle(px + c * 2, py + r * 2, 2, 2, col);
+        }
+    }
+}
+
+static void draw_bubble(int px, int py, bool filled) {
+    if (filled) {
+        DrawCircle(px + 8, py + 8, 7.0f, Color{ 15, 45, 80, 220 });
+        DrawCircle(px + 8, py + 8, 5.5f, Color{ 60, 190, 255, 240 });
+        DrawCircle(px + 6, py + 6, 2.0f, Color{ 230, 250, 255, 255 });
+    } else {
+        DrawCircleLines(px + 8, py + 8, 6.0f, Color{ 30, 70, 110, 120 });
+    }
+}
+
+void UI::draw_survival_hud(int health, int max_health, float air_supply, float max_air, bool in_water, float hurt_flash_timer) {
+    int sw = GetScreenWidth();
+    int sh = GetScreenHeight();
+    int slot_size = 50;
+    int spacing = 6;
+    int total_width = 10 * slot_size + 9 * spacing;
+    int start_x = (sw - total_width) / 2;
+    int start_y = sh - slot_size - 18;
+
+    // Corazones en el lado DERECHO de la hotbar, elevados para dar espacio limpio
+    int hearts_total_w = 9 * 20 + 18; // 198 px
+    int hearts_x = start_x + total_width - hearts_total_w;
+    int hearts_y = start_y - 34; // Elevado para no tocar el marco ni solapar popups
+
+    bool flash = (hurt_flash_timer > 0.0f);
+
+    // 10 corazones (2 HP cada uno = 20 HP máx)
+    for (int i = 0; i < 10; ++i) {
+        int heart_val = health - (i * 2);
+        int state = 0;
+        if (heart_val >= 2) state = 2;
+        else if (heart_val == 1) state = 1;
+
+        int hx = hearts_x + i * 20;
+        int hy = hearts_y;
+
+        // Vibración sutil si vida baja o recibe daño
+        if (((health <= 4 && health > 0) || flash) && (Config::rand_int(0, 3) == 0)) {
+            hy += Config::rand_int(-1, 1);
+        }
+
+        draw_beta_heart(hx, hy, state, flash);
+    }
+
+    // Burbujas de oxígeno apiladas justo ENCIMA de los corazones en el lado derecho
+    if (in_water || air_supply < max_air) {
+        int bubbles_x = hearts_x + 4; // Alineado con la fila de corazones
+        int bubbles_y = hearts_y - 20; // Encima de los corazones
+        int active_bubbles = (int)std::ceil((air_supply / std::max(max_air, 0.1f)) * 10.0f);
+        active_bubbles = std::clamp(active_bubbles, 0, 10);
+
+        for (int i = 0; i < 10; ++i) {
+            int bx = bubbles_x + (9 - i) * 19;
+            draw_bubble(bx, bubbles_y, i < active_bubbles);
+        }
+    }
+}
+
 void UI::draw_hotbar() {
     int sw = GetScreenWidth();
     int sh = GetScreenHeight();

@@ -479,3 +479,20 @@ float World::sample_density_trilinear(float x, float y, float z) const {
     float c1  = c10  * (1.0f - fz) + c11  * fz;
     return c0 * (1.0f - fy) + c1 * fy;
 }
+
+float World::get_spawn_surface_y(float x, float z) {
+    int ix = (int)std::floor(x);
+    int iz = (int)std::floor(z);
+    // Escanear de arriba hacia abajo para encontrar la superficie del suelo
+    for (int y = Config::GRID_Y - 3; y >= 2; --y) {
+        uint8_t b = get_block(ix, y, iz);
+        if (b != Config::AIR && b != Config::WATER) {
+            return (float)y + 1.0f;
+        }
+        float d = sample_density_trilinear(x, (float)y, z);
+        if (d >= Config::ISO_SURFACE) {
+            return (float)y + 0.5f;
+        }
+    }
+    return 60.0f;
+}

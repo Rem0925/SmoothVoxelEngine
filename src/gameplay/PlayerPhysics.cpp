@@ -134,8 +134,32 @@ void UpdatePlayerPhysics(World& world, Camera3D& camera, PlayerPhysicsState& sta
             }
 
             float dt = std::min(GetFrameTime(), 0.033f);
+            state.just_landed = false;
+            state.landed_fall_distance = 0.0f;
+
+            // Comprobar si está en agua para frenar y anular daño de caída
+            int check_cx = std::floor(camera.position.x);
+            int check_cy = std::floor(camera.position.y);
+            int check_cz = std::floor(camera.position.z);
+            int check_fy = std::floor(camera.position.y - Config::PLAYER_EYE_HEIGHT);
+            bool in_water = (world.get_block(check_cx, check_fy, check_cz) == Config::WATER ||
+                             world.get_block(check_cx, check_cy, check_cz) == Config::WATER ||
+                             camera.position.y < (Config::WATER_LEVEL + 0.1f));
+            if (in_water) {
+                state.fall_distance = 0.0f;
+                if (state.player_vel_y < -4.5f) state.player_vel_y = -4.5f;
+            }
+
+            float prev_cam_y = camera.position.y;
             state.player_vel_y -= 30.0f * dt;
             camera.position.y += state.player_vel_y * dt;
+
+            // Acumular distancia de caída hacia abajo si no está en agua
+            if (!in_water && camera.position.y < prev_cam_y) {
+                state.fall_distance += (prev_cam_y - camera.position.y);
+            } else if (state.player_vel_y > 0.0f) {
+                state.fall_distance = 0.0f;
+            }
 
             float head_top = camera.position.y + Config::PLAYER_HEAD_OFFSET;
             if (state.player_vel_y > 0 && check_wall(camera.position.x, camera.position.z, head_top)) {
@@ -159,6 +183,9 @@ void UpdatePlayerPhysics(World& world, Camera3D& camera, PlayerPhysicsState& sta
                     }
                     state.player_vel_y = 0.0f;
                     state.is_grounded = true;
+                    state.just_landed = true;
+                    state.landed_fall_distance = state.fall_distance;
+                    state.fall_distance = 0.0f;
                 }
             }
 
