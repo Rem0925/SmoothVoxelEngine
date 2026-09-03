@@ -7,8 +7,86 @@
 #include <cmath>
 #include <vector>
 #include <algorithm>
+#include <map>
+#include <tuple>
 
 using namespace Config;
+
+static void DrawCubeWiresCullBack(Vector3 pos, float width, float height, float length, Color color, Vector3 cam) {
+    float x = pos.x;
+    float y = pos.y;
+    float z = pos.z;
+
+    float w2 = width * 0.5f;
+    float h2 = height * 0.5f;
+    float l2 = length * 0.5f;
+
+    bool fx_p = (cam.x > x + w2);
+    bool fx_n = (cam.x < x - w2);
+    bool fy_p = (cam.y > y + h2);
+    bool fy_n = (cam.y < y - h2);
+    bool fz_p = (cam.z > z + l2);
+    bool fz_n = (cam.z < z - l2);
+
+    rlBegin(RL_LINES);
+    rlColor4ub(color.r, color.g, color.b, color.a);
+
+    // 4 aristas en X
+    if (fy_p || fz_p) {
+        rlVertex3f(x - w2, y + h2, z + l2);
+        rlVertex3f(x + w2, y + h2, z + l2);
+    }
+    if (fy_p || fz_n) {
+        rlVertex3f(x - w2, y + h2, z - l2);
+        rlVertex3f(x + w2, y + h2, z - l2);
+    }
+    if (fy_n || fz_p) {
+        rlVertex3f(x - w2, y - h2, z + l2);
+        rlVertex3f(x + w2, y - h2, z + l2);
+    }
+    if (fy_n || fz_n) {
+        rlVertex3f(x - w2, y - h2, z - l2);
+        rlVertex3f(x + w2, y - h2, z - l2);
+    }
+
+    // 4 aristas en Y
+    if (fx_p || fz_p) {
+        rlVertex3f(x + w2, y - h2, z + l2);
+        rlVertex3f(x + w2, y + h2, z + l2);
+    }
+    if (fx_p || fz_n) {
+        rlVertex3f(x + w2, y - h2, z - l2);
+        rlVertex3f(x + w2, y + h2, z - l2);
+    }
+    if (fx_n || fz_p) {
+        rlVertex3f(x - w2, y - h2, z + l2);
+        rlVertex3f(x - w2, y + h2, z + l2);
+    }
+    if (fx_n || fz_n) {
+        rlVertex3f(x - w2, y - h2, z - l2);
+        rlVertex3f(x - w2, y + h2, z - l2);
+    }
+
+    // 4 aristas en Z
+    if (fy_p || fx_p) {
+        rlVertex3f(x + w2, y + h2, z - l2);
+        rlVertex3f(x + w2, y + h2, z + l2);
+    }
+    if (fy_p || fx_n) {
+        rlVertex3f(x - w2, y + h2, z - l2);
+        rlVertex3f(x - w2, y + h2, z + l2);
+    }
+    if (fy_n || fx_p) {
+        rlVertex3f(x + w2, y - h2, z - l2);
+        rlVertex3f(x + w2, y - h2, z + l2);
+    }
+    if (fy_n || fx_n) {
+        rlVertex3f(x - w2, y - h2, z - l2);
+        rlVertex3f(x - w2, y - h2, z + l2);
+    }
+
+    rlEnd();
+}
 
 void DrawBlockHighlight(const BlockHighlightParams& p) {
     if (p.ui.is_open) return;
@@ -27,6 +105,7 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
     BeginMode3D(p.camera);
     rlDisableDepthMask();
     rlDisableDepthTest();
+    rlSetLineWidth(2.5f);
 
     Vector3 target_node = (p.ui.selected_slot == 0) ? p.target_solid : p.target_empty;
     rlDisableBackfaceCulling();
@@ -75,58 +154,54 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
     }
 
     if (is_construction_held) {
-        float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
-        unsigned char alpha = (unsigned char)(pulse * 255);
-        Color wire_col = Color{25, 255, 75, alpha};
-        Color solid_col = Color{0, 255, 0, 40};
+        Color wire_col = Color{70, 215, 125, 240};
+        Color solid_col = Color{85, 225, 135, 50}; // 80% transparente
 
         if (held_b == DOOR_WOOD) {
             Vector3 c_pos = { (float)bx, (float)by + 0.5f, (float)bz };
-            DrawCubeWires(c_pos, 1.002f, 2.002f, 1.002f, wire_col);
+            DrawCubeWiresCullBack(c_pos, 1.002f, 2.002f, 1.002f, wire_col, p.camera.position);
             DrawCube(c_pos, 1.0f, 2.0f, 1.0f, solid_col);
         } else {
             Vector3 c_pos = { (float)bx, (float)by, (float)bz };
-            DrawCubeWires(c_pos, 1.0f, 1.0f, 1.0f, wire_col);
+            DrawCubeWiresCullBack(c_pos, 1.0f, 1.0f, 1.0f, wire_col, p.camera.position);
             DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
         }
     } else if (is_construction_targeted) {
-        float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
-        unsigned char alpha = (unsigned char)(pulse * 255);
-        Color wire_col = Color{255, 45, 45, alpha};
-        Color solid_col = Color{255, 25, 25, 40};
+        Color wire_col = Color{235, 75, 75, 240};
+        Color solid_col = Color{240, 95, 80, 50}; // 80% transparente
 
         auto shape = BLOCKS.at(target_b).shape;
         if (shape == SHAPE_CHEST) {
-            DrawCubeWires({(float)bx, (float)by - 0.06f, (float)bz}, 0.89f, 0.89f, 0.89f, wire_col);
+            DrawCubeWiresCullBack({(float)bx, (float)by - 0.06f, (float)bz}, 0.89f, 0.89f, 0.89f, wire_col, p.camera.position);
             DrawCube({(float)bx, (float)by - 0.06f, (float)bz}, 0.88f, 0.88f, 0.88f, solid_col);
         } else if (shape == SHAPE_TORCH) {
-            DrawCubeWires({(float)bx, (float)by - 0.15f, (float)bz}, 0.16f, 0.70f, 0.16f, wire_col);
+            DrawCubeWiresCullBack({(float)bx, (float)by - 0.15f, (float)bz}, 0.16f, 0.70f, 0.16f, wire_col, p.camera.position);
             DrawCube({(float)bx, (float)by - 0.15f, (float)bz}, 0.14f, 0.68f, 0.14f, solid_col);
         } else if (shape == SHAPE_FENCE) {
-            DrawCubeWires({(float)bx, (float)by, (float)bz}, 0.26f, 1.002f, 0.26f, wire_col);
+            DrawCubeWiresCullBack({(float)bx, (float)by, (float)bz}, 0.26f, 1.002f, 0.26f, wire_col, p.camera.position);
             DrawCube({(float)bx, (float)by, (float)bz}, 0.25f, 1.0f, 0.25f, solid_col);
         } else if (shape == SHAPE_DOOR) {
-            DrawCubeWires({(float)bx, (float)by, (float)bz}, 1.002f, 1.002f, 1.002f, wire_col);
+            DrawCubeWiresCullBack({(float)bx, (float)by, (float)bz}, 1.002f, 1.002f, 1.002f, wire_col, p.camera.position);
             DrawCube({(float)bx, (float)by, (float)bz}, 1.0f, 1.0f, 1.0f, solid_col);
         } else if (shape == SHAPE_STAIRS) {
-            DrawCubeWires({(float)bx, (float)by - 0.25f, (float)bz}, 1.002f, 0.502f, 1.002f, wire_col);
+            DrawCubeWiresCullBack({(float)bx, (float)by - 0.25f, (float)bz}, 1.002f, 0.502f, 1.002f, wire_col, p.camera.position);
             DrawCube({(float)bx, (float)by - 0.25f, (float)bz}, 1.0f, 0.5f, 1.0f, solid_col);
             if (target_rot == 0) {
-                DrawCubeWires({(float)bx, (float)by + 0.25f, (float)bz - 0.25f}, 1.002f, 0.502f, 0.502f, wire_col);
+                DrawCubeWiresCullBack({(float)bx, (float)by + 0.25f, (float)bz - 0.25f}, 1.002f, 0.502f, 0.502f, wire_col, p.camera.position);
                 DrawCube({(float)bx, (float)by + 0.25f, (float)bz - 0.25f}, 1.0f, 0.5f, 0.5f, solid_col);
             } else if (target_rot == 1) {
-                DrawCubeWires({(float)bx + 0.25f, (float)by + 0.25f, (float)bz}, 0.502f, 0.502f, 1.002f, wire_col);
+                DrawCubeWiresCullBack({(float)bx + 0.25f, (float)by + 0.25f, (float)bz}, 0.502f, 0.502f, 1.002f, wire_col, p.camera.position);
                 DrawCube({(float)bx + 0.25f, (float)by + 0.25f, (float)bz}, 0.5f, 0.5f, 1.0f, solid_col);
             } else if (target_rot == 2) {
-                DrawCubeWires({(float)bx, (float)by + 0.25f, (float)bz + 0.25f}, 1.002f, 0.502f, 0.502f, wire_col);
+                DrawCubeWiresCullBack({(float)bx, (float)by + 0.25f, (float)bz + 0.25f}, 1.002f, 0.502f, 0.502f, wire_col, p.camera.position);
                 DrawCube({(float)bx, (float)by + 0.25f, (float)bz + 0.25f}, 1.0f, 0.5f, 0.5f, solid_col);
             } else {
-                DrawCubeWires({(float)bx - 0.25f, (float)by + 0.25f, (float)bz}, 0.502f, 0.502f, 1.002f, wire_col);
+                DrawCubeWiresCullBack({(float)bx - 0.25f, (float)by + 0.25f, (float)bz}, 0.502f, 0.502f, 1.002f, wire_col, p.camera.position);
                 DrawCube({(float)bx - 0.25f, (float)by + 0.25f, (float)bz}, 0.5f, 0.5f, 1.0f, solid_col);
             }
         } else {
             Vector3 c_pos = { (float)bx, (float)by, (float)bz };
-            DrawCubeWires(c_pos, 1.002f, 1.002f, 1.002f, wire_col);
+            DrawCubeWiresCullBack(c_pos, 1.002f, 1.002f, 1.002f, wire_col, p.camera.position);
             DrawCube(c_pos, 1.0f, 1.0f, 1.0f, solid_col);
         }
     } else {
@@ -218,6 +293,11 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
 
         std::vector<Vector3> f_verts;
         std::vector<Vector2> f_uvs;
+        std::vector<Vector3> f_outer_verts;
+        std::vector<Vector2> f_outer_uvs;
+        std::vector<Vector3> f_inner_verts;
+        std::vector<Vector2> f_inner_uvs;
+        size_t f_outer_count = 0;
         f_verts.reserve(g_verts.size());
         f_uvs.reserve(g_uvs.size());
 
@@ -243,6 +323,13 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
                         f_uvs.push_back(g_uvs[i]);
                         f_uvs.push_back(g_uvs[i+1]);
                         f_uvs.push_back(g_uvs[i+2]);
+
+                        f_inner_verts.push_back(g_verts[i]);
+                        f_inner_verts.push_back(g_verts[i+1]);
+                        f_inner_verts.push_back(g_verts[i+2]);
+                        f_inner_uvs.push_back(g_uvs[i]);
+                        f_inner_uvs.push_back(g_uvs[i+1]);
+                        f_inner_uvs.push_back(g_uvs[i+2]);
                     }
                 }
             }
@@ -267,8 +354,16 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
                     f_uvs.push_back(g_uvs[i]);
                     f_uvs.push_back(g_uvs[i+1]);
                     f_uvs.push_back(g_uvs[i+2]);
+
+                    f_outer_verts.push_back(g_verts[i]);
+                    f_outer_verts.push_back(g_verts[i+1]);
+                    f_outer_verts.push_back(g_verts[i+2]);
+                    f_outer_uvs.push_back(g_uvs[i]);
+                    f_outer_uvs.push_back(g_uvs[i+1]);
+                    f_outer_uvs.push_back(g_uvs[i+2]);
                 }
             }
+            f_outer_count = f_verts.size();
 
             // 2. Caras interiores de la abertura (quads superiores e inferiores del tronco, hueco del piso, base del montículo)
             std::vector<Vector3> a_verts, a_norms, a_d1, a_d2;
@@ -293,6 +388,14 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
                         f_uvs.push_back(a_uvs[i]);
                         f_uvs.push_back(a_uvs[i+1]);
                         f_uvs.push_back(a_uvs[i+2]);
+
+                        // Caras internas de corte / abertura
+                        f_inner_verts.push_back(a_verts[i]);
+                        f_inner_verts.push_back(a_verts[i+1]);
+                        f_inner_verts.push_back(a_verts[i+2]);
+                        f_inner_uvs.push_back(a_uvs[i]);
+                        f_inner_uvs.push_back(a_uvs[i+1]);
+                        f_inner_uvs.push_back(a_uvs[i+2]);
                     }
                 }
             }
@@ -314,15 +417,21 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
                         f_uvs.push_back(g_uvs[i]);
                         f_uvs.push_back(g_uvs[i+1]);
                         f_uvs.push_back(g_uvs[i+2]);
+
+                        f_inner_verts.push_back(g_verts[i]);
+                        f_inner_verts.push_back(g_verts[i+1]);
+                        f_inner_verts.push_back(g_verts[i+2]);
+                        f_inner_uvs.push_back(g_uvs[i]);
+                        f_inner_uvs.push_back(g_uvs[i+1]);
+                        f_inner_uvs.push_back(g_uvs[i+2]);
                     }
                 }
             }
         }
 
-        float pulse = 0.6f + std::sin(GetTime() * 6.0f) * 0.4f;
-        unsigned char alpha = (unsigned char)(pulse * 255);
-        Color wire_col = is_hammer ? Color{255, 180, 40, alpha} : ((p.ui.selected_slot == 0) ? Color{255, 25, 25, alpha} : Color{25, 255, 75, alpha});
-        Color solid_col = is_hammer ? Color{255, 160, 0, 45} : ((p.ui.selected_slot == 0) ? Color{255, 0, 0, 40} : Color{0, 255, 0, 40});
+        // === Líneas unicolor no tan intensas + caras internas 80% transparentes (alpha ~ 50) con tonalidad mínimamente diferente ===
+        Color wire_col = is_hammer ? Color{245, 175, 50, 240} : ((p.ui.selected_slot == 0) ? Color{235, 75, 75, 240} : Color{70, 215, 125, 240});
+        Color inner_face_col = is_hammer ? Color{250, 185, 60, 50} : ((p.ui.selected_slot == 0) ? Color{240, 95, 80, 50} : Color{85, 225, 135, 50});
 
         // Borde perimetral adaptado a la topografía del terreno para el martillo
         auto get_terrain_height_local = [&](float lx, float lz) -> float {
@@ -373,31 +482,133 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
             hammer_border_pts.push_back({ x_min, get_terrain_height_local(x_min, z_min) + 0.03f, z_min });
         }
 
+        // === OPCIÓN B: Extracción de aristas limpias (Bordes de contorno y pliegues, sin diagonales coplanares) ===
+        // === Extracción de aristas limpias (Bordes de contorno y pliegues, sin diagonales coplanares) ===
+        struct EdgeInfo {
+            Vector3 v0;
+            Vector3 v1;
+            Vector3 n1;
+            Vector3 n2;
+            int count = 0;
+            bool is_inner = false;
+        };
+
+        auto point_to_key = [](const Vector3& pt) -> std::tuple<int, int, int> {
+            return {
+                (int)std::floor(pt.x * 200.0f + 0.5f),
+                (int)std::floor(pt.y * 200.0f + 0.5f),
+                (int)std::floor(pt.z * 200.0f + 0.5f)
+            };
+        };
+
+        std::map<std::pair<std::tuple<int, int, int>, std::tuple<int, int, int>>, EdgeInfo> edge_map;
+
+        for (size_t i = 0; i + 2 < f_verts.size(); i += 3) {
+            bool is_inner_tri = (i >= f_outer_count);
+            Vector3 v0 = f_verts[i];
+            Vector3 v1 = f_verts[i+1];
+            Vector3 v2 = f_verts[i+2];
+
+            Vector3 u = { v1.x - v0.x, v1.y - v0.y, v1.z - v0.z };
+            Vector3 v = { v2.x - v0.x, v2.y - v0.y, v2.z - v0.z };
+            Vector3 n = {
+                u.y * v.z - u.z * v.y,
+                u.z * v.x - u.x * v.z,
+                u.x * v.y - u.y * v.x
+            };
+            float nlen = std::sqrt(n.x*n.x + n.y*n.y + n.z*n.z);
+            if (nlen > 1e-6f) { n.x /= nlen; n.y /= nlen; n.z /= nlen; }
+
+            Vector3 tri_edges[3][2] = { {v0, v1}, {v1, v2}, {v2, v0} };
+            for (int e = 0; e < 3; ++e) {
+                auto k1 = point_to_key(tri_edges[e][0]);
+                auto k2 = point_to_key(tri_edges[e][1]);
+                if (k1 == k2) continue;
+                auto edge_key = (k1 < k2) ? std::make_pair(k1, k2) : std::make_pair(k2, k1);
+
+                auto& info = edge_map[edge_key];
+                if (info.count == 0) {
+                    info.v0 = tri_edges[e][0];
+                    info.v1 = tri_edges[e][1];
+                    info.n1 = n;
+                } else if (info.count == 1) {
+                    info.n2 = n;
+                }
+                if (is_inner_tri) {
+                    info.is_inner = true;
+                }
+                info.count++;
+            }
+        }
+
+        std::vector<std::pair<Vector3, Vector3>> clean_edges;
+        clean_edges.reserve(edge_map.size());
+
+        for (const auto& kv : edge_map) {
+            const auto& info = kv.second;
+
+            // Arista compartida entre 2 triángulos: solo dibujarla si hay quiebre angular (> 25°)
+            if (info.count == 2) {
+                float dot = info.n1.x * info.n2.x + info.n1.y * info.n2.y + info.n1.z * info.n2.z;
+                if (dot >= 0.88f) {
+                    continue; // Diagonal coplanar -> omitir
+                }
+            }
+
+            if (!info.is_inner) {
+                // Arista exterior: solo si mira a la cámara o silueta
+                Vector3 mid_local = {
+                    (info.v0.x + info.v1.x) * 0.5f,
+                    (info.v0.y + info.v1.y) * 0.5f,
+                    (info.v0.z + info.v1.z) * 0.5f
+                };
+                Vector3 mid_world = {
+                    (float)bx + (float)off_min_x + mid_local.x,
+                    (float)by - 1.0f + mid_local.y,
+                    (float)bz + (float)off_min_z + mid_local.z
+                };
+                Vector3 to_cam = {
+                    p.camera.position.x - mid_world.x,
+                    p.camera.position.y - mid_world.y,
+                    p.camera.position.z - mid_world.z
+                };
+
+                float cam_dot1 = info.n1.x * to_cam.x + info.n1.y * to_cam.y + info.n1.z * to_cam.z;
+                float cam_dot2 = (info.count >= 2) ? (info.n2.x * to_cam.x + info.n2.y * to_cam.y + info.n2.z * to_cam.z) : cam_dot1;
+                bool is_front_facing = (cam_dot1 > 0.0f) || (cam_dot2 > 0.0f);
+
+                if (!is_front_facing) continue;
+            }
+
+            clean_edges.push_back({ info.v0, info.v1 });
+        }
+
         rlPushMatrix();
         rlTranslatef(bx + (float)off_min_x, by - 1.0f, bz + (float)off_min_z);
 
-        if (!f_verts.empty()) {
-            rlBegin(RL_LINES);
-            rlColor4ub(wire_col.r, wire_col.g, wire_col.b, wire_col.a);
-            for (size_t i = 0; i < f_verts.size(); i += 3) {
-                rlVertex3f(f_verts[i].x, f_verts[i].y, f_verts[i].z);
-                rlVertex3f(f_verts[i+1].x, f_verts[i+1].y, f_verts[i+1].z);
-                rlVertex3f(f_verts[i+1].x, f_verts[i+1].y, f_verts[i+1].z);
-                rlVertex3f(f_verts[i+2].x, f_verts[i+2].y, f_verts[i+2].z);
-                rlVertex3f(f_verts[i+2].x, f_verts[i+2].y, f_verts[i+2].z);
-                rlVertex3f(f_verts[i].x, f_verts[i].y, f_verts[i].z);
-            }
-            rlEnd();
-
+        // 1. CARAS INTERNAS: 80% transparentes (alpha 50) para que medio se note, con color armónico
+        if (!f_inner_verts.empty()) {
+            rlDisableBackfaceCulling();
             rlSetTexture(p.spritesheet.id);
             rlBegin(RL_TRIANGLES);
-            rlColor4ub(solid_col.r, solid_col.g, solid_col.b, solid_col.a);
-            for (size_t i = 0; i < f_verts.size(); ++i) {
-                rlTexCoord2f(f_uvs[i].x, f_uvs[i].y);
-                rlVertex3f(f_verts[i].x, f_verts[i].y, f_verts[i].z);
+            rlColor4ub(inner_face_col.r, inner_face_col.g, inner_face_col.b, inner_face_col.a);
+            for (size_t i = 0; i < f_inner_verts.size(); ++i) {
+                rlTexCoord2f(f_inner_uvs[i].x, f_inner_uvs[i].y);
+                rlVertex3f(f_inner_verts[i].x, f_inner_verts[i].y, f_inner_verts[i].z);
             }
             rlEnd();
             rlSetTexture(0);
+        }
+
+        // 2. LÍNEAS UNICOLOR: tono no tan intenso con grosor limpio
+        if (!clean_edges.empty()) {
+            rlBegin(RL_LINES);
+            rlColor4ub(wire_col.r, wire_col.g, wire_col.b, wire_col.a);
+            for (const auto& edge : clean_edges) {
+                rlVertex3f(edge.first.x, edge.first.y, edge.first.z);
+                rlVertex3f(edge.second.x, edge.second.y, edge.second.z);
+            }
+            rlEnd();
         }
 
         if (is_hammer && !hammer_border_pts.empty()) {
@@ -414,6 +625,8 @@ void DrawBlockHighlight(const BlockHighlightParams& p) {
     }
 
     rlDrawRenderBatchActive();
+    rlSetLineWidth(1.0f);
+    rlEnableDepthTest();
     rlEnableDepthMask();
     rlEnableBackfaceCulling();
     EndMode3D();
